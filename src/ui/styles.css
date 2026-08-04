@@ -1300,7 +1300,8 @@ body {
 /* ---- Approval card ---- */
 .approval {
   align-self: flex-start;
-  max-width: 82%;
+  /* Wider than a message bubble: the options are stacked full-width rows. */
+  max-width: 92%;
   border: 1px solid var(--accent);
   border-radius: 10px;
   padding: 10px 14px;
@@ -1332,20 +1333,39 @@ body {
   border-color: var(--accent);
 }
 
+/* One option per row: each carries a line of explanation, which a shared
+   row has no width for. */
 .approval__options {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
 }
 
 .approval__button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
   border: none;
   background: var(--accent);
   color: #fff;
   border-radius: 6px;
-  padding: 6px 14px;
+  padding: 8px 12px;
   cursor: pointer;
   font-size: inherit;
+  text-align: left;
+}
+
+.approval__button-label {
+  font-weight: 600;
+}
+
+/* Dimmed against the fill, not var(--text-dim): the button is coloured. */
+.approval__button-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.85;
 }
 
 .approval__button--reject {

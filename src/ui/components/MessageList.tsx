@@ -6,6 +6,7 @@ import {
   Paperclip,
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { permissionOptionHint } from "../../core/entities/approval";
 import type { ChatMessage } from "../../core/entities/message";
 import { fileName } from "../fileName";
 import { Markdown } from "./MarkdownLite";
@@ -191,19 +192,23 @@ function ApprovalCard({
         </button>
       )}
       <div className="approval__options">
-        {approval.options.map((option) => (
-          <button
-            type="button"
-            key={option.optionId}
-            className={`approval__button ${
-              option.kind.startsWith("reject") ? "approval__button--reject" : ""
-            }`}
-            disabled={answered}
-            onClick={() => onRespond(approval.requestId, option.optionId)}
-          >
-            {option.name}
-          </button>
-        ))}
+        {approval.options.map((option) => {
+          const hint = permissionOptionHint(option.optionId);
+          return (
+            <button
+              type="button"
+              key={option.optionId}
+              className={`approval__button ${
+                option.kind.startsWith("reject") ? "approval__button--reject" : ""
+              }`}
+              disabled={answered}
+              onClick={() => onRespond(approval.requestId, option.optionId)}
+            >
+              <span className="approval__button-label">{option.name}</span>
+              {hint && <span className="approval__button-hint">{hint}</span>}
+            </button>
+          );
+        })}
       </div>
       {chosen && <div className="approval__status">You chose: {chosen.name}</div>}
       {approval.cancelled && !chosen && (
