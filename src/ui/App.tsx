@@ -1,0 +1,92 @@
+import { useState } from "react";
+import { activeTab } from "../core/state/appState";
+import type { AppContext } from "../wiring/context";
+import type { SidebarView } from "./components/ActivityBar";
+import { ChatPanel } from "./components/ChatPanel";
+import { EmptyState } from "./components/EmptyState";
+import { TabBar } from "./components/TabBar";
+import { useAppState } from "./useAppState";
+
+/**
+ * UI — the application shell: tab bar on top, active project's chat below.
+ * Humble view: renders state and forwards intents to use cases; no logic.
+ */
+export function App({ context }: { context: AppContext }) {
+  const state = useAppState(context.store);
+  const tab = activeTab(state);
+  const [sidebarView, setSidebarView] = useState<SidebarView | null>("changes");
+
+  return (
+    <div className="app">
+      {!context.runningInTauri && (
+        <div className="env-banner">
+          Browser preview — you're driving a simulated demo agent. For real
+          projects and agents, run <code>npm run tauri dev</code> and use
+          the Mota Editor window it opens.
+        </div>
+      )}
+      <TabBar
+        tabs={state.tabs}
+        activeTabId={state.activeTabId}
+        onSelect={(tabId) => void context.switchTab.execute(tabId)}
+        onClose={(tabId) => void context.closeProject.execute(tabId)}
+        onOpenProject={() => void context.openProject.execute()}
+      />
+      {tab ? (
+        <ChatPanel
+          key={tab.project.id}
+          tab={tab}
+          sidebarView={sidebarView}
+          onSelectSidebarView={setSidebarView}
+          defaultProvider={state.settings.defaultProvider}
+          onChangeDefaultProvider={(provider) =>
+            void context.setDefaultProvider.execute(provider)
+          }
+          loadHistory={() => context.sessionHistory.list(tab.project.id)}
+          onOpenSession={(sessionId, native) =>
+            context.sessionHistory.open(tab.project.id, sessionId, native)
+          }
+          onDeleteSession={(sessionId) =>
+            context.sessionHistory.remove(tab.project.id, sessionId)
+          }
+          onNewChat={() => context.sessionHistory.startNew(tab.project.id)}
+          onSend={(prompt, attachments) =>
+            void context.sendPrompt.execute(tab.project.id, prompt, attachments)
+          }
+          onRemoveQueued={(index) => context.sendPrompt.removeQueued(tab.project.id, index)}
+          onCancel={() => void context.cancelTurn.execute(tab.project.id)}
+          onSelectProvider={(provider) =>
+            void context.selectProvider.execute(tab.project.id, provider)
+          }
+          onSelectMode={(mode) => void context.selectMode.execute(tab.project.id, mode)}
+          onSelectPermission={(permission) =>
+            void context.selectPermission.execute(tab.project.id, permission)
+          }
+          onSelectModel={(model) => void context.selectModel.execute(tab.project.id, model)}
+          onSelectEffort={(effort) =>
+            void context.selectEffort.execute(tab.project.id, effort)
+          }
+          onToggleVerbose={(verbose) =>
+            void context.selectVerbose.execute(tab.project.id, verbose)
+          }
+          loadGitChanges={() => context.loadGitChanges.execute(tab.project.id)}
+          onGitStage={(path) => context.gitActions.stage(tab.project.id, path)}
+          onGitUnstage={(path) => context.gitActions.unstage(tab.project.id, path)}
+          onGitCommitPush={(message) =>
+            context.gitActions.commitAndPush(tab.project.id, message)
+          }
+          onGitCheckout={(branch) => context.gitActions.checkout(tab.project.id, branch)}
+          onGitPush={() => context.gitActions.push(tab.project.id)}
+          onGitPull={() => context.gitActions.pull(tab.project.id)}
+          onRespondPermission={(requestId, optionId) =>
+            void context.respondPermission.execute(tab.project.id, requestId, optionId)
+          }
+          loadCommands={() => context.listCommands.execute(tab.project.id)}
+          onPickFiles={() => context.filePicker.pickFiles()}
+        />
+      ) : (
+        <EmptyState onOpenProject={() => void context.openProject.execute()} />
+      )}
+    </div>
+  );
+}

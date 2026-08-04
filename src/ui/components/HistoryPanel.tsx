@@ -1,0 +1,80 @@
+import type { TranscriptMeta } from "../../core/ports/transcriptStore";
+
+interface Props {
+  sessions: readonly TranscriptMeta[];
+  /** True when these are the agent's own sessions (opening = true resume). */
+  native: boolean;
+  activeSessionId?: string;
+  busy: boolean;
+  onOpen: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
+  onNewChat: () => void;
+}
+
+/** UI — previous conversations of this project; click one to reopen it. */
+export function HistoryPanel({
+  sessions,
+  native,
+  activeSessionId,
+  busy,
+  onOpen,
+  onDelete,
+  onNewChat,
+}: Props) {
+  return (
+    <aside className="history">
+      <button className="changes__action" disabled={busy} onClick={onNewChat}>
+        + New chat
+      </button>
+      {native && sessions.length > 0 && (
+        <p className="history__source">
+          From the agent's own history — opening resumes with full memory.
+        </p>
+      )}
+      {sessions.length === 0 && (
+        <p className="changes__empty">No saved sessions for this project yet.</p>
+      )}
+      <ul className="history__list">
+        {sessions.map((session) => (
+          <li
+            key={session.id}
+            className={`history__item ${
+              session.id === activeSessionId ? "history__item--active" : ""
+            }`}
+            onClick={() => !busy && onOpen(session.id)}
+            title={`${session.messageCount} messages · ${session.provider}`}
+          >
+            <div className="history__title">{session.title}</div>
+            <div className="history__meta">
+              <span>{formatWhen(session.savedAt)}</span>
+              <span className="history__provider">{session.provider}</span>
+              {!native && (
+                <button
+                  className="history__delete"
+                  title="Delete this session"
+                  aria-label="Delete session"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(session.id);
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  );
+}
+
+function formatWhen(savedAt: number): string {
+  if (!savedAt) return "";
+  const minutes = Math.floor((Date.now() - savedAt) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(savedAt).toLocaleDateString();
+}
