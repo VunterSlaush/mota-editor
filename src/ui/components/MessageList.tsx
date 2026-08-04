@@ -1,5 +1,11 @@
-import { ArrowDown, ClipboardText, LockKey, Paperclip } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ClipboardText,
+  LockKey,
+  Paperclip,
+} from "@phosphor-icons/react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../core/entities/message";
 import { fileName } from "../fileName";
 import { Markdown } from "./MarkdownLite";
@@ -33,15 +39,32 @@ export function MessageList({
   onShowPlan,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
+  const [promptScrolledAway, setPromptScrolledAway] = useState(false);
   const visible = verbose ? messages : messages.filter((m) => !QUIET_ROLES.has(m.role));
   const last = visible[visible.length - 1];
+  const askedMessage = lastUserMessage(visible);
   const contentKey = `${visible.length}:${last?.text.length ?? 0}`;
+
+  /** True once the user's prompt has scrolled off the top of the list. */
+  const syncPromptVisibility = useCallback(() => {
+    const el = scrollerRef.current;
+    const prompt = promptRef.current;
+    if (!el || !prompt) {
+      setPromptScrolledAway(false);
+      return;
+    }
+    setPromptScrolledAway(
+      prompt.getBoundingClientRect().bottom < el.getBoundingClientRect().top,
+    );
+  }, []);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (el && following) el.scrollTop = el.scrollHeight;
-  }, [contentKey, following]);
+    syncPromptVisibility();
+  }, [contentKey, following, syncPromptVisibility]);
 
   // A new turn always re-pins: sending a message means "show me".
   useEffect(() => {
@@ -55,12 +78,20 @@ export function MessageList({
     const nearBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD;
     setFollowing(nearBottom);
+    syncPromptVisibility();
+  };
+
+  const scrollToPrompt = () => {
+    promptRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
   };
 
   const streamingId = busy && last?.role === "assistant" ? last.id : null;
 
   return (
     <div className="message-list-wrap">
+      {askedMessage && promptScrolledAway && (
+        <PinnedPrompt message={askedMessage} onJump={scrollToPrompt} />
+      )}
       <div className="message-list" ref={scrollerRef} onScroll={onScroll}>
         {visible.map((m) =>
           m.role === "approval" ? (
@@ -71,7 +102,12 @@ export function MessageList({
               onShowPlan={onShowPlan}
             />
           ) : (
-            <MessageBubble key={m.id} message={m} streaming={m.id === streamingId} />
+            <MessageBubble
+              key={m.id}
+              message={m}
+              streaming={m.id === streamingId}
+              innerRef={m.id === askedMessage?.id ? promptRef : undefined}
+            />
           ),
         )}
         {busy && last?.role !== "assistant" && <WorkingIndicator />}
@@ -87,6 +123,35 @@ export function MessageList({
         </button>
       )}
     </div>
+  );
+}
+
+/** The most recent thing the user asked, whatever the agent has said since. */
+function lastUserMessage(messages: readonly ChatMessage[]): ChatMessage | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "user") return messages[i];
+  }
+  return undefined;
+}
+
+/**
+ * UI — the user's prompt, held at the top of the transcript once it has
+ * scrolled away, so a long answer never leaves them wondering what they
+ * asked. Click it to jump back to the message itself.
+ */
+function PinnedPrompt({ message, onJump }: { message: ChatMessage; onJump: () => void }) {
+  return (
+    <button
+      type="button"
+      className="pinned-prompt"
+      title={message.text}
+      aria-label="Jump to your message"
+      onClick={onJump}
+    >
+      <span className="pinned-prompt__label">You asked</span>
+      <span className="pinned-prompt__text">{message.text}</span>
+      <ArrowUp size={13} className="pinned-prompt__jump" />
+    </button>
   );
 }
 
@@ -151,9 +216,12 @@ function ApprovalCard({
 function MessageBubble({
   message,
   streaming,
+  innerRef,
 }: {
   message: ChatMessage;
   streaming: boolean;
+  /** Set on the message the PinnedPrompt tracks, so it can be measured. */
+  innerRef?: React.Ref<HTMLDivElement>;
 }) {
   if (message.role === "tool") {
     return (
@@ -172,7 +240,7 @@ function MessageBubble({
     );
   }
   return (
-    <div className={`msg msg--${message.role}`}>
+    <div className={`msg msg--${message.role}`} ref={innerRef}>
       <div className="msg__text">{message.text}</div>
       {message.attachments && message.attachments.length > 0 && (
         <div className="msg__attachments">

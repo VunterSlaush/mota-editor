@@ -133,6 +133,40 @@ describe("SessionHistory", () => {
     expect(tab.busy).toBe(false);
   });
 
+  it("lands a replayed session in one update, however long the conversation", async () => {
+    const { store, gateway, history } = setup();
+    gateway.replay = Array.from({ length: 40 }, (_, i) => ({
+      kind: i % 2 === 0 ? "userDelta" : "assistantDelta",
+      text: `line ${i}`,
+    })) as AgentTurnEvent[];
+
+    let updates = 0;
+    store.subscribe(() => {
+      updates += 1;
+    });
+
+    await history.open("t1", "abc-123", true);
+
+    // cleared, busy on, the whole transcript, busy off — and nothing per
+    // event, or the transcript builds on screen and the view chases the
+    // bottom all the way down.
+    expect(updates).toBe(4);
+  });
+
+  it("does not claim the session when the resume failed", async () => {
+    const { store, gateway, history } = setup();
+    gateway.loadNativeSession = async () => {
+      throw new Error("session file is gone");
+    };
+
+    await history.open("t1", "abc-123", true);
+
+    const tab = store.getState().tabs[0];
+    expect(tab.historySessionId).toBeUndefined();
+    expect(tab.messages.at(-1)?.text).toContain("session file is gone");
+    expect(tab.busy).toBe(false);
+  });
+
   it("local open restores the plan by reading its FILE PATH from disk", async () => {
     const { store, transcripts, history } = setup();
     transcripts.planFiles.set("/home/u/.claude/plans/p.md", "# Plan\n\n1. Add the port");

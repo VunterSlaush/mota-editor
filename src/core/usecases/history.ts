@@ -1,4 +1,5 @@
-import { infoMessage, toolMessage } from "../entities/message";
+import { type ChatMessage, infoMessage, toolMessage } from "../entities/message";
+import type { PlanEntry } from "../entities/plan";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
 import { tabById } from "../state/appState";
@@ -9,6 +10,53 @@ export interface HistoryListing {
   /** True when the entries are the AGENT's own sessions (true resume). */
   readonly native: boolean;
   readonly sessions: readonly TranscriptMeta[];
+}
+
+/**
+ * A replayed session, folded in memory before it reaches the store.
+ *
+ * The agent replays a saved conversation one event at a time. Dispatching
+ * each one made the transcript build itself on screen and the view chase
+ * the bottom all the way down; collecting them here means the whole
+ * conversation arrives in a single update, already scrolled to the end.
+ */
+class ReplayedSession {
+  readonly messages: ChatMessage[] = [];
+  plan: readonly PlanEntry[] = [];
+
+  /** Replay events → chat messages (approvals/completions don't replay). */
+  fold(event: AgentTurnEvent): void {
+    switch (event.kind) {
+      case "userDelta":
+        this.appendOrExtend("user", event.text);
+        break;
+      case "assistantDelta":
+        this.appendOrExtend("assistant", event.text);
+        break;
+      case "tool":
+        this.messages.push(toolMessage(event.name, event.detail));
+        break;
+      case "plan":
+        this.plan = event.entries;
+        break;
+      default:
+        break; // usage, thoughts, etc.: not part of the restored view
+    }
+  }
+
+  note(text: string): void {
+    this.messages.push(infoMessage(text));
+  }
+
+  /** Streamed text extends the last message when the role still matches. */
+  private appendOrExtend(role: "user" | "assistant", text: string): void {
+    const last = this.messages[this.messages.length - 1];
+    if (last?.role === role) {
+      this.messages[this.messages.length - 1] = { ...last, text: last.text + text };
+      return;
+    }
+    this.messages.push({ id: `r-${this.messages.length}`, role, text });
+  }
 }
 
 /**
@@ -70,76 +118,37 @@ export class SessionHistory {
 
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true });
+
+    const replay = new ReplayedSession();
+    let resumed = true;
     try {
       await this.agentGateway.loadNativeSession(
         { tabId, provider, projectPath: path, model, effort, sessionId },
-        (event) => this.foldReplayEvent(tabId, event),
+        (event) => replay.fold(event),
       );
-      this.store.dispatch({
-        type: "chat/messageAppended",
-        tabId,
-        message: infoMessage("Resumed — the agent remembers this conversation."),
-      });
-      this.store.dispatch({ type: "chat/historySessionAssigned", tabId, sessionId });
+      replay.note("Resumed — the agent remembers this conversation.");
     } catch (e) {
+      resumed = false;
+      replay.note(
+        `Could not resume this session: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    if (resumed) {
       this.store.dispatch({
-        type: "chat/messageAppended",
+        type: "chat/transcriptLoaded",
         tabId,
-        message: infoMessage(
-          `Could not resume this session: ${e instanceof Error ? e.message : String(e)}`,
-        ),
+        sessionId,
+        messages: replay.messages,
+        plan: replay.plan,
       });
-    } finally {
-      this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
+    } else {
+      // A resume that failed must not leave the tab claiming that session.
+      for (const message of replay.messages) {
+        this.store.dispatch({ type: "chat/messageAppended", tabId, message });
+      }
     }
-  }
-
-  /** Replay events → chat messages (approvals/completions don't replay). */
-  private foldReplayEvent(tabId: string, event: AgentTurnEvent): void {
-    const tab = tabById(this.store.getState(), tabId);
-    if (!tab) return;
-    const last = tab.messages[tab.messages.length - 1];
-
-    switch (event.kind) {
-      case "userDelta":
-        if (last?.role === "user") {
-          this.store.dispatch({ type: "chat/userDelta", tabId, text: event.text });
-        } else {
-          this.store.dispatch({
-            type: "chat/messageAppended",
-            tabId,
-            message: { id: `r-${tab.messages.length}`, role: "user", text: event.text },
-          });
-        }
-        break;
-      case "assistantDelta":
-        if (last?.role === "assistant") {
-          this.store.dispatch({ type: "chat/assistantDelta", tabId, text: event.text });
-        } else {
-          this.store.dispatch({
-            type: "chat/messageAppended",
-            tabId,
-            message: {
-              id: `r-${tab.messages.length}`,
-              role: "assistant",
-              text: event.text,
-            },
-          });
-        }
-        break;
-      case "tool":
-        this.store.dispatch({
-          type: "chat/messageAppended",
-          tabId,
-          message: toolMessage(event.name, event.detail),
-        });
-        break;
-      case "plan":
-        this.store.dispatch({ type: "tab/planUpdated", tabId, plan: event.entries });
-        break;
-      default:
-        break; // usage, thoughts, etc.: not part of the restored view
-    }
+    this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
   }
 
   /** Fallback: our own transcript copy (view only, no agent memory). */
