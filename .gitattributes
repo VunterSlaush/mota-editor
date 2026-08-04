@@ -1,0 +1,9 @@
+# Normalise line endings: LF in the repository, on every platform.
+# Without this, a checkout on Windows rewrites every file to CRLF and the
+# next contributor on macOS or Linux produces a whole-file diff.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png binary
+*.ico binary
+*.icns binary
