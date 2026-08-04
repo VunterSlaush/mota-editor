@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { Store } from "../state/store";
 import { newProject } from "../entities/project";
 import type {
   AgentGateway,
   AgentTurnEvent,
   AgentTurnRequest,
 } from "../ports/agentGateway";
-import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
 import type {
   PersistedTranscript,
   TranscriptMeta,
   TranscriptStore,
 } from "../ports/transcriptStore";
+import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
+import { Store } from "../state/store";
 import { SendPrompt } from "./sendPrompt";
 
 /** Test double — a scripted agent, per the case study's in-memory gateways. */
@@ -84,7 +84,10 @@ class FakeTranscriptStore implements TranscriptStore {
 
 function setup(script: AgentTurnEvent[] = []) {
   const store = new Store();
-  store.dispatch({ type: "tab/opened", project: newProject("t1", "/work/alpha", "claude") });
+  store.dispatch({
+    type: "tab/opened",
+    project: newProject("t1", "/work/alpha", "claude"),
+  });
   const gateway = new FakeAgentGateway();
   gateway.script = script;
   const workspace = new FakeWorkspaceStore();
@@ -221,7 +224,12 @@ describe("SendPrompt", () => {
     await useCase.execute("t1", "check the config");
 
     const messages = store.getState().tabs[0].messages;
-    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+    expect(messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+    ]);
     expect(messages[1].text).toBe("Let me check.");
     expect(messages[3].text).toBe("All good.");
   });
@@ -315,8 +323,13 @@ describe("SendPrompt", () => {
   });
 
   it("flags a background tab and notifies when its turn completes", async () => {
-    const { store, notifications, useCase } = setup([{ kind: "completed", isError: false }]);
-    store.dispatch({ type: "tab/opened", project: newProject("t2", "/work/beta", "claude") });
+    const { store, notifications, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
+    store.dispatch({
+      type: "tab/opened",
+      project: newProject("t2", "/work/beta", "claude"),
+    });
     // t2 is now active; run the turn in t1 (background).
 
     await useCase.execute("t1", "long refactor");
@@ -332,7 +345,9 @@ describe("SendPrompt", () => {
   });
 
   it("does not flag the active tab, and reports it as watched", async () => {
-    const { store, notifications, useCase } = setup([{ kind: "completed", isError: false }]);
+    const { store, notifications, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
 
     await useCase.execute("t1", "quick question");
 
@@ -378,7 +393,10 @@ describe("SendPrompt", () => {
 
     expect(transcripts.saved).toHaveLength(1);
     expect(transcripts.saved[0].title).toBe("refactor the login module please");
-    expect(transcripts.saved[0].messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(transcripts.saved[0].messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
     expect(store.getState().tabs[0].historySessionId).toBe(transcripts.saved[0].id);
 
     // A second turn re-saves the SAME session, not a new one.
@@ -401,9 +419,7 @@ describe("SendPrompt", () => {
   });
 
   it("delivers queued prompts in order as turns complete", async () => {
-    const { store, gateway, useCase } = setup([
-      { kind: "completed", isError: false },
-    ]);
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
     // First send runs synchronously through "completed", so queue while
     // busy by scripting nothing first: simulate with a manual queue.
     store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: true });

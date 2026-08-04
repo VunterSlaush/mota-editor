@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { Store } from "../state/store";
 import { newProject } from "../entities/project";
 import type {
   AgentGateway,
@@ -11,6 +10,7 @@ import type {
   TranscriptMeta,
   TranscriptStore,
 } from "../ports/transcriptStore";
+import { Store } from "../state/store";
 import { SessionHistory } from "./history";
 
 class FakeTranscriptStore implements TranscriptStore {
@@ -41,7 +41,8 @@ class FakeTranscriptStore implements TranscriptStore {
 
 /** Gateway with scriptable native history. */
 class FakeGateway implements AgentGateway {
-  nativeSessions: { sessionId: string; title?: string; updatedAt?: string }[] | null = null;
+  nativeSessions: { sessionId: string; title?: string; updatedAt?: string }[] | null =
+    null;
   replay: AgentTurnEvent[] = [];
 
   async startTurn(_r: AgentTurnRequest, _e: (event: AgentTurnEvent) => void) {}
@@ -78,7 +79,11 @@ describe("SessionHistory", () => {
   it("prefers the agent's native session list", async () => {
     const { gateway, history } = setup();
     gateway.nativeSessions = [
-      { sessionId: "abc-123", title: "Plan the feature", updatedAt: "2026-08-04T10:00:00Z" },
+      {
+        sessionId: "abc-123",
+        title: "Plan the feature",
+        updatedAt: "2026-08-04T10:00:00Z",
+      },
     ];
 
     const listing = await history.list("t1");
@@ -116,7 +121,12 @@ describe("SessionHistory", () => {
     await history.open("t1", "abc-123", true);
 
     const tab = store.getState().tabs[0];
-    expect(tab.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "info"]);
+    expect(tab.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "info",
+    ]);
     expect(tab.messages[1].text).toBe("Here is the plan.");
     expect(tab.messages[3].text).toContain("remembers");
     expect(tab.historySessionId).toBe("abc-123");

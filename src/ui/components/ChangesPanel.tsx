@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { Icon } from "@phosphor-icons/react";
 import {
   ArrowClockwise,
@@ -10,9 +9,10 @@ import {
   Minus,
   Plus,
 } from "@phosphor-icons/react";
-import type { GitChanges } from "../../core/usecases/loadGitChanges";
-import type { GitActionResult } from "../../core/usecases/gitActions";
+import { useState } from "react";
 import type { GitChange } from "../../core/ports/gitPort";
+import type { GitActionResult } from "../../core/usecases/gitActions";
+import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import { fileName } from "../fileName";
 
 interface Props {
@@ -46,7 +46,9 @@ export function ChangesPanel({
   const [notice, setNotice] = useState<GitActionResult | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
 
-  const run = async (action: () => Promise<GitActionResult>): Promise<GitActionResult> => {
+  const run = async (
+    action: () => Promise<GitActionResult>,
+  ): Promise<GitActionResult> => {
     setWorking(true);
     setNotice(null);
     const result = await action();
@@ -74,6 +76,7 @@ export function ChangesPanel({
     <aside className="changes">
       {changes && changes.branches.length > 0 && (
         <button
+          type="button"
           className="changes__branch"
           disabled={mutationsDisabled}
           title="Checkout a branch"
@@ -86,6 +89,7 @@ export function ChangesPanel({
       )}
       <div className="changes__actions">
         <button
+          type="button"
           className="changes__action"
           disabled={mutationsDisabled}
           onClick={() => void run(onPull)}
@@ -93,6 +97,7 @@ export function ChangesPanel({
           <ArrowLineDown /> Pull
         </button>
         <button
+          type="button"
           className="changes__action"
           disabled={mutationsDisabled}
           onClick={() => void run(onPush)}
@@ -100,13 +105,12 @@ export function ChangesPanel({
           <ArrowLineUp /> Push
         </button>
         <button
+          type="button"
           className="changes__action changes__action--icon"
           disabled={working}
           aria-label="Refresh git status"
           title={
-            busy
-              ? "Watching the agent's changes live — click to refresh now"
-              : "Refresh"
+            busy ? "Watching the agent's changes live — click to refresh now" : "Refresh"
           }
           onClick={onRefresh}
         >
@@ -126,6 +130,7 @@ export function ChangesPanel({
           }}
         />
         <button
+          type="button"
           className="changes__action changes__action--commit"
           disabled={!canCommit}
           title="Commit staged changes and push"
@@ -169,7 +174,11 @@ export function ChangesPanel({
               <h3 className="changes__title">Last commits</h3>
               <ul className="changes__list">
                 {changes.commits.map((commit) => (
-                  <li key={commit.hash} className="commit" title={`${commit.author} — ${commit.when}`}>
+                  <li
+                    key={commit.hash}
+                    className="commit"
+                    title={`${commit.author} — ${commit.when}`}
+                  >
                     <span className="commit__hash">{commit.hash}</span>
                     <span className="commit__subject">{commit.subject}</span>
                     <span className="commit__when">{commit.when}</span>
@@ -199,7 +208,14 @@ function parentDir(path: string): string {
   return cut > 0 ? path.slice(0, cut) : "";
 }
 
-function ChangeGroup({ title, files, ActionIcon, actionTitle, disabled, onAction }: GroupProps) {
+function ChangeGroup({
+  title,
+  files,
+  ActionIcon,
+  actionTitle,
+  disabled,
+  onAction,
+}: GroupProps) {
   if (files.length === 0) return null;
   return (
     <div className="changes__group">
@@ -217,6 +233,7 @@ function ChangeGroup({ title, files, ActionIcon, actionTitle, disabled, onAction
               )}
             </span>
             <button
+              type="button"
               className="changes__file-action"
               title={`${actionTitle} ${file.path}`}
               disabled={disabled}

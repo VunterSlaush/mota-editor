@@ -20,6 +20,7 @@ export function ActivityBar({ active, onSelect }: Props) {
     <nav className="activity-bar" aria-label="Sidebar views">
       {ITEMS.map((item) => (
         <button
+          type="button"
           key={item.view}
           className={`activity-bar__item ${
             active === item.view ? "activity-bar__item--active" : ""

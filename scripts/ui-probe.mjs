@@ -1,8 +1,9 @@
 /* eslint-disable no-console */
 // UI probe — drives the demo-mode app in headless Chromium and captures
 // screenshots at each interesting state. Run: node scripts/ui-probe.mjs
-import { chromium } from "playwright";
+
 import fs from "node:fs";
+import { chromium } from "playwright";
 
 const OUT = "/tmp/ui-shots";
 fs.mkdirSync(OUT, { recursive: true });
@@ -89,7 +90,10 @@ console.log("jump pill visible:", await page.locator(".jump-to-latest").count())
 await shot(page, "07-scrolled-up-pill");
 
 // --- Scenario 5: approval flow still fine ---
-await page.locator(".jump-to-latest").click().catch(() => {});
+await page
+  .locator(".jump-to-latest")
+  .click()
+  .catch(() => {});
 await input.fill("run the tests please");
 await input.press("Enter");
 await page.waitForTimeout(1500);

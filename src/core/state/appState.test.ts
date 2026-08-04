@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { newProject } from "../entities/project";
 import { userMessage } from "../entities/message";
-import { activeTab, initialState, reduce, type AppState } from "./appState";
+import { newProject } from "../entities/project";
+import { type AppState, activeTab, initialState, reduce } from "./appState";
 
 const open = (state: AppState, id: string, path: string) =>
   reduce(state, { type: "tab/opened", project: newProject(id, path, "claude") });
@@ -162,7 +162,11 @@ describe("appState reducer", () => {
       provider: "claude",
       sessionId: "s-123",
     });
-    state = reduce(state, { type: "tab/providerChanged", tabId: "t1", provider: "codex" });
+    state = reduce(state, {
+      type: "tab/providerChanged",
+      tabId: "t1",
+      provider: "codex",
+    });
     expect(state.tabs[0].project.provider).toBe("codex");
     expect(state.tabs[0].project.providerSessions.claude).toBe("s-123");
   });

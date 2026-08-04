@@ -30,6 +30,7 @@ export function TabBar({ tabs, activeTabId, onSelect, onClose, onOpenProject }: 
             )}
             <span className="tab__name">{tab.project.name}</span>
             <button
+              type="button"
               className="tab__close"
               aria-label={`Close ${tab.project.name}`}
               onClick={(e) => {
@@ -42,7 +43,12 @@ export function TabBar({ tabs, activeTabId, onSelect, onClose, onOpenProject }: 
           </div>
         );
       })}
-      <button className="tab-bar__add" onClick={onOpenProject} title="Open a project folder">
+      <button
+        type="button"
+        className="tab-bar__add"
+        onClick={onOpenProject}
+        title="Open a project folder"
+      >
         +
       </button>
     </header>

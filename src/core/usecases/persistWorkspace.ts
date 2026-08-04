@@ -1,5 +1,5 @@
-import type { AppState } from "../state/appState";
 import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
+import type { AppState } from "../state/appState";
 
 /**
  * Use case (shared step) — project the in-memory state onto the persisted

@@ -17,16 +17,29 @@ export function ContextGauge({ usage, threshold }: Props) {
   const fraction = Math.min(usage.used / usage.size, 1);
   const percent = Math.round(fraction * 100);
   const color =
-    fraction >= threshold ? "#ff6b6b" : fraction >= threshold - 0.15 ? "#f0b429" : "#7ee2a8";
+    fraction >= threshold
+      ? "#ff6b6b"
+      : fraction >= threshold - 0.15
+        ? "#f0b429"
+        : "#7ee2a8";
 
   return (
     <span
       className="context-gauge"
+      role="img"
       title={`Context: ${percent}% used (${format(usage.used)} of ${format(usage.size)} tokens). Auto-compacts at ${Math.round(threshold * 100)}%.`}
       aria-label={`Context ${percent} percent used`}
     >
-      <svg width="20" height="20" viewBox="0 0 20 20">
-        <circle cx="10" cy="10" r={RADIUS} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+      {/* Decorative: the accessible name lives on the wrapper above. */}
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <circle
+          cx="10"
+          cy="10"
+          r={RADIUS}
+          fill="none"
+          stroke="var(--border)"
+          strokeWidth="2.5"
+        />
         <circle
           cx="10"
           cy="10"

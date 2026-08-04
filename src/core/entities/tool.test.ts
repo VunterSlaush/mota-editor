@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { changesFiles, countFileChangingTools } from "./tool";
 import { assistantMessage, toolMessage } from "./message";
+import { changesFiles, countFileChangingTools } from "./tool";
 
 describe("changesFiles", () => {
   it("recognises the editing tools", () => {

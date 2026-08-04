@@ -1,8 +1,8 @@
-import type { Store } from "../state/store";
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { ProviderId } from "../entities/provider";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { WorkspaceStore } from "../ports/workspacePort";
+import type { Store } from "../state/store";
 import { persistWorkspace } from "./persistWorkspace";
 import { warmTab } from "./warmSessions";
 

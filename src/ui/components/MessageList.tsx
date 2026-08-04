@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ClipboardText, LockKey, Paperclip } from "@phosphor-icons/react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../core/entities/message";
 import { fileName } from "../fileName";
 import { Markdown } from "./MarkdownLite";
@@ -52,7 +52,8 @@ export function MessageList({
   const onScroll = () => {
     const el = scrollerRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD;
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD;
     setFollowing(nearBottom);
   };
 
@@ -77,6 +78,7 @@ export function MessageList({
       </div>
       {!following && (
         <button
+          type="button"
           className="jump-to-latest"
           onClick={() => setFollowing(true)}
           aria-label="Jump to latest"
@@ -119,13 +121,14 @@ function ApprovalCard({
         <LockKey /> {message.text}
       </div>
       {approval.planMarkdown && (
-        <button className="approval__plan-link" onClick={onShowPlan}>
+        <button type="button" className="approval__plan-link" onClick={onShowPlan}>
           <ClipboardText /> View the plan
         </button>
       )}
       <div className="approval__options">
         {approval.options.map((option) => (
           <button
+            type="button"
             key={option.optionId}
             className={`approval__button ${
               option.kind.startsWith("reject") ? "approval__button--reject" : ""

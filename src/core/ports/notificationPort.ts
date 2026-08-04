@@ -10,5 +10,9 @@ export interface NotificationPort {
    * the one currently shown — implementations suppress the notification
    * when the user is demonstrably already looking at the result.
    */
-  turnCompleted(projectName: string, providerName: string, tabActive: boolean): Promise<void>;
+  turnCompleted(
+    projectName: string,
+    providerName: string,
+    tabActive: boolean,
+  ): Promise<void>;
 }

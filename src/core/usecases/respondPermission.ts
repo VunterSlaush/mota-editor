@@ -1,6 +1,6 @@
+import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import type { AgentGateway } from "../ports/agentGateway";
 
 /**
  * Use case — deliver the user's Allow/Deny choice for a pending
@@ -15,7 +15,9 @@ export class RespondPermission {
 
   async execute(tabId: string, requestId: string, optionId: string): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
-    const approval = tab?.messages.find((m) => m.approval?.requestId === requestId)?.approval;
+    const approval = tab?.messages.find(
+      (m) => m.approval?.requestId === requestId,
+    )?.approval;
     if (!approval || approval.resolvedOptionId || approval.cancelled) return;
 
     this.store.dispatch({ type: "chat/approvalResolved", tabId, requestId, optionId });

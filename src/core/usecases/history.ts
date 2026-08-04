@@ -1,8 +1,8 @@
 import { infoMessage, toolMessage } from "../entities/message";
-import { tabById } from "../state/appState";
-import type { Store } from "../state/store";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
+import { tabById } from "../state/appState";
+import type { Store } from "../state/store";
 
 /** The history list plus where it came from. */
 export interface HistoryListing {

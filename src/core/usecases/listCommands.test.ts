@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { Store } from "../state/store";
-import { newProject } from "../entities/project";
 import type { CommandInfo } from "../entities/command";
+import { newProject } from "../entities/project";
 import type { CommandCatalog } from "../ports/commandCatalog";
+import { Store } from "../state/store";
 import { ListCommands } from "./listCommands";
 
 class FakeCommandCatalog implements CommandCatalog {
@@ -17,7 +17,10 @@ class FakeCommandCatalog implements CommandCatalog {
 
 function setup() {
   const store = new Store();
-  store.dispatch({ type: "tab/opened", project: newProject("t1", "/work/alpha", "claude") });
+  store.dispatch({
+    type: "tab/opened",
+    project: newProject("t1", "/work/alpha", "claude"),
+  });
   const catalog = new FakeCommandCatalog();
   return { store, catalog, useCase: new ListCommands(store, catalog) };
 }
@@ -25,9 +28,7 @@ function setup() {
 describe("ListCommands", () => {
   it("merges built-ins with discovered custom commands, sorted by name", async () => {
     const { catalog, useCase } = setup();
-    catalog.custom = [
-      { name: "/deploy", description: "Ship it", source: "custom" },
-    ];
+    catalog.custom = [{ name: "/deploy", description: "Ship it", source: "custom" }];
 
     const commands = await useCase.execute("t1");
 

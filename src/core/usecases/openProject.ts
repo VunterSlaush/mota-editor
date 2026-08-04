@@ -1,7 +1,7 @@
 import { newProject } from "../entities/project";
-import type { Store } from "../state/store";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { FolderPicker, WorkspaceStore } from "../ports/workspacePort";
+import type { Store } from "../state/store";
 import { persistWorkspace } from "./persistWorkspace";
 import { warmTab } from "./warmSessions";
 
@@ -27,7 +27,11 @@ export class OpenProject {
 
     this.store.dispatch({
       type: "tab/opened",
-      project: newProject(this.newId(), path, this.store.getState().settings.defaultProvider),
+      project: newProject(
+        this.newId(),
+        path,
+        this.store.getState().settings.defaultProvider,
+      ),
     });
     const activeTabId = this.store.getState().activeTabId;
     if (activeTabId) warmTab(this.store, this.agentGateway, activeTabId);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planTitle, planToMarkdown, type PlanEntry } from "./plan";
+import { type PlanEntry, planTitle, planToMarkdown } from "./plan";
 
 const plan: PlanEntry[] = [
   { content: "Read the code", priority: "medium", status: "completed" },

@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowUp,
   Bug,
@@ -12,10 +11,10 @@ import {
   Stop,
   X,
 } from "@phosphor-icons/react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
-import { OptionPicker, type PickerOption } from "./OptionPicker";
-import { filterCommands, type CommandInfo } from "../../core/entities/command";
+import { type CommandInfo, filterCommands } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
 import { AUTO_COMPACT_THRESHOLD } from "../../core/usecases/sendPrompt";
@@ -23,6 +22,7 @@ import { fileName } from "../fileName";
 import { CommandPalette } from "./CommandPalette";
 import { ContextGauge } from "./ContextGauge";
 import { ModelPicker } from "./ModelPicker";
+import { OptionPicker, type PickerOption } from "./OptionPicker";
 
 /** The input grows with the text up to this many lines, then scrolls. */
 const MAX_INPUT_LINES = 4;
@@ -199,10 +199,16 @@ export function Composer({
       {queued.length > 0 && (
         <div className="queued-list" aria-label="Queued messages">
           {queued.map((q, index) => (
-            <div key={`${index}-${q.prompt}`} className="queued-item" title={q.prompt}>
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: the queue is removed by index (onRemoveQueued), so position is the identity
+              key={`${index}-${q.prompt}`}
+              className="queued-item"
+              title={q.prompt}
+            >
               <span className="queued-item__badge">queued</span>
               <span className="queued-item__text">{q.prompt}</span>
               <button
+                type="button"
                 className="queued-item__remove"
                 aria-label="Remove queued message"
                 onClick={() => onRemoveQueued(index)}
@@ -219,6 +225,7 @@ export function Composer({
             <span key={path} className="attachment-chip" title={path}>
               <Paperclip size={13} /> {fileName(path)}
               <button
+                type="button"
                 className="attachment-chip__remove"
                 aria-label={`Remove ${fileName(path)}`}
                 onClick={() => setAttachments(attachments.filter((p) => p !== path))}
@@ -246,6 +253,7 @@ export function Composer({
         <div className="composer-card__toolbar">
           <div className="composer-card__group">
             <button
+              type="button"
               className="icon-button"
               title="Attach files"
               aria-label="Attach files"
@@ -254,8 +262,13 @@ export function Composer({
               <Plus />
             </button>
             <button
+              type="button"
               className="icon-button icon-button--plan"
-              title={hasPlan ? "View the current plan" : "No plan yet — the agent publishes one when it breaks a task into steps"}
+              title={
+                hasPlan
+                  ? "View the current plan"
+                  : "No plan yet — the agent publishes one when it breaks a task into steps"
+              }
               aria-label="View plan"
               disabled={!hasPlan}
               onClick={onShowPlan}
@@ -298,6 +311,7 @@ export function Composer({
             )}
             {busy ? (
               <button
+                type="button"
                 className="send-button send-button--stop"
                 title="Stop"
                 aria-label="Stop"
@@ -307,6 +321,7 @@ export function Composer({
               </button>
             ) : (
               <button
+                type="button"
                 className="send-button"
                 title="Send"
                 aria-label="Send"

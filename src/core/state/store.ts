@@ -17,7 +17,9 @@ export class Store {
 
   dispatch(action: Action): void {
     this.state = reduce(this.state, action);
-    this.listeners.forEach((l) => l());
+    this.listeners.forEach((l) => {
+      l();
+    });
   }
 
   subscribe(listener: Listener): () => void {

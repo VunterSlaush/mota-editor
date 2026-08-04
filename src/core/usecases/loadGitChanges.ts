@@ -1,6 +1,6 @@
+import type { GitBranch, GitChange, GitCommit, GitPort } from "../ports/gitPort";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import type { GitBranch, GitChange, GitCommit, GitPort } from "../ports/gitPort";
 
 const COMMIT_LOG_LIMIT = 10;
 

@@ -8,12 +8,12 @@ import {
   userMessage,
 } from "../entities/message";
 import { COMPACT_COMMAND, providerById } from "../entities/provider";
-import { tabById } from "../state/appState";
-import type { Store } from "../state/store";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { TranscriptStore } from "../ports/transcriptStore";
 import type { WorkspaceStore } from "../ports/workspacePort";
+import { tabById } from "../state/appState";
+import type { Store } from "../state/store";
 import { persistWorkspace } from "./persistWorkspace";
 
 export type IdGenerator = () => string;
@@ -282,7 +282,7 @@ export class SendPrompt {
    */
   private autoCompactIfNeeded(tabId: string): void {
     const tab = tabById(this.store.getState(), tabId);
-    if (!tab || !tab.usage) return;
+    if (!tab?.usage) return;
     if (tab.usage.used / tab.usage.size < AUTO_COMPACT_THRESHOLD) return;
 
     const compactCommand = COMPACT_COMMAND[tab.project.provider];
@@ -330,10 +330,7 @@ export class SendPrompt {
  * The text to send: the trimmed prompt, a stand-in when only files were
  * attached, or null when there is nothing to send at all.
  */
-function effectiveText(
-  prompt: string,
-  attachments: readonly string[],
-): string | null {
+function effectiveText(prompt: string, attachments: readonly string[]): string | null {
   const trimmed = prompt.trim();
   if (trimmed.length > 0) return trimmed;
   if (attachments.length > 0) return "Please review the attached files.";

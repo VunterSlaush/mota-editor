@@ -1,8 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  PersistedWorkspace,
-  WorkspaceStore,
-} from "../../core/ports/workspacePort";
+import type { PersistedWorkspace, WorkspaceStore } from "../../core/ports/workspacePort";
 
 /**
  * Interface adapter — persists the workspace via the Tauri backend,

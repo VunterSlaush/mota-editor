@@ -1,6 +1,6 @@
+import type { GitPort } from "../ports/gitPort";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import type { GitPort } from "../ports/gitPort";
 
 /** Outcome of a git verb, ready for display. */
 export interface GitActionResult {

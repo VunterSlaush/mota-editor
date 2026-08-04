@@ -16,12 +16,28 @@ export interface CommandInfo {
  */
 export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[]>> = {
   claude: [
-    { name: "/init", description: "Create or refresh CLAUDE.md with project guidance", source: "builtin" },
-    { name: "/review", description: "Review current changes or a pull request", source: "builtin" },
-    { name: "/compact", description: "Summarize the conversation to free context", source: "builtin" },
+    {
+      name: "/init",
+      description: "Create or refresh CLAUDE.md with project guidance",
+      source: "builtin",
+    },
+    {
+      name: "/review",
+      description: "Review current changes or a pull request",
+      source: "builtin",
+    },
+    {
+      name: "/compact",
+      description: "Summarize the conversation to free context",
+      source: "builtin",
+    },
   ],
   codex: [
-    { name: "/init", description: "Create AGENTS.md with project guidance", source: "builtin" },
+    {
+      name: "/init",
+      description: "Create AGENTS.md with project guidance",
+      source: "builtin",
+    },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
   gemini: [],

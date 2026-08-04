@@ -1,7 +1,7 @@
 import { infoMessage } from "../entities/message";
+import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import type { AgentGateway } from "../ports/agentGateway";
 
 /** Use case — stop the agent turn currently running in a tab. */
 export class CancelTurn {
@@ -12,7 +12,7 @@ export class CancelTurn {
 
   async execute(tabId: string): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
-    if (!tab || !tab.busy) return;
+    if (!tab?.busy) return;
 
     await this.agentGateway.cancelTurn(tabId);
     const queuedCount = tab.queued.length;

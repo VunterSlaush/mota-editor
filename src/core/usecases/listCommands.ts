@@ -1,7 +1,7 @@
 import { BUILTIN_COMMANDS, type CommandInfo } from "../entities/command";
+import type { CommandCatalog } from "../ports/commandCatalog";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import type { CommandCatalog } from "../ports/commandCatalog";
 
 /**
  * Use case — the slash commands available in a tab: the provider's

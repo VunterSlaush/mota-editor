@@ -24,7 +24,8 @@ export const MODES: readonly OptionDescriptor<AgentMode>[] = [
   {
     id: "debug",
     label: "Debug",
-    description: "Diagnose first: reproduce, find the root cause, then propose a minimal fix.",
+    description:
+      "Diagnose first: reproduce, find the root cause, then propose a minimal fix.",
   },
 ];
 

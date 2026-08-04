@@ -34,7 +34,9 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
     } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const delta = e.key === "ArrowDown" ? 1 : -1;
-      setSelectedIndex((selectedIndex + delta + filtered.length) % Math.max(filtered.length, 1));
+      setSelectedIndex(
+        (selectedIndex + delta + filtered.length) % Math.max(filtered.length, 1),
+      );
     } else if (e.key === "Enter" && filtered.length > 0) {
       e.preventDefault();
       pick(filtered[Math.min(selectedIndex, filtered.length - 1)]);

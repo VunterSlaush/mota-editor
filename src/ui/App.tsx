@@ -20,9 +20,9 @@ export function App({ context }: { context: AppContext }) {
     <div className="app">
       {!context.runningInTauri && (
         <div className="env-banner">
-          Browser preview — you're driving a simulated demo agent. For real
-          projects and agents, run <code>npm run tauri dev</code> and use
-          the Mota Editor window it opens.
+          Browser preview — you're driving a simulated demo agent. For real projects and
+          agents, run <code>npm run tauri dev</code> and use the Mota Editor window it
+          opens.
         </div>
       )}
       <TabBar
@@ -53,7 +53,9 @@ export function App({ context }: { context: AppContext }) {
           onSend={(prompt, attachments) =>
             void context.sendPrompt.execute(tab.project.id, prompt, attachments)
           }
-          onRemoveQueued={(index) => context.sendPrompt.removeQueued(tab.project.id, index)}
+          onRemoveQueued={(index) =>
+            context.sendPrompt.removeQueued(tab.project.id, index)
+          }
           onCancel={() => void context.cancelTurn.execute(tab.project.id)}
           onSelectProvider={(provider) =>
             void context.selectProvider.execute(tab.project.id, provider)
@@ -62,7 +64,9 @@ export function App({ context }: { context: AppContext }) {
           onSelectPermission={(permission) =>
             void context.selectPermission.execute(tab.project.id, permission)
           }
-          onSelectModel={(model) => void context.selectModel.execute(tab.project.id, model)}
+          onSelectModel={(model) =>
+            void context.selectModel.execute(tab.project.id, model)
+          }
           onSelectEffort={(effort) =>
             void context.selectEffort.execute(tab.project.id, effort)
           }

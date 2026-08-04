@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CaretDown, Check } from "@phosphor-icons/react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 /** One row of the dropdown. Callers map their domain objects onto this. */
 export interface PickerOption<T extends string> {
@@ -142,7 +142,9 @@ export function OptionPicker<T extends string>({
                   <span className="picker__option-description">{option.description}</span>
                 )}
               </span>
-              {option.id === value && <Check size={14} className="picker__option-check" />}
+              {option.id === value && (
+                <Check size={14} className="picker__option-check" />
+              )}
             </div>
           ))}
         </div>

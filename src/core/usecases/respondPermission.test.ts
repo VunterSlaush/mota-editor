@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { Store } from "../state/store";
 import { approvalMessage } from "../entities/message";
 import { newProject } from "../entities/project";
 import type {
   AgentGateway,
-  AgentTurnRequest,
   AgentTurnEvent,
+  AgentTurnRequest,
 } from "../ports/agentGateway";
+import { Store } from "../state/store";
 import { RespondPermission } from "./respondPermission";
 
 class RecordingGateway implements AgentGateway {
@@ -48,7 +48,9 @@ describe("RespondPermission", () => {
 
     await useCase.execute("t1", "9", "allow");
 
-    expect(gateway.responses).toEqual([{ tabId: "t1", requestId: "9", optionId: "allow" }]);
+    expect(gateway.responses).toEqual([
+      { tabId: "t1", requestId: "9", optionId: "allow" },
+    ]);
     const approval = store.getState().tabs[0].messages[0].approval;
     expect(approval?.resolvedOptionId).toBe("allow");
   });

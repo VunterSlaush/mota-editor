@@ -1,6 +1,6 @@
+import { IconContext } from "@phosphor-icons/react";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { IconContext } from "@phosphor-icons/react";
 import { App } from "./ui/App";
 import { createAppContext } from "./wiring/context";
 import "./ui/styles.css";

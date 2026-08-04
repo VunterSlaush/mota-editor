@@ -1,9 +1,9 @@
+import type { CommandInfo } from "../../core/entities/command";
 import type {
   AgentGateway,
   AgentTurnEvent,
   AgentTurnRequest,
 } from "../../core/ports/agentGateway";
-import type { CommandInfo } from "../../core/entities/command";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
 import type { GitBranch, GitChange, GitCommit, GitPort } from "../../core/ports/gitPort";
 import type { NotificationPort } from "../../core/ports/notificationPort";
@@ -68,7 +68,11 @@ export class DemoAgentGateway implements AgentGateway {
       emit({
         kind: "plan",
         entries: [
-          { content: "Inspect the current implementation", priority: "medium", status: "completed" },
+          {
+            content: "Inspect the current implementation",
+            priority: "medium",
+            status: "completed",
+          },
           { content: "Apply the change", priority: "high", status: "in_progress" },
           { content: "Run the tests", priority: "medium", status: "pending" },
         ],
@@ -101,7 +105,7 @@ export class DemoAgentGateway implements AgentGateway {
       "Here's what I found:\n\n" +
       "| File | Status |\n|---|---|\n| `src/main.ts` | ok |\n\n" +
       "- The setup looks **good**\n- I adjusted one detail\n\n" +
-      "```ts\nconsole.log(\"done\");\n```";
+      '```ts\nconsole.log("done");\n```';
     for (const chunk of reply.match(/.{1,14}/gs) ?? []) {
       await delay(35);
       emit({ kind: "assistantDelta", text: chunk });
@@ -180,8 +184,18 @@ export class DemoGit implements GitPort {
   }
   async log(): Promise<GitCommit[]> {
     return [
-      { hash: "a1b2c3d", subject: "Add plan side panel", author: "mota", when: "2 hours ago" },
-      { hash: "d4e5f6a", subject: "Fix approval race", author: "mota", when: "5 hours ago" },
+      {
+        hash: "a1b2c3d",
+        subject: "Add plan side panel",
+        author: "mota",
+        when: "2 hours ago",
+      },
+      {
+        hash: "d4e5f6a",
+        subject: "Fix approval race",
+        author: "mota",
+        when: "5 hours ago",
+      },
     ];
   }
   async branches(): Promise<GitBranch[]> {

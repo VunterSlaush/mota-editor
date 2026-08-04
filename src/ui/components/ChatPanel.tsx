@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import type { TabState } from "../../core/state/appState";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import type { CommandInfo } from "../../core/entities/command";
-import { countFileChangingTools } from "../../core/entities/tool";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
-import type { GitChanges } from "../../core/usecases/loadGitChanges";
+import { countFileChangingTools } from "../../core/entities/tool";
+import type { TabState } from "../../core/state/appState";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryListing } from "../../core/usecases/history";
+import type { GitChanges } from "../../core/usecases/loadGitChanges";
+import { useDragWidth } from "../useDragWidth";
 import { ActivityBar, type SidebarView } from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
@@ -17,7 +18,6 @@ import { MessageList } from "./MessageList";
 import { PlanBar, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
 import { SettingsPanel } from "./SettingsPanel";
-import { useDragWidth } from "../useDragWidth";
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
 const GIT_RELOAD_DEBOUNCE_MS = 400;
@@ -104,8 +104,7 @@ export function ChatPanel({
 
   // The running agent's own command list is the source of truth; the
   // static + discovered set covers the time before a session starts.
-  const commands =
-    tab.agentCommands.length > 0 ? tab.agentCommands : fallbackCommands;
+  const commands = tab.agentCommands.length > 0 ? tab.agentCommands : fallbackCommands;
 
   useEffect(() => {
     let cancelled = false;
@@ -160,15 +159,19 @@ export function ChatPanel({
         </span>
         {currentBranch && (
           <button
+            type="button"
             className="branch-chip"
             title="Checkout a branch"
             onClick={() => setBranchPickerOpen(true)}
           >
-             {currentBranch}
+            {currentBranch}
           </button>
         )}
         <div className="chat-panel__controls">
-          <label className="verbose-toggle" title="Verbose: show tool activity, thoughts, and status rows. Off: only the conversation.">
+          <label
+            className="verbose-toggle"
+            title="Verbose: show tool activity, thoughts, and status rows. Off: only the conversation."
+          >
             <input
               type="checkbox"
               checked={tab.project.verbose}

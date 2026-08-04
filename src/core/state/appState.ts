@@ -100,11 +100,21 @@ export type Action =
   | { type: "chat/approvalResolved"; tabId: string; requestId: string; optionId: string }
   | { type: "chat/approvalsCancelled"; tabId: string }
   | { type: "chat/busyChanged"; tabId: string; busy: boolean }
-  | { type: "chat/promptQueued"; tabId: string; prompt: string; attachments: readonly string[] }
+  | {
+      type: "chat/promptQueued";
+      tabId: string;
+      prompt: string;
+      attachments: readonly string[];
+    }
   | { type: "chat/queueShifted"; tabId: string }
   | { type: "chat/queueRemoved"; tabId: string; index: number }
   | { type: "chat/queueCleared"; tabId: string }
-  | { type: "chat/sessionRecorded"; tabId: string; provider: ProviderId; sessionId: string };
+  | {
+      type: "chat/sessionRecorded";
+      tabId: string;
+      provider: ProviderId;
+      sessionId: string;
+    };
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -116,7 +126,10 @@ export function reduce(state: AppState, action: Action): AppState {
       };
 
     case "settings/defaultProviderChanged":
-      return { ...state, settings: { ...state.settings, defaultProvider: action.provider } };
+      return {
+        ...state,
+        settings: { ...state.settings, defaultProvider: action.provider },
+      };
 
     case "tab/opened": {
       const existing = state.tabs.find((t) => t.project.path === action.project.path);
@@ -285,11 +298,17 @@ export function reduce(state: AppState, action: Action): AppState {
     case "chat/promptQueued":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
-        queued: [...tab.queued, { prompt: action.prompt, attachments: action.attachments }],
+        queued: [
+          ...tab.queued,
+          { prompt: action.prompt, attachments: action.attachments },
+        ],
       }));
 
     case "chat/queueShifted":
-      return mapTab(state, action.tabId, (tab) => ({ ...tab, queued: tab.queued.slice(1) }));
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        queued: tab.queued.slice(1),
+      }));
 
     case "chat/queueRemoved":
       return mapTab(state, action.tabId, (tab) => ({

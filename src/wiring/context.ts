@@ -1,7 +1,30 @@
+import {
+  DemoAgentGateway,
+  DemoCommandCatalog,
+  DemoFilePicker,
+  DemoFolderPicker,
+  DemoGit,
+  DemoNotifications,
+  DemoTranscriptStore,
+  DemoWorkspaceStore,
+} from "../adapters/demo/demoAdapters";
+import { isTauriRuntime } from "../adapters/tauri/runtime";
+import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
+import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
+import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
+import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
+import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
+import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
+import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
+import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
+import type { FilePicker } from "../core/ports/workspacePort";
 import { Store } from "../core/state/store";
 import { CancelTurn } from "../core/usecases/cancelTurn";
 import { CloseProject } from "../core/usecases/closeProject";
+import { GitActions } from "../core/usecases/gitActions";
+import { SessionHistory } from "../core/usecases/history";
 import { ListCommands } from "../core/usecases/listCommands";
+import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { OpenProject } from "../core/usecases/openProject";
 import { RespondPermission } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
@@ -16,29 +39,6 @@ import {
   SetDefaultProvider,
   SwitchTab,
 } from "../core/usecases/switchTab";
-import { GitActions } from "../core/usecases/gitActions";
-import { LoadGitChanges } from "../core/usecases/loadGitChanges";
-import { SessionHistory } from "../core/usecases/history";
-import type { FilePicker } from "../core/ports/workspacePort";
-import { isTauriRuntime } from "../adapters/tauri/runtime";
-import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
-import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
-import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
-import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
-import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
-import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
-import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
-import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
-import {
-  DemoAgentGateway,
-  DemoCommandCatalog,
-  DemoFilePicker,
-  DemoFolderPicker,
-  DemoGit,
-  DemoNotifications,
-  DemoTranscriptStore,
-  DemoWorkspaceStore,
-} from "../adapters/demo/demoAdapters";
 
 /**
  * Composition root — the one place where concrete adapters are chosen and
@@ -79,14 +79,22 @@ export function createAppContext(): AppContext {
   const filePicker = inTauri ? new TauriFilePicker() : new DemoFilePicker();
   const commandCatalog = inTauri ? new TauriCommandCatalog() : new DemoCommandCatalog();
   const gitPort = inTauri ? new TauriGitStatus() : new DemoGit();
-  const transcriptStore = inTauri ? new TauriTranscriptStore() : new DemoTranscriptStore();
+  const transcriptStore = inTauri
+    ? new TauriTranscriptStore()
+    : new DemoTranscriptStore();
   const notifications = inTauri ? new TauriNotifications() : new DemoNotifications();
   const newId = () => crypto.randomUUID();
 
   return {
     store,
     restoreWorkspace: new RestoreWorkspace(store, workspaceStore, agentGateway),
-    openProject: new OpenProject(store, folderPicker, workspaceStore, agentGateway, newId),
+    openProject: new OpenProject(
+      store,
+      folderPicker,
+      workspaceStore,
+      agentGateway,
+      newId,
+    ),
     closeProject: new CloseProject(store, agentGateway, workspaceStore),
     switchTab: new SwitchTab(store, workspaceStore),
     selectProvider: new SelectProvider(store, workspaceStore, agentGateway),

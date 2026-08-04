@@ -37,8 +37,8 @@ export function SettingsPanel({ defaultProvider, onChangeDefaultProvider }: Prop
 
       <h3 className="changes__title">Per-tab settings</h3>
       <p className="settings__hint">
-        Model, effort, mode, and permissions are set per tab, in the toolbar
-        under the message box. Verbose and provider are in the tab header.
+        Model, effort, mode, and permissions are set per tab, in the toolbar under the
+        message box. Verbose and provider are in the tab header.
       </p>
     </aside>
   );

@@ -1,6 +1,6 @@
+import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import type { AgentGateway } from "../ports/agentGateway";
 
 /**
  * Use case (shared step) — pre-start a tab's agent session with its
@@ -12,7 +12,9 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
   const tab = tabById(store.getState(), tabId);
   if (!tab) return;
   const { provider, path, model, effort } = tab.project;
-  void agentGateway.warmSession(tabId, provider, path, model, effort).catch(() => undefined);
+  void agentGateway
+    .warmSession(tabId, provider, path, model, effort)
+    .catch(() => undefined);
 }
 
 /** Warm every open tab (app start). */

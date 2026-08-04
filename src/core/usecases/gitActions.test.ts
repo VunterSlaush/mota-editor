@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { Store } from "../state/store";
 import { newProject } from "../entities/project";
 import type { GitBranch, GitChange, GitCommit, GitPort } from "../ports/gitPort";
+import { Store } from "../state/store";
 import { GitActions } from "./gitActions";
 import { LoadGitChanges } from "./loadGitChanges";
 

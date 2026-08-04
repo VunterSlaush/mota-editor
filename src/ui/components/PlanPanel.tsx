@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { Check, CheckSquare, ClipboardText, Square, X } from "@phosphor-icons/react";
+import { useState } from "react";
 import type { PlanEntry } from "../../core/entities/plan";
 import { planTitle, planToMarkdown } from "../../core/entities/plan";
 import { Markdown } from "./MarkdownLite";
@@ -21,11 +21,15 @@ export function PlanBar({
 }) {
   if (plan.length === 0 && !planMarkdown) return null;
   const done = plan.filter((e) => e.status === "completed").length;
-  const title =
-    plan.length > 0 ? planTitle(plan) : markdownTitle(planMarkdown ?? "");
+  const title = plan.length > 0 ? planTitle(plan) : markdownTitle(planMarkdown ?? "");
 
   return (
-    <button className="plan-bar" onClick={onOpen} title="View the full plan">
+    <button
+      type="button"
+      className="plan-bar"
+      onClick={onOpen}
+      title="View the full plan"
+    >
       <ClipboardText className="plan-bar__icon" />
       <span className="plan-bar__title">{title}</span>
       {plan.length > 0 && (
@@ -77,7 +81,7 @@ export function PlanSidePanel({
           <ClipboardText /> Plan
         </h3>
         <div className="plan-side__actions">
-          <button className="changes__action" onClick={copyMarkdown}>
+          <button type="button" className="changes__action" onClick={copyMarkdown}>
             {copied ? (
               <>
                 <Check /> Copied
@@ -86,7 +90,12 @@ export function PlanSidePanel({
               "Copy"
             )}
           </button>
-          <button className="icon-button" aria-label="Close plan" onClick={onClose}>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close plan"
+            onClick={onClose}
+          >
             <X />
           </button>
         </div>
@@ -96,6 +105,7 @@ export function PlanSidePanel({
           <ul className="plan-viewer__list">
             {plan.map((entry, index) => (
               <li
+                // biome-ignore lint/suspicious/noArrayIndexKey: a PlanEntry has no id and the plan is replaced wholesale, so position is the only identity
                 key={index}
                 className={`plan-viewer__item plan-viewer__item--${entry.status}`}
               >
@@ -113,7 +123,9 @@ export function PlanSidePanel({
                   </span>
                 )}
                 {entry.priority === "high" && (
-                  <span className="plan-viewer__badge plan-viewer__badge--high">high</span>
+                  <span className="plan-viewer__badge plan-viewer__badge--high">
+                    high
+                  </span>
                 )}
               </li>
             ))}
@@ -122,8 +134,8 @@ export function PlanSidePanel({
           <Markdown text={planMarkdown} />
         ) : (
           <p className="plan-viewer__empty">
-            No plan yet — the agent publishes one when it breaks a task into
-            steps (plan mode, or any multi-step task).
+            No plan yet — the agent publishes one when it breaks a task into steps (plan
+            mode, or any multi-step task).
           </p>
         )}
       </div>

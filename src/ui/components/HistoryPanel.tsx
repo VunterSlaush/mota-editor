@@ -23,7 +23,12 @@ export function HistoryPanel({
 }: Props) {
   return (
     <aside className="history">
-      <button className="changes__action" disabled={busy} onClick={onNewChat}>
+      <button
+        type="button"
+        className="changes__action"
+        disabled={busy}
+        onClick={onNewChat}
+      >
         + New chat
       </button>
       {native && sessions.length > 0 && (
@@ -50,6 +55,7 @@ export function HistoryPanel({
               <span className="history__provider">{session.provider}</span>
               {!native && (
                 <button
+                  type="button"
                   className="history__delete"
                   title="Delete this session"
                   aria-label="Delete session"

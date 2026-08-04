@@ -1,9 +1,9 @@
 import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
 import { projectNameFromPath } from "../entities/project";
-import type { Store } from "../state/store";
-import type { TabState } from "../state/appState";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { WorkspaceStore } from "../ports/workspacePort";
+import type { TabState } from "../state/appState";
+import type { Store } from "../state/store";
 import { warmAllTabs } from "./warmSessions";
 
 /**
