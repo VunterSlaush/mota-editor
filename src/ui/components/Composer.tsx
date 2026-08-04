@@ -1,7 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowUp, ClipboardText, Paperclip, Plus, Stop, X } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowUp,
+  Bug,
+  ClipboardText,
+  Gauge,
+  Lightning,
+  Paperclip,
+  Plus,
+  Robot,
+  ShieldCheck,
+  Stop,
+  X,
+} from "@phosphor-icons/react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
+import { OptionPicker, type PickerOption } from "./OptionPicker";
 import { filterCommands, type CommandInfo } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
@@ -14,6 +27,30 @@ import { ModelPicker } from "./ModelPicker";
 /** The input grows with the text up to this many lines, then scrolls. */
 const MAX_INPUT_LINES = 4;
 const LINE_HEIGHT_PX = 22;
+
+/**
+ * Icons for the core's mode and permission descriptors. They live here,
+ * not beside the descriptors: the entities layer knows nothing of icons.
+ */
+const MODE_ICONS: Record<AgentMode, ReactNode> = {
+  agent: <Robot />,
+  plan: <ClipboardText />,
+  debug: <Bug />,
+};
+
+const PERMISSION_ICONS: Record<PermissionPolicy, ReactNode> = {
+  manual: <ShieldCheck />,
+  bypass: <Lightning />,
+};
+
+const MODE_OPTIONS: readonly PickerOption<AgentMode>[] = MODES.map((mode) => ({
+  ...mode,
+  icon: MODE_ICONS[mode.id],
+}));
+
+const PERMISSION_OPTIONS: readonly PickerOption<PermissionPolicy>[] = PERMISSIONS.map(
+  (permission) => ({ ...permission, icon: PERMISSION_ICONS[permission.id] }),
+);
 
 interface Props {
   busy: boolean;
@@ -74,6 +111,11 @@ export function Composer({
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const effortOptions = EFFORT_OPTIONS[provider];
+  // The empty id is the provider's own default — the way back from a choice.
+  const effortPickerOptions: readonly PickerOption<string>[] = [
+    { id: "", label: "Default effort", icon: <Gauge /> },
+    ...effortOptions.map((level) => ({ id: level, label: level, icon: <Gauge /> })),
+  ];
   const paletteCommands = paletteVisible() ? filterCommands(commands, draft) : [];
 
   function paletteVisible(): boolean {
@@ -220,34 +262,20 @@ export function Composer({
             >
               <ClipboardText />
             </button>
-            <select
-              className="chip-select"
+            <OptionPicker
+              ariaLabel="Agent mode"
+              options={MODE_OPTIONS}
               value={mode}
               disabled={busy}
-              aria-label="Agent mode"
-              title={MODES.find((m) => m.id === mode)?.description}
-              onChange={(e) => onSelectMode(e.target.value as AgentMode)}
-            >
-              {MODES.map((m) => (
-                <option key={m.id} value={m.id} title={m.description}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <select
-              className="chip-select"
+              onChange={onSelectMode}
+            />
+            <OptionPicker
+              ariaLabel="Permissions"
+              options={PERMISSION_OPTIONS}
               value={permission}
               disabled={busy}
-              aria-label="Permissions"
-              title={PERMISSIONS.find((p) => p.id === permission)?.description}
-              onChange={(e) => onSelectPermission(e.target.value as PermissionPolicy)}
-            >
-              {PERMISSIONS.map((p) => (
-                <option key={p.id} value={p.id} title={p.description}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+              onChange={onSelectPermission}
+            />
           </div>
           <div className="composer-card__group">
             <ContextGauge usage={usage} threshold={AUTO_COMPACT_THRESHOLD} />
@@ -258,21 +286,15 @@ export function Composer({
               onChange={onSelectModel}
             />
             {effortOptions.length > 0 && (
-              <select
-                className="chip-select chip-select--dim"
+              <OptionPicker
+                ariaLabel="Reasoning effort"
+                options={effortPickerOptions}
                 value={effort}
                 disabled={busy}
-                aria-label="Reasoning effort"
-                title="Reasoning effort — applies on the next message"
-                onChange={(e) => onSelectEffort(e.target.value)}
-              >
-                <option value="">effort</option>
-                {effortOptions.map((level) => (
-                  <option key={level} value={level}>
-                    {level}
-                  </option>
-                ))}
-              </select>
+                placeholder="effort"
+                className="picker__trigger--dim"
+                onChange={onSelectEffort}
+              />
             )}
             {busy ? (
               <button

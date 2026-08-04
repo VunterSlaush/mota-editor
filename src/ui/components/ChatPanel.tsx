@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { TabState } from "../../core/state/appState";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import type { CommandInfo } from "../../core/entities/command";
+import { countFileChangingTools } from "../../core/entities/tool";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
@@ -16,6 +17,10 @@ import { MessageList } from "./MessageList";
 import { PlanBar, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
 import { SettingsPanel } from "./SettingsPanel";
+import { useDragWidth } from "../useDragWidth";
+
+/** A burst of agent edits should cost one `git status`, not twenty. */
+const GIT_RELOAD_DEBOUNCE_MS = 400;
 
 interface Props {
   tab: TabState;
@@ -84,27 +89,18 @@ export function ChatPanel({
   const [changes, setChanges] = useState<GitChanges | null>(null);
   const [changesRefreshKey, setChangesRefreshKey] = useState(0);
   const [history, setHistory] = useState<HistoryListing>({ native: false, sessions: [] });
-  const [panelWidth, setPanelWidth] = useState(270);
+  const sidebar = useDragWidth(270, 180, 520);
+  const planPanel = useDragWidth(420, 280, 760, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
 
-  const startResize = (e: React.PointerEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = panelWidth;
-    const onMove = (move: PointerEvent) => {
-      const next = startWidth + (move.clientX - startX);
-      setPanelWidth(Math.min(520, Math.max(180, next)));
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  };
+  // Bumps every time the agent runs a tool that could touch the tree.
+  const fileChangingTools = useMemo(
+    () => countFileChangingTools(tab.messages),
+    [tab.messages],
+  );
 
   // The running agent's own command list is the source of truth; the
   // static + discovered set covers the time before a session starts.
@@ -123,19 +119,24 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.project.provider, tab.project.id]);
 
-  // Refresh the git view when a turn finishes or an action requests it —
-  // loaded even with the panel closed, so the header branch stays live.
+  // Reload git whenever the working tree may have moved: a turn starting
+  // or ending, the running agent touching files, or the user asking.
+  // Reading git is safe mid-turn, so this stays live while the agent
+  // works. Debounced, so a burst of edits costs one `git status`.
+  // Loaded even with the panel closed, so the header branch stays live.
   useEffect(() => {
-    if (tab.busy) return;
     let cancelled = false;
-    loadGitChanges().then((loaded) => {
-      if (!cancelled) setChanges(loaded);
-    });
+    const timer = setTimeout(() => {
+      loadGitChanges().then((loaded) => {
+        if (!cancelled) setChanges(loaded);
+      });
+    }, GIT_RELOAD_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.busy, tab.project.id, changesRefreshKey]);
+  }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
 
   // Refresh the session list when the history view is open and the tab
   // is idle (a finished turn may have added or updated a session).
@@ -186,7 +187,7 @@ export function ChatPanel({
         <ActivityBar active={sidebarView} onSelect={onSelectSidebarView} />
         {sidebarView && (
           <>
-            <div style={{ width: panelWidth }} className="changes-container">
+            <div style={{ width: sidebar.width }} className="changes-container">
               {sidebarView === "changes" && (
                 <ChangesPanel
                   changes={changes}
@@ -230,7 +231,7 @@ export function ChatPanel({
               role="separator"
               aria-orientation="vertical"
               title="Drag to resize"
-              onPointerDown={startResize}
+              onPointerDown={sidebar.startResize}
             />
           </>
         )}
@@ -271,11 +272,21 @@ export function ChatPanel({
           />
         </div>
         {planOpen && (
-          <PlanSidePanel
-            plan={tab.plan}
-            planMarkdown={tab.planMarkdown}
-            onClose={() => setPlanOpen(false)}
-          />
+          <>
+            <div
+              className="panel-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              title="Drag to resize"
+              onPointerDown={planPanel.startResize}
+            />
+            <PlanSidePanel
+              plan={tab.plan}
+              planMarkdown={tab.planMarkdown}
+              width={planPanel.width}
+              onClose={() => setPlanOpen(false)}
+            />
+          </>
         )}
       </div>
       {branchPickerOpen && changes && (

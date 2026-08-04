@@ -54,10 +54,13 @@ function markdownTitle(markdown: string): string {
 export function PlanSidePanel({
   plan,
   planMarkdown,
+  width,
   onClose,
 }: {
   plan: readonly PlanEntry[];
   planMarkdown?: string;
+  /** Set by the drag handle on the panel's left edge. */
+  width: number;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -68,7 +71,7 @@ export function PlanSidePanel({
   };
 
   return (
-    <aside className="plan-side" aria-label="Plan">
+    <aside className="plan-side" style={{ width }} aria-label="Plan">
       <div className="plan-side__header">
         <h3 className="plan-side__heading">
           <ClipboardText /> Plan

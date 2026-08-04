@@ -1,4 +1,5 @@
 import { PROVIDERS, type ProviderId } from "../../core/entities/provider";
+import { OptionPicker, type PickerOption } from "./OptionPicker";
 
 interface Props {
   value: ProviderId;
@@ -6,21 +7,22 @@ interface Props {
   onChange: (provider: ProviderId) => void;
 }
 
+const OPTIONS: readonly PickerOption<ProviderId>[] = PROVIDERS.map((provider) => ({
+  id: provider.id,
+  label: provider.displayName,
+  description: provider.vendor,
+}));
+
 /** UI — choose which AI agent answers in this project tab. */
 export function ProviderPicker({ value, disabled, onChange }: Props) {
   return (
-    <select
-      className="provider-picker"
+    <OptionPicker
+      ariaLabel="AI provider"
+      options={OPTIONS}
       value={value}
       disabled={disabled}
-      onChange={(e) => onChange(e.target.value as ProviderId)}
-      aria-label="AI provider"
-    >
-      {PROVIDERS.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.displayName}
-        </option>
-      ))}
-    </select>
+      placement="bottom"
+      onChange={onChange}
+    />
   );
 }

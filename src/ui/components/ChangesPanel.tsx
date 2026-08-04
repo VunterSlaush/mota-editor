@@ -56,10 +56,14 @@ export function ChangesPanel({
     return result;
   };
 
-  const disabled = busy || working;
+  // Reading git is safe while the agent works; moving the index under it
+  // is not. Only the refresh stays live.
+  const mutationsDisabled = busy || working;
   const currentBranch = changes?.branches.find((b) => b.current)?.name ?? "";
   const canCommit =
-    !disabled && (changes?.staged.length ?? 0) > 0 && commitMessage.trim() !== "";
+    !mutationsDisabled &&
+    (changes?.staged.length ?? 0) > 0 &&
+    commitMessage.trim() !== "";
 
   const commitPush = async () => {
     const result = await run(() => onCommitPush(commitMessage));
@@ -71,7 +75,7 @@ export function ChangesPanel({
       {changes && changes.branches.length > 0 && (
         <button
           className="changes__branch"
-          disabled={disabled}
+          disabled={mutationsDisabled}
           title="Checkout a branch"
           onClick={onOpenBranchPicker}
         >
@@ -81,19 +85,32 @@ export function ChangesPanel({
         </button>
       )}
       <div className="changes__actions">
-        <button className="changes__action" disabled={disabled} onClick={() => void run(onPull)}>
+        <button
+          className="changes__action"
+          disabled={mutationsDisabled}
+          onClick={() => void run(onPull)}
+        >
           <ArrowLineDown /> Pull
         </button>
-        <button className="changes__action" disabled={disabled} onClick={() => void run(onPush)}>
+        <button
+          className="changes__action"
+          disabled={mutationsDisabled}
+          onClick={() => void run(onPush)}
+        >
           <ArrowLineUp /> Push
         </button>
         <button
           className="changes__action changes__action--icon"
-          disabled={disabled}
-          title="Refresh"
+          disabled={working}
+          aria-label="Refresh git status"
+          title={
+            busy
+              ? "Watching the agent's changes live — click to refresh now"
+              : "Refresh"
+          }
           onClick={onRefresh}
         >
-          <ArrowClockwise />
+          <ArrowClockwise className={busy ? "changes__watching" : undefined} />
         </button>
       </div>
 
@@ -102,7 +119,7 @@ export function ChangesPanel({
           className="changes__commit-message"
           value={commitMessage}
           placeholder="Commit message"
-          disabled={disabled}
+          disabled={mutationsDisabled}
           onChange={(e) => setCommitMessage(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && canCommit) void commitPush();
@@ -136,7 +153,7 @@ export function ChangesPanel({
             files={changes.staged}
             ActionIcon={Minus}
             actionTitle="Unstage"
-            disabled={disabled}
+            disabled={mutationsDisabled}
             onAction={(path) => void run(() => onUnstage(path))}
           />
           <ChangeGroup
@@ -144,7 +161,7 @@ export function ChangesPanel({
             files={changes.unstaged}
             ActionIcon={Plus}
             actionTitle="Stage"
-            disabled={disabled}
+            disabled={mutationsDisabled}
             onAction={(path) => void run(() => onStage(path))}
           />
           {changes.commits.length > 0 && (

@@ -534,13 +534,13 @@ body {
 }
 
 /* ---- Plan side panel (right of the chat) ---- */
+/* Width is driven by the drag handle on its left edge (useDragWidth). */
 .plan-side {
   flex: none;
-  width: 380px;
-  max-width: 45%;
+  min-width: 280px;
+  max-width: 760px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border);
   background: var(--bg-raised);
   min-height: 0;
 }
@@ -1051,6 +1051,18 @@ body {
   width: 32px;
 }
 
+/* Turns slowly while the agent works, to say "this view is live". */
+.changes__watching {
+  animation: changes-watching 2.4s linear infinite;
+  color: var(--accent);
+}
+
+@keyframes changes-watching {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .changes__action:hover:not(:disabled) {
   border-color: var(--accent);
 }
@@ -1517,32 +1529,128 @@ body {
   cursor: default;
 }
 
-.chip-select {
-  appearance: none;
+/* ---- Option picker (themed replacement for native <select>) ---- */
+.picker {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 190px;
   border: none;
   background: transparent;
   color: var(--text-dim);
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
-  padding: 5px 6px;
+  padding: 5px 8px;
   border-radius: 8px;
-  max-width: 170px;
-  text-overflow: ellipsis;
 }
 
-.chip-select:hover:not(:disabled) {
+.picker__trigger:hover:not(:disabled),
+.picker--open .picker__trigger {
   background: var(--border);
   color: var(--text);
 }
 
-.chip-select:disabled {
+.picker__trigger:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.chip-select--dim {
+.picker__trigger--dim {
   color: var(--text-dim);
+}
+
+.picker__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__caret {
+  flex: none;
+  opacity: 0.7;
+}
+
+.picker__panel {
+  position: absolute;
+  z-index: 20;
+  min-width: 240px;
+  max-width: 340px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+/* Opens upward for the composer, which sits at the bottom of the window. */
+.picker__panel--top {
+  bottom: calc(100% + 6px);
+  left: 0;
+}
+
+.picker__panel--bottom {
+  top: calc(100% + 6px);
+  right: 0;
+}
+
+.picker__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.picker__option--highlighted {
+  background: var(--bg-input);
+}
+
+.picker__option-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 1.35em;
+  color: var(--text-dim);
+}
+
+.picker__option--highlighted .picker__option-icon {
+  color: var(--accent);
+}
+
+.picker__option-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.picker__option-label {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.picker__option-description {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.picker__option-check {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
 }
 
 .composer-card .model-picker {
