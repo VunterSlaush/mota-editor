@@ -26,11 +26,19 @@ const GIT_RELOAD_DEBOUNCE_MS = 400;
 const EMPTY_ATTACHMENTS: readonly string[] = [];
 
 /** The file whose diff the modal is showing, and which side of it. */
-interface DiffTarget {
-  readonly path: string;
-  readonly staged: boolean;
-  readonly untracked: boolean;
-}
+type DiffTarget =
+  | {
+      readonly kind: "git";
+      readonly path: string;
+      readonly staged: boolean;
+      readonly untracked: boolean;
+    }
+  | {
+      readonly kind: "agent";
+      readonly path: string;
+      readonly oldText?: string;
+      readonly newText: string;
+    };
 
 interface Props {
   tab: TabState;
@@ -124,6 +132,15 @@ export function ChatPanel({
 
   // Reaches memoized transcript rows — must not be a fresh arrow per render.
   const showPlan = useCallback(() => setPlanOpen(true), []);
+  const showAgentDiff = useCallback(
+    (diff: { path: string; oldText?: string; newText: string }) =>
+      setDiffTarget({ kind: "agent", ...diff }),
+    [],
+  );
+  const openTouchedFile = useCallback(
+    (path: string) => void onOpenFile(path),
+    [onOpenFile],
+  );
 
   // Bumps every time the agent runs a tool that could touch the tree.
   // Keyed on length, not the array: deltas replace the array per token
@@ -251,6 +268,7 @@ export function ChatPanel({
                   onOpenFile={onOpenFile}
                   onShowDiff={(file, staged) =>
                     setDiffTarget({
+                      kind: "git",
                       path: file.path,
                       staged,
                       untracked: file.label === "untracked",
@@ -296,6 +314,8 @@ export function ChatPanel({
             turnStartedAt={tab.turnStartedAt}
             sessionStage={tab.sessionStage}
             onRetry={onRetry}
+            onOpenFile={openTouchedFile}
+            onShowAgentDiff={showAgentDiff}
             commands={commandNameSet}
             verbose={tab.project.verbose}
             onRespondPermission={onRespondPermission}
@@ -346,10 +366,26 @@ export function ChatPanel({
       </div>
       {diffTarget && (
         <DiffModal
-          key={`${diffTarget.path}:${diffTarget.staged}`}
+          key={
+            diffTarget.kind === "git"
+              ? `git:${diffTarget.path}:${diffTarget.staged}`
+              : `agent:${diffTarget.path}`
+          }
           path={diffTarget.path}
-          staged={diffTarget.staged}
-          load={() => onGitDiff(diffTarget.path, diffTarget.staged, diffTarget.untracked)}
+          source={
+            diffTarget.kind === "git"
+              ? {
+                  kind: "git",
+                  staged: diffTarget.staged,
+                  load: () =>
+                    onGitDiff(diffTarget.path, diffTarget.staged, diffTarget.untracked),
+                }
+              : {
+                  kind: "agent",
+                  oldText: diffTarget.oldText,
+                  newText: diffTarget.newText,
+                }
+          }
           onClose={() => setDiffTarget(null)}
         />
       )}

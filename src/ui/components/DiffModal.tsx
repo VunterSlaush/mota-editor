@@ -1,19 +1,29 @@
 import { X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   countChanges,
   type DiffLine,
   parseUnifiedDiff,
   toSideBySide,
 } from "../../core/entities/diff";
+import { diffTexts } from "../../core/entities/textDiff";
 import { fileName } from "../fileName";
+
+/** Where the diff comes from: git (loaded async) or the agent's own
+ *  reported edit (full old/new text, diffed locally). */
+export type DiffSource =
+  | {
+      readonly kind: "git";
+      /** True when showing the index side rather than the working tree. */
+      readonly staged: boolean;
+      /** Resolves with the unified diff, or rejects with git's message. */
+      readonly load: () => Promise<{ ok: boolean; message: string }>;
+    }
+  | { readonly kind: "agent"; readonly oldText?: string; readonly newText: string };
 
 interface Props {
   path: string;
-  /** True when showing the index side rather than the working tree. */
-  staged: boolean;
-  /** Resolves with the unified diff, or rejects with git's message. */
-  load: () => Promise<{ ok: boolean; message: string }>;
+  source: DiffSource;
   onClose: () => void;
 }
 
@@ -30,7 +40,7 @@ type Load =
 const MIN_WIDTH_PX = 480;
 const MIN_HEIGHT_PX = 240;
 
-export function DiffModal({ path, staged, load, onClose }: Props) {
+export function DiffModal({ path, source, onClose }: Props) {
   const [result, setResult] = useState<Load>({ state: "loading" });
   // A size the user dragged the modal to; null means the default layout.
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
@@ -69,9 +79,11 @@ export function DiffModal({ path, staged, load, onClose }: Props) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
+  const staged = source.kind === "git" && source.staged;
   useEffect(() => {
+    if (source.kind !== "git") return;
     let cancelled = false;
-    load().then((r) => {
+    source.load().then((r) => {
       if (cancelled) return;
       setResult(
         r.ok
@@ -86,7 +98,14 @@ export function DiffModal({ path, staged, load, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, staged]);
 
-  const hunks = result.state === "loaded" ? parseUnifiedDiff(result.text) : [];
+  const hunks = useMemo(() => {
+    if (source.kind === "agent") return diffTexts(source.oldText ?? "", source.newText);
+    return result.state === "loaded" ? parseUnifiedDiff(result.text) : [];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.kind, result]);
+  const loading = source.kind === "git" && result.state === "loading";
+  const failed = source.kind === "git" && result.state === "failed" ? result : null;
+  const empty = !loading && !failed && hunks.length === 0;
   const { added, removed } = countChanges(hunks);
 
   return (
@@ -103,8 +122,10 @@ export function DiffModal({ path, staged, load, onClose }: Props) {
         <header className="diff-modal__header">
           <span className="diff-modal__name">{fileName(path)}</span>
           <span className="diff-modal__path">{path}</span>
-          <span className="diff-modal__badge">{staged ? "staged" : "not staged"}</span>
-          {result.state === "loaded" && hunks.length > 0 && (
+          <span className="diff-modal__badge">
+            {source.kind === "agent" ? "agent edit" : staged ? "staged" : "not staged"}
+          </span>
+          {hunks.length > 0 && (
             <span className="diff-modal__stat">
               <span className="diff-modal__stat--add">+{added}</span>
               <span className="diff-modal__stat--remove">−{removed}</span>
@@ -121,13 +142,11 @@ export function DiffModal({ path, staged, load, onClose }: Props) {
         </header>
 
         <div className="diff-modal__body">
-          {result.state === "loading" && (
-            <p className="diff-modal__note">Loading diff…</p>
+          {loading && <p className="diff-modal__note">Loading diff…</p>}
+          {failed && (
+            <p className="diff-modal__note diff-modal__note--error">{failed.message}</p>
           )}
-          {result.state === "failed" && (
-            <p className="diff-modal__note diff-modal__note--error">{result.message}</p>
-          )}
-          {result.state === "loaded" && hunks.length === 0 && (
+          {empty && (
             <p className="diff-modal__note">
               No textual changes — the file may be binary, or only its mode changed.
             </p>

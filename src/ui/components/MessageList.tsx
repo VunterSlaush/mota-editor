@@ -1,6 +1,8 @@
 import {
   ArrowDown,
   ArrowUp,
+  CaretDown,
+  CaretUp,
   Check,
   CircleNotch,
   ClipboardText,
@@ -16,6 +18,7 @@ import { fileName } from "../fileName";
 import { CommandText } from "./CommandText";
 import { Markdown } from "./MarkdownLite";
 import { QuestionCard } from "./QuestionCard";
+import { type AgentDiff, ToolCallContentView } from "./ToolCallContentView";
 
 interface Props {
   messages: readonly ChatMessage[];
@@ -25,8 +28,13 @@ interface Props {
   turnStartedAt?: number;
   /** Session startup stage (installing|booting|creating|recovering). */
   sessionStage?: string;
-  /** Re-send the last prompt; offered on the trailing error bubble. */
+  /** Re-send the last prompt; offered on the trailing error bubble.
+   *  Stable identity — reaches memoized rows. */
   onRetry: () => void;
+  /** Open a file the agent touched. Stable identity. */
+  onOpenFile: (path: string) => void;
+  /** Show an agent-reported diff in the diff modal. Stable identity. */
+  onShowAgentDiff: (diff: AgentDiff) => void;
   /** Lowercased slash-command names, for highlighting in user messages.
    *  Must be a stable identity — it reaches memoized rows. */
   commands: ReadonlySet<string>;
@@ -56,6 +64,8 @@ export function MessageList({
   turnStartedAt,
   sessionStage,
   onRetry,
+  onOpenFile,
+  onShowAgentDiff,
   commands,
   verbose,
   onRespondPermission,
@@ -144,6 +154,8 @@ export function MessageList({
               onRetry={
                 !busy && m.role === "error" && m.id === last?.id ? onRetry : undefined
               }
+              onOpenFile={onOpenFile}
+              onShowAgentDiff={onShowAgentDiff}
               innerRef={m.id === askedMessage?.id ? promptRef : undefined}
             />
           ),
@@ -206,6 +218,13 @@ function mergeStatus(a?: RowStatus, b?: RowStatus): RowStatus | undefined {
  * only — the individual details are kept and listed inside the row
  * (exact duplicate details collapse to one line).
  */
+/** A tool row with reported output/locations is worth its own row —
+ *  collapsing it into a group would hide what it brought back. */
+function hasSubstance(message: ChatMessage): boolean {
+  const call = message.toolCall;
+  return Boolean(call && (call.content.length > 0 || call.locations.length > 0));
+}
+
 function groupToolRuns(messages: readonly ChatMessage[]): Row[] {
   const rows: Row[] = [];
   for (const message of messages) {
@@ -214,7 +233,9 @@ function groupToolRuns(messages: readonly ChatMessage[]): Row[] {
       prev &&
       message.role === "tool" &&
       prev.message.role === "tool" &&
-      prev.message.toolName === message.toolName
+      prev.message.toolName === message.toolName &&
+      !hasSubstance(message) &&
+      !hasSubstance(prev.message)
     ) {
       const lines = prev.detail.split("\n");
       const detail = lines.includes(message.text)
@@ -396,6 +417,8 @@ const MessageBubble = memo(function MessageBubble({
   commands,
   streaming,
   onRetry,
+  onOpenFile,
+  onShowAgentDiff,
   innerRef,
 }: {
   message: ChatMessage;
@@ -409,23 +432,54 @@ const MessageBubble = memo(function MessageBubble({
   streaming: boolean;
   /** Set only on the trailing error bubble while idle: offer a retry. */
   onRetry?: () => void;
+  /** Open a file the agent touched (tool rows). */
+  onOpenFile?: (path: string) => void;
+  /** Show an agent-reported diff (tool rows). */
+  onShowAgentDiff?: (diff: AgentDiff) => void;
   /** Set on the message the PinnedPrompt tracks, so it can be measured. */
   innerRef?: React.Ref<HTMLDivElement>;
 }) {
+  // Expansion is per-row UI state, not message state: collapsing again
+  // must not touch the transcript.
+  const [expanded, setExpanded] = useState(false);
   if (message.role === "tool") {
     const lines = (detail ?? message.text).split("\n");
+    const call = message.toolCall;
+    const expandable = Boolean(
+      call && (call.content.length > 0 || call.locations.length > 0),
+    );
     return (
       <div className={`msg msg--tool ${status ? `msg--tool-${status}` : ""}`}>
-        {status && <ToolStatusIcon status={status} />}
-        <span className="msg__tool-name">{message.toolName}</span>
-        <span className="msg__tool-details">
-          {lines.map((line) => (
-            <code key={line} className="msg__tool-detail">
-              {line}
-            </code>
-          ))}
-        </span>
-        {count > 1 && <span className="msg__tool-count">×{count}</span>}
+        <div className="msg__tool-row">
+          {status && <ToolStatusIcon status={status} />}
+          <span className="msg__tool-name">{message.toolName}</span>
+          <span className="msg__tool-details">
+            {lines.map((line) => (
+              <code key={line} className="msg__tool-detail">
+                {line}
+              </code>
+            ))}
+          </span>
+          {count > 1 && <span className="msg__tool-count">×{count}</span>}
+          {expandable && (
+            <button
+              type="button"
+              className="msg__tool-expand"
+              aria-expanded={expanded}
+              aria-label={expanded ? "Hide tool output" : "Show tool output"}
+              onClick={() => setExpanded((open) => !open)}
+            >
+              {expanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
+            </button>
+          )}
+        </div>
+        {expandable && expanded && call && onOpenFile && onShowAgentDiff && (
+          <ToolCallContentView
+            toolCall={call}
+            onOpenFile={onOpenFile}
+            onShowDiff={onShowAgentDiff}
+          />
+        )}
       </div>
     );
   }

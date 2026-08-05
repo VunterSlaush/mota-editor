@@ -478,8 +478,8 @@ body {
 .msg--tool {
   align-self: flex-start;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   font-size: 12px;
   color: var(--text-dim);
   background: transparent;
@@ -489,9 +489,120 @@ body {
   max-width: 90%;
 }
 
+.msg__tool-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .msg__tool-name {
   color: var(--tool);
   font-weight: 600;
+}
+
+.msg__tool-expand {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.msg__tool-expand:hover {
+  color: var(--text);
+  background: rgba(128, 128, 128, 0.15);
+}
+
+/* ---- Tool-call reported content (expanded rows, approval preview) ---- */
+.tool-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 4px 2px;
+}
+
+.tool-content__text {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.tool-content__diff {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tool-content__diff:hover {
+  border-color: var(--tool);
+}
+
+.tool-content__diff-name {
+  font-weight: 600;
+}
+
+.tool-content__stat--add {
+  color: var(--success, #4caf7d);
+}
+
+.tool-content__stat--remove {
+  color: var(--danger, #e5534b);
+}
+
+.tool-content__diff-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.tool-content__terminal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.tool-content__locations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-content__location {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tool-content__location:hover {
+  color: var(--text);
+  border-color: var(--tool);
 }
 
 .msg__tool-details {

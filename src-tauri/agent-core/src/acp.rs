@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use crate::event::{
     AgentEvent, AvailableCommand, PermissionOptionInfo, PlanEntry, QuestionInfo,
-    QuestionOptionInfo,
+    QuestionOptionInfo, ToolContent, ToolLocation,
 };
 use crate::provider::truncate;
 use crate::turn::{mode_preamble, Mode, TurnRequest};
@@ -748,23 +748,41 @@ fn translate_update(params: &Value) -> Vec<AgentEvent> {
                 .unwrap_or_default(),
         }],
         Some("tool_call") => match update.get("toolCallId").and_then(Value::as_str) {
-            Some(id) => vec![AgentEvent::ToolCall {
-                id: id.to_owned(),
-                kind: update
-                    .get("kind")
-                    .and_then(Value::as_str)
-                    .unwrap_or("other")
-                    .to_owned(),
-                title: truncate(
-                    update.get("title").and_then(Value::as_str).unwrap_or_default(),
-                    200,
-                ),
-                status: update
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .unwrap_or("pending")
-                    .to_owned(),
-            }],
+            Some(id) => {
+                let mut events = vec![AgentEvent::ToolCall {
+                    id: id.to_owned(),
+                    kind: update
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or("other")
+                        .to_owned(),
+                    title: truncate(
+                        update.get("title").and_then(Value::as_str).unwrap_or_default(),
+                        200,
+                    ),
+                    status: update
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("pending")
+                        .to_owned(),
+                }];
+                // An initial tool_call may already carry content and
+                // locations; the ToolCall variant deliberately doesn't
+                // (identity vs. payload), so they follow as a synthetic
+                // update in the same batch.
+                let content = parse_tool_content(update);
+                let locations = parse_tool_locations(update);
+                if !content.is_empty() || !locations.is_empty() {
+                    events.push(AgentEvent::ToolCallUpdate {
+                        id: id.to_owned(),
+                        status: None,
+                        title: None,
+                        content,
+                        locations,
+                    });
+                }
+                events
+            }
             // No id means no way to correlate updates: degrade to the
             // legacy flat row rather than dropping the activity.
             None => vec![AgentEvent::ToolUse {
@@ -793,8 +811,8 @@ fn translate_update(params: &Value) -> Vec<AgentEvent> {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|t| truncate(t, 200)),
-                    content: Vec::new(),
-                    locations: Vec::new(),
+                    content: parse_tool_content(update),
+                    locations: parse_tool_locations(update),
                 }]
             })
             .unwrap_or_default(),
@@ -859,10 +877,92 @@ fn parse_command(value: &Value) -> Option<AvailableCommand> {
 
 fn text_of(update: &Value) -> Option<String> {
     let content = update.get("content")?;
+    text_or_placeholder(content)
+}
+
+/// The text of one content block — or a placeholder for media the app
+/// cannot render. A silently swallowed image reads as the agent saying
+/// nothing; "[image]" at least says something arrived.
+fn text_or_placeholder(content: &Value) -> Option<String> {
     match content.get("type").and_then(Value::as_str)? {
         "text" => content.get("text").and_then(Value::as_str).map(str::to_owned),
+        "image" => Some("[image]".to_owned()),
+        "audio" => Some("[audio]".to_owned()),
+        "resource_link" => {
+            let name = content
+                .get("name")
+                .or_else(|| content.get("uri"))
+                .and_then(Value::as_str)
+                .unwrap_or("resource");
+            Some(format!("[link: {name}]"))
+        }
+        "resource" => content
+            .pointer("/resource/text")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| {
+                let uri = content
+                    .pointer("/resource/uri")
+                    .and_then(Value::as_str)
+                    .unwrap_or("resource");
+                Some(format!("[resource: {uri}]"))
+            }),
         _ => None,
     }
+}
+
+/// Tool output can be enormous (a whole test run); the chat row carries
+/// this much and the rest is the log's problem.
+const TOOL_TEXT_CAP: usize = 4000;
+
+/// Content blocks reported on a `tool_call` / `tool_call_update`.
+fn parse_tool_content(update: &Value) -> Vec<ToolContent> {
+    update
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(parse_tool_content_item).collect())
+        .unwrap_or_default()
+}
+
+fn parse_tool_content_item(item: &Value) -> Option<ToolContent> {
+    match item.get("type").and_then(Value::as_str)? {
+        // A regular content block wrapped for a tool call.
+        "content" => {
+            let text = text_or_placeholder(item.get("content")?)?;
+            Some(ToolContent::Text { text: truncate(&text, TOOL_TEXT_CAP) })
+        }
+        "diff" => Some(ToolContent::Diff {
+            path: item.get("path").and_then(Value::as_str)?.to_owned(),
+            old_text: item.get("oldText").and_then(Value::as_str).map(str::to_owned),
+            new_text: item.get("newText").and_then(Value::as_str)?.to_owned(),
+        }),
+        "terminal" => Some(ToolContent::Terminal {
+            terminal_id: item.get("terminalId").and_then(Value::as_str)?.to_owned(),
+        }),
+        _ => None,
+    }
+}
+
+/// Files (and lines) a tool call reported touching.
+fn parse_tool_locations(update: &Value) -> Vec<ToolLocation> {
+    update
+        .get("locations")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(ToolLocation {
+                        path: item.get("path").and_then(Value::as_str)?.to_owned(),
+                        line: item
+                            .get("line")
+                            .and_then(Value::as_u64)
+                            .and_then(|line| u32::try_from(line).ok()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Map a `session/prompt` result to the turn-completion event.
@@ -1356,6 +1456,108 @@ mod tests {
             "update":{"sessionUpdate":"tool_call_update","status":"completed"}}}"#
             .replace('\n', "");
         assert_eq!(parse_incoming(&anonymous), Some(Incoming::Updates(vec![])));
+    }
+
+    #[test]
+    fn tool_call_updates_carry_content_and_locations() {
+        let line = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed",
+            "content":[
+                {"type":"content","content":{"type":"text","text":"42 passed"}},
+                {"type":"diff","path":"/w/a.ts","oldText":"old","newText":"new"},
+                {"type":"terminal","terminalId":"term-1"}
+            ],
+            "locations":[{"path":"/w/a.ts","line":3},{"path":"/w/b.ts"}]}}}"#
+            .replace('\n', "");
+        match parse_incoming(&line) {
+            Some(Incoming::Updates(events)) => match &events[0] {
+                AgentEvent::ToolCallUpdate { content, locations, status, .. } => {
+                    assert_eq!(status.as_deref(), Some("completed"));
+                    assert_eq!(
+                        content[0],
+                        ToolContent::Text { text: "42 passed".into() }
+                    );
+                    assert_eq!(
+                        content[1],
+                        ToolContent::Diff {
+                            path: "/w/a.ts".into(),
+                            old_text: Some("old".into()),
+                            new_text: "new".into(),
+                        }
+                    );
+                    assert_eq!(
+                        content[2],
+                        ToolContent::Terminal { terminal_id: "term-1".into() }
+                    );
+                    assert_eq!(
+                        locations[0],
+                        ToolLocation { path: "/w/a.ts".into(), line: Some(3) }
+                    );
+                    assert_eq!(
+                        locations[1],
+                        ToolLocation { path: "/w/b.ts".into(), line: None }
+                    );
+                }
+                other => panic!("unexpected: {other:?}"),
+            },
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn initial_tool_calls_with_content_also_emit_a_synthetic_update() {
+        let line = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"tool_call","toolCallId":"c1","title":"Edit a.ts","kind":"edit",
+            "content":[{"type":"diff","path":"/w/a.ts","newText":"created"}]}}}"#
+            .replace('\n', "");
+        match parse_incoming(&line) {
+            Some(Incoming::Updates(events)) => {
+                assert_eq!(events.len(), 2);
+                assert!(matches!(events[0], AgentEvent::ToolCall { .. }));
+                match &events[1] {
+                    AgentEvent::ToolCallUpdate { content, .. } => {
+                        // oldText absent = newly created file.
+                        assert_eq!(
+                            content[0],
+                            ToolContent::Diff {
+                                path: "/w/a.ts".into(),
+                                old_text: None,
+                                new_text: "created".into(),
+                            }
+                        );
+                    }
+                    other => panic!("unexpected: {other:?}"),
+                }
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_text_chunks_become_placeholders_not_silence() {
+        let image = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"image","data":"...","mimeType":"image/png"}}}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&image),
+            Some(Incoming::Updates(vec![AgentEvent::AssistantDelta {
+                text: "[image]".into()
+            }]))
+        );
+        let link = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"resource_link","name":"spec.md","uri":"file:///w/spec.md"}}}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&link),
+            Some(Incoming::Updates(vec![AgentEvent::AssistantDelta {
+                text: "[link: spec.md]".into()
+            }]))
+        );
+        // Truly unknown block types still drop.
+        let unknown = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"hologram"}}}}"#
+            .replace('\n', "");
+        assert_eq!(parse_incoming(&unknown), Some(Incoming::Updates(vec![])));
     }
 
     #[test]
