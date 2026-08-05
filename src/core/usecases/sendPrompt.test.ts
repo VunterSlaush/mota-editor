@@ -11,8 +11,11 @@ import type {
   TranscriptStore,
 } from "../ports/transcriptStore";
 import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
+import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
+import { ApplyCommandConfig } from "./applyCommandConfig";
 import { SendPrompt } from "./sendPrompt";
+import { SelectEffort, SelectMode, SelectPermission } from "./switchTab";
 
 /** Test double — a scripted agent, per the case study's in-memory gateways. */
 class FakeAgentGateway implements AgentGateway {
@@ -86,7 +89,7 @@ function setup(script: AgentTurnEvent[] = []) {
   const store = new Store();
   store.dispatch({
     type: "tab/opened",
-    project: newProject("t1", "/work/alpha", "claude"),
+    project: newProject("t1", "/work/alpha", DEFAULTS),
   });
   const gateway = new FakeAgentGateway();
   gateway.script = script;
@@ -94,16 +97,105 @@ function setup(script: AgentTurnEvent[] = []) {
   const transcripts = new FakeTranscriptStore();
   const notifications = new FakeNotifications();
   let counter = 0;
+  const applyCommandConfig = new ApplyCommandConfig(
+    store,
+    new SelectMode(store, workspace),
+    new SelectPermission(store, workspace),
+    new SelectEffort(store, workspace, gateway),
+  );
   const useCase = new SendPrompt(
     store,
     gateway,
     workspace,
     transcripts,
     notifications,
+    applyCommandConfig,
     () => `s${++counter}`,
   );
   return { store, gateway, workspace, transcripts, notifications, useCase };
 }
+
+const DEFAULTS = projectDefaults(defaultSettings);
+
+describe("SendPrompt with MCP servers", () => {
+  it("hands the agent the servers switched on for its provider", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        mcpServers: [
+          {
+            id: "s1",
+            name: "files",
+            command: "npx",
+            args: ["-y", "server-filesystem"],
+            env: {},
+            enabledFor: ["claude"],
+          },
+          {
+            id: "s2",
+            name: "search",
+            command: "npx",
+            args: [],
+            env: {},
+            enabledFor: ["gemini"],
+          },
+        ],
+      },
+    });
+
+    await useCase.execute("t1", "Hello");
+
+    expect(gateway.requests[0].mcpServers?.map((s) => s.name)).toEqual(["files"]);
+  });
+});
+
+describe("SendPrompt with per-command settings", () => {
+  it("sends the turn under the settings the command carries", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        commandConfigs: {
+          "claude:/review": { mode: "plan", permission: "bypass", effort: "high" },
+        },
+      },
+    });
+
+    await useCase.execute("t1", "/review the diff");
+
+    // The REQUEST must carry them, not just the store: a turn built from
+    // the pre-command tab would run under the old settings.
+    expect(gateway.requests[0].mode).toBe("plan");
+    expect(gateway.requests[0].permission).toBe("bypass");
+    expect(gateway.requests[0].effort).toBe("high");
+  });
+
+  it("leaves the tab configured that way afterwards", async () => {
+    const { store, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandConfigs: { "claude:/review": { mode: "plan" } } },
+    });
+
+    await useCase.execute("t1", "/review");
+
+    expect(store.getState().tabs[0].project.mode).toBe("plan");
+  });
+
+  it("leaves an unconfigured prompt alone", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandConfigs: { "claude:/review": { mode: "plan" } } },
+    });
+
+    await useCase.execute("t1", "what does /review do?");
+
+    expect(gateway.requests[0].mode).toBe("agent");
+    expect(store.getState().tabs[0].project.mode).toBe("agent");
+  });
+});
 
 describe("SendPrompt", () => {
   it("appends the user message and the assistant reply", async () => {
@@ -328,7 +420,7 @@ describe("SendPrompt", () => {
     ]);
     store.dispatch({
       type: "tab/opened",
-      project: newProject("t2", "/work/beta", "claude"),
+      project: newProject("t2", "/work/beta", DEFAULTS),
     });
     // t2 is now active; run the turn in t1 (background).
 

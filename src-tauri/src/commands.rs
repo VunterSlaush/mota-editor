@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 use tokio::process::Child;
 
-use crate::acp_session::{self, AcpSessions, AcpStartError};
+use crate::acp_session::{self, AcpSessions, AcpStartError, SessionSpec};
 use crate::command_discovery;
 use crate::runner;
 use crate::workspace_file;
@@ -37,6 +37,8 @@ pub struct StartTurnArgs {
     pub model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
+    #[serde(default)]
+    pub mcp_servers: Vec<agent_core::acp::McpServer>,
 }
 
 #[tauri::command]
@@ -75,8 +77,15 @@ pub async fn start_turn(
     // Preferred transport: a persistent ACP session (interactive
     // approvals, streaming). Falls back to one-shot headless mode when
     // the provider's ACP agent isn't available on this machine.
-    match acp_session::start_turn(app.clone(), &acp, &args.tab_id, provider.id(), request.clone())
-        .await
+    match acp_session::start_turn(
+        app.clone(),
+        &acp,
+        &args.tab_id,
+        provider.id(),
+        request.clone(),
+        args.mcp_servers.clone(),
+    )
+    .await
     {
         Ok(()) => return Ok(()),
         Err(AcpStartError::Failed(message)) => return Err(message),
@@ -127,6 +136,21 @@ pub struct WarmSessionArgs {
     pub model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
+    #[serde(default)]
+    pub mcp_servers: Vec<agent_core::acp::McpServer>,
+}
+
+impl WarmSessionArgs {
+    /// Blank strings arrive from empty pickers; they mean "the provider's
+    /// own default", not a model literally called "".
+    fn spec(&self) -> SessionSpec {
+        SessionSpec {
+            project_path: self.project_path.clone(),
+            model: self.model.clone().filter(|m| !m.trim().is_empty()),
+            effort: self.effort.clone().filter(|e| !e.trim().is_empty()),
+            mcp_servers: self.mcp_servers.clone(),
+        }
+    }
 }
 
 /// Pre-start a tab's agent session in the background so the first
@@ -140,16 +164,7 @@ pub async fn warm_session(
     if !PathBuf::from(&args.project_path).is_dir() {
         return Ok(());
     }
-    acp_session::warm(
-        app,
-        &acp,
-        &args.tab_id,
-        &args.provider_id,
-        &args.project_path,
-        args.model.filter(|m| !m.trim().is_empty()),
-        args.effort.filter(|e| !e.trim().is_empty()),
-    )
-    .await;
+    acp_session::warm(app, &acp, &args.tab_id, &args.provider_id, &args.spec()).await;
     Ok(())
 }
 
@@ -160,16 +175,8 @@ pub async fn list_agent_sessions(
     acp: State<'_, AcpSessions>,
     args: WarmSessionArgs,
 ) -> Result<serde_json::Value, String> {
-    acp_session::list_native_sessions(
-        app,
-        &acp,
-        &args.tab_id,
-        &args.provider_id,
-        &args.project_path,
-        args.model.filter(|m| !m.trim().is_empty()),
-        args.effort.filter(|e| !e.trim().is_empty()),
-    )
-    .await
+    acp_session::list_native_sessions(app, &acp, &args.tab_id, &args.provider_id, &args.spec())
+        .await
 }
 
 #[derive(Deserialize)]
@@ -192,9 +199,7 @@ pub async fn load_agent_session(
         &acp,
         &args.warm.tab_id,
         &args.warm.provider_id,
-        &args.warm.project_path,
-        args.warm.model.filter(|m| !m.trim().is_empty()),
-        args.warm.effort.filter(|e| !e.trim().is_empty()),
+        &args.warm.spec(),
         &args.session_id,
     )
     .await

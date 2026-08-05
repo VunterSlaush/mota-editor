@@ -1,4 +1,5 @@
 import type { CommandInfo } from "../../core/entities/command";
+import type { ProviderId } from "../../core/entities/provider";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -7,6 +8,7 @@ import type {
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
 import type { GitBranch, GitChange, GitCommit, GitPort } from "../../core/ports/gitPort";
 import type { NotificationPort } from "../../core/ports/notificationPort";
+import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
 import type {
   PersistedTranscript,
   TranscriptMeta,
@@ -256,4 +258,36 @@ export class DemoTranscriptStore implements TranscriptStore {
 
 export class DemoNotifications implements NotificationPort {
   async turnCompleted(): Promise<void> {}
+}
+
+/** Claude answers; the others show the two failure states worth seeing. */
+export class DemoProviderProbe implements ProviderProbe {
+  async probe(provider: ProviderId): Promise<ProviderStatus> {
+    await delay(400);
+    if (provider === "claude") {
+      return {
+        provider,
+        installed: true,
+        authenticated: true,
+        detail: "Connected via demo-agent.",
+        installHint: "",
+      };
+    }
+    if (provider === "codex") {
+      return {
+        provider,
+        installed: true,
+        authenticated: false,
+        detail: "Not signed in. Sign in to the codex CLI in a terminal first.",
+        installHint: "npm i -g @agentclientprotocol/codex-acp",
+      };
+    }
+    return {
+      provider,
+      installed: false,
+      authenticated: false,
+      detail: "no launch candidate found on PATH",
+      installHint: "npm i -g @google/gemini-cli",
+    };
+  }
 }

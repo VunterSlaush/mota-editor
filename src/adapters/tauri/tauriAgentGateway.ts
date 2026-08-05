@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -76,6 +77,7 @@ export class TauriAgentGateway implements AgentGateway {
           effort: request.effort ?? null,
           attachments: [...request.attachments],
           resumeSessionId: request.resumeSessionId ?? null,
+          mcpServers: toWireServers(request.mcpServers),
         },
       });
     } catch (e) {
@@ -106,6 +108,7 @@ export class TauriAgentGateway implements AgentGateway {
     projectPath: string,
     model?: string,
     effort?: string,
+    mcpServers?: readonly McpServerSpec[],
   ): Promise<void> {
     await invoke("warm_session", {
       args: {
@@ -114,6 +117,7 @@ export class TauriAgentGateway implements AgentGateway {
         projectPath,
         model: model ?? null,
         effort: effort ?? null,
+        mcpServers: toWireServers(mcpServers),
       },
     });
   }
@@ -167,6 +171,19 @@ export class TauriAgentGateway implements AgentGateway {
       unlisten();
     }
   }
+}
+
+/**
+ * Servers cross the boundary as a plain array — `readonly` is a
+ * TypeScript idea, and Tauri serializes what it is given.
+ */
+function toWireServers(servers: readonly McpServerSpec[] | undefined) {
+  return (servers ?? []).map((server) => ({
+    name: server.name,
+    command: server.command,
+    args: [...server.args],
+    env: { ...server.env },
+  }));
 }
 
 function toDomainEvent(wire: WireEvent["event"]): AgentTurnEvent {

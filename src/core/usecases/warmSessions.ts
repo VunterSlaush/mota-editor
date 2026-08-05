@@ -1,3 +1,4 @@
+import { serversForProvider } from "../entities/mcpServer";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
@@ -9,11 +10,19 @@ import type { Store } from "../state/store";
  * real turn reports problems with full context.
  */
 export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string): void {
-  const tab = tabById(store.getState(), tabId);
+  const state = store.getState();
+  const tab = tabById(state, tabId);
   if (!tab) return;
   const { provider, path, model, effort } = tab.project;
   void agentGateway
-    .warmSession(tabId, provider, path, model, effort)
+    .warmSession(
+      tabId,
+      provider,
+      path,
+      model,
+      effort,
+      serversForProvider(state.settings.mcpServers, provider),
+    )
     .catch(() => undefined);
 }
 

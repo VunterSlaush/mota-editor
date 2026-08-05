@@ -20,7 +20,7 @@ export function toPersisted(state: AppState): PersistedWorkspace {
       providerSessions: t.project.providerSessions,
     })),
     activeTabId: state.activeTabId,
-    settings: { defaultProvider: state.settings.defaultProvider },
+    settings: state.settings,
   };
 }
 

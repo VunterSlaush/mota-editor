@@ -1,8 +1,9 @@
 import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
 import { projectNameFromPath } from "../entities/project";
 import type { AgentGateway } from "../ports/agentGateway";
-import type { WorkspaceStore } from "../ports/workspacePort";
-import type { TabState } from "../state/appState";
+import type { PersistedSettings, WorkspaceStore } from "../ports/workspacePort";
+import type { AppSettings, TabState } from "../state/appState";
+import { defaultSettings } from "../state/appState";
 import type { Store } from "../state/store";
 import { warmAllTabs } from "./warmSessions";
 
@@ -50,8 +51,21 @@ export class RestoreWorkspace {
       type: "workspace/restored",
       tabs,
       activeTabId,
-      settings: { defaultProvider: persisted.settings?.defaultProvider ?? "claude" },
+      settings: restoredSettings(persisted.settings),
     });
     warmAllTabs(this.store, this.agentGateway);
   }
+}
+
+/** Field by field, so a file written before a setting existed still loads. */
+function restoredSettings(persisted: PersistedSettings | undefined): AppSettings {
+  return {
+    defaultProvider: persisted?.defaultProvider ?? defaultSettings.defaultProvider,
+    defaultMode: persisted?.defaultMode ?? defaultSettings.defaultMode,
+    defaultPermission: persisted?.defaultPermission ?? defaultSettings.defaultPermission,
+    defaultModel: persisted?.defaultModel ?? defaultSettings.defaultModel,
+    defaultEffort: persisted?.defaultEffort ?? defaultSettings.defaultEffort,
+    commandConfigs: persisted?.commandConfigs ?? defaultSettings.commandConfigs,
+    mcpServers: persisted?.mcpServers ?? defaultSettings.mcpServers,
+  };
 }

@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { userMessage } from "../entities/message";
 import { newProject } from "../entities/project";
-import { type AppState, activeTab, initialState, reduce } from "./appState";
+import {
+  type AppState,
+  activeTab,
+  defaultSettings,
+  initialState,
+  projectDefaults,
+  reduce,
+} from "./appState";
+
+const DEFAULTS = projectDefaults(defaultSettings);
 
 const open = (state: AppState, id: string, path: string) =>
-  reduce(state, { type: "tab/opened", project: newProject(id, path, "claude") });
+  reduce(state, { type: "tab/opened", project: newProject(id, path, DEFAULTS) });
 
 describe("appState reducer", () => {
   it("opens a project as the active tab", () => {
@@ -169,5 +178,36 @@ describe("appState reducer", () => {
     });
     expect(state.tabs[0].project.provider).toBe("codex");
     expect(state.tabs[0].project.providerSessions.claude).toBe("s-123");
+  });
+
+  it("a settings patch changes only the keys it names", () => {
+    let state = reduce(initialState, {
+      type: "settings/changed",
+      patch: { defaultMode: "plan" },
+    });
+    state = reduce(state, {
+      type: "settings/changed",
+      patch: { defaultProvider: "gemini" },
+    });
+    expect(state.settings.defaultMode).toBe("plan");
+    expect(state.settings.defaultProvider).toBe("gemini");
+    expect(state.settings.defaultPermission).toBe(
+      initialState.settings.defaultPermission,
+    );
+  });
+
+  it("new tabs start from the defaults, tabs already open do not move", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "settings/changed",
+      patch: { defaultMode: "debug", defaultEffort: { claude: "max" } },
+    });
+    state = reduce(state, {
+      type: "tab/opened",
+      project: newProject("t2", "/b", projectDefaults(state.settings)),
+    });
+    expect(state.tabs[0].project.mode).toBe("agent"); // untouched
+    expect(state.tabs[1].project.mode).toBe("debug");
+    expect(state.tabs[1].project.effort).toBe("max");
   });
 });

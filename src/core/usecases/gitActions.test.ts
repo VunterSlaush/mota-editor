@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newProject } from "../entities/project";
 import type { GitBranch, GitChange, GitCommit, GitPort } from "../ports/gitPort";
+import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { GitActions } from "./gitActions";
 import { LoadGitChanges } from "./loadGitChanges";
@@ -52,7 +53,7 @@ class FakeGit implements GitPort {
 
 function setup() {
   const store = new Store();
-  store.dispatch({ type: "tab/opened", project: newProject("t1", "/repo", "claude") });
+  store.dispatch({ type: "tab/opened", project: newProject("t1", "/repo", DEFAULTS) });
   const git = new FakeGit();
   return {
     store,
@@ -61,6 +62,8 @@ function setup() {
     loader: new LoadGitChanges(store, git),
   };
 }
+
+const DEFAULTS = projectDefaults(defaultSettings);
 
 describe("git use cases", () => {
   it("splits changes into staged and unstaged, with commits", async () => {

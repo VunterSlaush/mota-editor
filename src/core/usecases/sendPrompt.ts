@@ -1,3 +1,4 @@
+import { serversForProvider } from "../entities/mcpServer";
 import {
   approvalMessage,
   assistantMessage,
@@ -14,6 +15,7 @@ import type { TranscriptStore } from "../ports/transcriptStore";
 import type { WorkspaceStore } from "../ports/workspacePort";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import type { ApplyCommandConfig } from "./applyCommandConfig";
 import { persistWorkspace } from "./persistWorkspace";
 
 export type IdGenerator = () => string;
@@ -34,6 +36,7 @@ export class SendPrompt {
     private readonly workspaceStore: WorkspaceStore,
     private readonly transcriptStore: TranscriptStore,
     private readonly notifications: NotificationPort,
+    private readonly applyCommandConfig: ApplyCommandConfig,
     private readonly newId: IdGenerator,
   ) {}
 
@@ -58,10 +61,17 @@ export class SendPrompt {
       return;
     }
 
-    const { provider, path, mode, permission, model, effort } = tab.project;
+    // A slash command may carry its own mode/permission/effort. Apply it
+    // first, then read the tab back: the request below must describe the
+    // tab as the command leaves it, not as it was when the user typed.
+    await this.applyCommandConfig.execute(tabId, trimmed);
+    const configured = tabById(this.store.getState(), tabId);
+    if (!configured) return;
+
+    const { provider, path, mode, permission, model, effort } = configured.project;
     const descriptor = providerById(provider);
     const resumeSessionId = descriptor.supportsResume
-      ? tab.project.providerSessions[provider]
+      ? configured.project.providerSessions[provider]
       : undefined;
 
     this.store.dispatch({
@@ -84,6 +94,10 @@ export class SendPrompt {
           effort,
           attachments,
           resumeSessionId,
+          mcpServers: serversForProvider(
+            this.store.getState().settings.mcpServers,
+            provider,
+          ),
         },
         (event) => this.onEvent(tabId, event),
       );

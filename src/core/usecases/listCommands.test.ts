@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CommandInfo } from "../entities/command";
 import { newProject } from "../entities/project";
 import type { CommandCatalog } from "../ports/commandCatalog";
+import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { ListCommands } from "./listCommands";
 
@@ -19,11 +20,13 @@ function setup() {
   const store = new Store();
   store.dispatch({
     type: "tab/opened",
-    project: newProject("t1", "/work/alpha", "claude"),
+    project: newProject("t1", "/work/alpha", DEFAULTS),
   });
   const catalog = new FakeCommandCatalog();
   return { store, catalog, useCase: new ListCommands(store, catalog) };
 }
+
+const DEFAULTS = projectDefaults(defaultSettings);
 
 describe("ListCommands", () => {
   it("merges built-ins with discovered custom commands, sorted by name", async () => {

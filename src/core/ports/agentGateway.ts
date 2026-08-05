@@ -1,4 +1,5 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
+import type { McpServerSpec } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
 
 /**
@@ -63,6 +64,8 @@ export interface AgentTurnRequest {
   readonly attachments: readonly string[];
   /** Provider-side session to resume, when the provider supports it. */
   readonly resumeSessionId?: string;
+  /** MCP servers to hand the agent when its session is created. */
+  readonly mcpServers?: readonly McpServerSpec[];
 }
 
 export interface AgentGateway {
@@ -92,6 +95,7 @@ export interface AgentGateway {
     projectPath: string,
     model?: string,
     effort?: string,
+    mcpServers?: readonly McpServerSpec[],
   ): Promise<void>;
 
   /** The agent's OWN saved sessions for this project (native history). */

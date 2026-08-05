@@ -40,6 +40,8 @@ pub struct AcpSession {
     model: Option<String>,
     /// Effort the agent was spawned with (env-based; change = respawn).
     effort: Option<String>,
+    /// Servers passed at session creation (fixed then; change = respawn).
+    mcp_servers: Vec<acp::McpServer>,
     /// The agent-side session this tab currently talks to. Set after
     /// `session/new`, replaced when a saved session is loaded (resume).
     session_id: Mutex<String>,
@@ -134,17 +136,15 @@ pub async fn start_turn(
     tab_id: &str,
     provider_id: &str,
     request: TurnRequest,
+    mcp_servers: Vec<acp::McpServer>,
 ) -> Result<(), AcpStartError> {
-    let session = ensure_session(
-        &app,
-        sessions,
-        tab_id,
-        provider_id,
-        &request.project_path,
-        request.model.clone(),
-        request.effort.clone(),
-    )
-    .await?;
+    let spec = SessionSpec {
+        project_path: request.project_path.clone(),
+        model: request.model.clone(),
+        effort: request.effort.clone(),
+        mcp_servers,
+    };
+    let session = ensure_session(&app, sessions, tab_id, provider_id, &spec).await?;
 
     if session.turn_active.swap(true, Ordering::SeqCst) {
         return Err(AcpStartError::Failed(
@@ -255,32 +255,47 @@ pub async fn warm(
     sessions: &AcpSessions,
     tab_id: &str,
     provider_id: &str,
-    project_path: &str,
-    model: Option<String>,
-    effort: Option<String>,
+    spec: &SessionSpec,
 ) {
-    let _ =
-        ensure_session(&app, sessions, tab_id, provider_id, project_path, model, effort).await;
+    let _ = ensure_session(&app, sessions, tab_id, provider_id, spec).await;
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Everything that decides WHICH agent process a tab talks to. Grouped
+/// because it travels together through every entry point, and because
+/// any difference here means the session must be respawned.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSpec {
+    pub project_path: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// Servers Mota hands the agent at session creation.
+    #[serde(default)]
+    pub mcp_servers: Vec<acp::McpServer>,
+}
+
 async fn ensure_session(
     app: &AppHandle,
     sessions: &AcpSessions,
     tab_id: &str,
     provider_id: &str,
-    project_path: &str,
-    model: Option<String>,
-    effort: Option<String>,
+    spec: &SessionSpec,
 ) -> Result<Arc<AcpSession>, AcpStartError> {
+    let SessionSpec { project_path, model, effort, mcp_servers } = spec;
+    let (model, effort) = (model.clone(), effort.clone());
+
     if let Some(existing) = sessions.get(tab_id) {
         if existing.provider_id == provider_id
             && existing.model == model
             && existing.effort == effort
+            && existing.mcp_servers == *mcp_servers
         {
             return Ok(existing);
         }
-        sessions.end_session(tab_id); // provider/model/effort switched: fresh session
+        // Provider, model, effort or tools switched: start over. Servers
+        // are fixed when the session is created, so a changed list is
+        // only real once the agent has been handed it.
+        sessions.end_session(tab_id);
     }
 
     let (child, install_hint) =
@@ -293,6 +308,7 @@ async fn ensure_session(
         provider_id: provider_id.to_owned(),
         model,
         effort,
+        mcp_servers: mcp_servers.clone(),
         session_id: Mutex::new(String::new()),
         child: Mutex::new(Some(child)),
         stdin: tokio::sync::Mutex::new(stdin),
@@ -319,7 +335,7 @@ async fn ensure_session(
     let new_id = session.request_id();
     let new_result = session
         .call_with_timeout(
-            acp::session_new_request(new_id, project_path),
+            acp::session_new_request(new_id, project_path, mcp_servers),
             new_id,
             HANDSHAKE_TIMEOUT,
         )
@@ -354,25 +370,25 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180); // replays the whole conversation
 
 /// The agent's own saved sessions for this project (native history).
-#[allow(clippy::too_many_arguments)]
 pub async fn list_native_sessions(
     app: AppHandle,
     sessions: &AcpSessions,
     tab_id: &str,
     provider_id: &str,
-    project_path: &str,
-    model: Option<String>,
-    effort: Option<String>,
+    spec: &SessionSpec,
 ) -> Result<Value, String> {
-    let session =
-        ensure_session(&app, sessions, tab_id, provider_id, project_path, model, effort)
-            .await
-            .map_err(|e| match e {
-                AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
-            })?;
+    let session = ensure_session(&app, sessions, tab_id, provider_id, spec)
+        .await
+        .map_err(|e| match e {
+            AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
+        })?;
     let id = session.request_id();
     let result = session
-        .call_with_timeout(acp::session_list_request(id, project_path), id, LIST_TIMEOUT)
+        .call_with_timeout(
+            acp::session_list_request(id, &spec.project_path),
+            id,
+            LIST_TIMEOUT,
+        )
         .await?;
     Ok(result.get("sessions").cloned().unwrap_or(Value::Array(vec![])))
 }
@@ -380,15 +396,12 @@ pub async fn list_native_sessions(
 /// Truly resume one of the agent's saved sessions: the conversation is
 /// replayed through the event stream, and the agent continues WITH that
 /// context in memory.
-#[allow(clippy::too_many_arguments)]
 pub async fn load_native_session(
     app: AppHandle,
     sessions: &AcpSessions,
     tab_id: &str,
     provider_id: &str,
-    project_path: &str,
-    model: Option<String>,
-    effort: Option<String>,
+    spec: &SessionSpec,
     session_id: &str,
 ) -> Result<(), String> {
     // Never load over an unfinished turn: replacing the session id
@@ -401,16 +414,15 @@ pub async fn load_native_session(
             );
         }
     }
-    let session =
-        ensure_session(&app, sessions, tab_id, provider_id, project_path, model, effort)
-            .await
-            .map_err(|e| match e {
-                AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
-            })?;
+    let session = ensure_session(&app, sessions, tab_id, provider_id, spec)
+        .await
+        .map_err(|e| match e {
+            AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
+        })?;
     let id = session.request_id();
     session
         .call_with_timeout(
-            acp::session_load_request(id, session_id, project_path),
+            acp::session_load_request(id, session_id, &spec.project_path, &spec.mcp_servers),
             id,
             LOAD_TIMEOUT,
         )
@@ -421,7 +433,10 @@ pub async fn load_native_session(
 
 /// Try each launch candidate in order (global binary first, then npx);
 /// return the first child that spawns, with the install hint for errors.
-fn spawn_agent(
+/// Launch a provider's ACP agent. `pub(crate)` because the connection
+/// probe launches one too, and how an agent starts must be described in
+/// exactly one place.
+pub(crate) fn spawn_agent(
     provider_id: &str,
     project_path: &str,
     model: Option<&str>,

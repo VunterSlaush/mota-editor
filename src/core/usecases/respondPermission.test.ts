@@ -6,6 +6,7 @@ import type {
   AgentTurnEvent,
   AgentTurnRequest,
 } from "../ports/agentGateway";
+import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { RespondPermission } from "./respondPermission";
 
@@ -30,7 +31,7 @@ class RecordingGateway implements AgentGateway {
 
 function setup() {
   const store = new Store();
-  store.dispatch({ type: "tab/opened", project: newProject("t1", "/a", "claude") });
+  store.dispatch({ type: "tab/opened", project: newProject("t1", "/a", DEFAULTS) });
   store.dispatch({
     type: "chat/messageAppended",
     tabId: "t1",
@@ -41,6 +42,8 @@ function setup() {
   const gateway = new RecordingGateway();
   return { store, gateway, useCase: new RespondPermission(store, gateway) };
 }
+
+const DEFAULTS = projectDefaults(defaultSettings);
 
 describe("RespondPermission", () => {
   it("delivers the choice and marks the approval answered", async () => {

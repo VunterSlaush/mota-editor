@@ -1,5 +1,4 @@
 import type { AgentMode, PermissionPolicy } from "./agentSettings";
-import { DEFAULT_MODE, DEFAULT_PERMISSION } from "./agentSettings";
 import type { ProviderId } from "./provider";
 
 /**
@@ -34,14 +33,29 @@ export function projectNameFromPath(path: string): string {
   return segments[segments.length - 1] || trimmed;
 }
 
-export function newProject(id: string, path: string, provider: ProviderId): Project {
+/**
+ * What a brand-new tab starts with. Named here rather than taken from
+ * `AppSettings` so entities stay ignorant of app state: the use case
+ * resolves the app's per-provider model/effort down to this flat shape.
+ */
+export interface ProjectDefaults {
+  readonly provider: ProviderId;
+  readonly mode: AgentMode;
+  readonly permission: PermissionPolicy;
+  readonly model?: string;
+  readonly effort?: string;
+}
+
+export function newProject(id: string, path: string, defaults: ProjectDefaults): Project {
   return {
     id,
     path,
     name: projectNameFromPath(path),
-    provider,
-    mode: DEFAULT_MODE,
-    permission: DEFAULT_PERMISSION,
+    provider: defaults.provider,
+    mode: defaults.mode,
+    permission: defaults.permission,
+    model: defaults.model,
+    effort: defaults.effort,
     verbose: true,
     providerSessions: {},
   };

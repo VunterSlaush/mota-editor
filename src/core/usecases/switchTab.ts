@@ -2,6 +2,7 @@ import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { ProviderId } from "../entities/provider";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { WorkspaceStore } from "../ports/workspacePort";
+import type { AppSettings } from "../state/appState";
 import type { Store } from "../state/store";
 import { persistWorkspace } from "./persistWorkspace";
 import { warmTab } from "./warmSessions";
@@ -60,15 +61,19 @@ export class SelectPermission {
   }
 }
 
-/** Use case — choose the default provider for newly opened projects. */
-export class SetDefaultProvider {
+/**
+ * Use case — change the app-wide defaults that seed new project tabs.
+ * Takes a patch so one settings screen needs one use case, not one per
+ * field.
+ */
+export class UpdateSettings {
   constructor(
     private readonly store: Store,
     private readonly workspaceStore: WorkspaceStore,
   ) {}
 
-  async execute(provider: ProviderId): Promise<void> {
-    this.store.dispatch({ type: "settings/defaultProviderChanged", provider });
+  async execute(patch: Partial<AppSettings>): Promise<void> {
+    this.store.dispatch({ type: "settings/changed", patch });
     await persistWorkspace(this.store.getState(), this.workspaceStore);
   }
 }

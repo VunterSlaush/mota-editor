@@ -1,9 +1,13 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
+import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
+import type { CommandConfig } from "../entities/commandConfig";
+import type { McpServerConfig } from "../entities/mcpServer";
 import type { ChatMessage, MessageRole } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
-import type { Project } from "../entities/project";
+import type { Project, ProjectDefaults } from "../entities/project";
 import type { ProviderId } from "../entities/provider";
+import { DEFAULT_PROVIDER } from "../entities/provider";
 
 /**
  * Core state — a pure, framework-free model of the whole workbench,
@@ -39,9 +43,21 @@ export interface TabState {
   readonly usage?: { readonly used: number; readonly size: number };
 }
 
-/** App-wide preferences, persisted with the workspace. */
+/**
+ * App-wide preferences, persisted with the workspace. These seed every
+ * NEW project tab; changing them never disturbs a tab already open.
+ */
 export interface AppSettings {
   readonly defaultProvider: ProviderId;
+  readonly defaultMode: AgentMode;
+  readonly defaultPermission: PermissionPolicy;
+  /** Per provider — "sonnet" means nothing to Gemini. */
+  readonly defaultModel: Readonly<Partial<Record<ProviderId, string>>>;
+  readonly defaultEffort: Readonly<Partial<Record<ProviderId, string>>>;
+  /** Settings a slash command applies to its tab, by `commandConfigKey`. */
+  readonly commandConfigs: Readonly<Record<string, CommandConfig>>;
+  /** MCP servers Mota hands to agents, per provider enablement. */
+  readonly mcpServers: readonly McpServerConfig[];
 }
 
 export interface AppState {
@@ -50,10 +66,20 @@ export interface AppState {
   readonly settings: AppSettings;
 }
 
+export const defaultSettings: AppSettings = {
+  defaultProvider: DEFAULT_PROVIDER,
+  defaultMode: DEFAULT_MODE,
+  defaultPermission: DEFAULT_PERMISSION,
+  defaultModel: {},
+  defaultEffort: {},
+  commandConfigs: {},
+  mcpServers: [],
+};
+
 export const initialState: AppState = {
   tabs: [],
   activeTabId: null,
-  settings: { defaultProvider: "claude" },
+  settings: defaultSettings,
 };
 
 export type Action =
@@ -63,7 +89,7 @@ export type Action =
       activeTabId: string | null;
       settings?: AppSettings;
     }
-  | { type: "settings/defaultProviderChanged"; provider: ProviderId }
+  | { type: "settings/changed"; patch: Partial<AppSettings> }
   | { type: "tab/opened"; project: Project }
   | { type: "tab/closed"; tabId: string }
   | { type: "tab/activated"; tabId: string }
@@ -125,11 +151,8 @@ export function reduce(state: AppState, action: Action): AppState {
         settings: action.settings ?? state.settings,
       };
 
-    case "settings/defaultProviderChanged":
-      return {
-        ...state,
-        settings: { ...state.settings, defaultProvider: action.provider },
-      };
+    case "settings/changed":
+      return { ...state, settings: { ...state.settings, ...action.patch } };
 
     case "tab/opened": {
       const existing = state.tabs.find((t) => t.project.path === action.project.path);
@@ -356,6 +379,21 @@ function mapTab(
   return {
     ...state,
     tabs: state.tabs.map((t) => (t.project.id === tabId ? update(t) : t)),
+  };
+}
+
+/**
+ * The app defaults, flattened for one provider: the model and effort are
+ * stored per provider, but a project only ever has one of each.
+ */
+export function projectDefaults(settings: AppSettings): ProjectDefaults {
+  const provider = settings.defaultProvider;
+  return {
+    provider,
+    mode: settings.defaultMode,
+    permission: settings.defaultPermission,
+    model: settings.defaultModel[provider],
+    effort: settings.defaultEffort[provider],
   };
 }
 

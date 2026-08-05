@@ -7,6 +7,7 @@ mod command_discovery;
 mod commands;
 mod git;
 mod history_file;
+mod provider_probe;
 mod runner;
 mod workspace_file;
 
@@ -29,6 +30,7 @@ pub fn run() {
             commands::respond_permission,
             commands::end_session,
             commands::list_custom_commands,
+            provider_probe::probe_provider,
             git::git_status,
             git::git_log,
             git::git_stage,

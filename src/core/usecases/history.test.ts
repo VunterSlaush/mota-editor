@@ -10,6 +10,7 @@ import type {
   TranscriptMeta,
   TranscriptStore,
 } from "../ports/transcriptStore";
+import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { SessionHistory } from "./history";
 
@@ -64,7 +65,7 @@ class FakeGateway implements AgentGateway {
 
 function setup() {
   const store = new Store();
-  store.dispatch({ type: "tab/opened", project: newProject("t1", "/repo", "claude") });
+  store.dispatch({ type: "tab/opened", project: newProject("t1", "/repo", DEFAULTS) });
   const transcripts = new FakeTranscriptStore();
   const gateway = new FakeGateway();
   return {
@@ -74,6 +75,8 @@ function setup() {
     history: new SessionHistory(store, transcripts, gateway),
   };
 }
+
+const DEFAULTS = projectDefaults(defaultSettings);
 
 describe("SessionHistory", () => {
   it("prefers the agent's native session list", async () => {

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import type { ProviderId } from "../core/entities/provider";
 import { activeTab } from "../core/state/appState";
 import type { AppContext } from "../wiring/context";
 import type { SidebarView } from "./components/ActivityBar";
 import { ChatPanel } from "./components/ChatPanel";
 import { EmptyState } from "./components/EmptyState";
+import { SettingsModal } from "./components/SettingsModal";
 import { TabBar } from "./components/TabBar";
 import { useAppState } from "./useAppState";
 
@@ -15,6 +17,19 @@ export function App({ context }: { context: AppContext }) {
   const state = useAppState(context.store);
   const tab = activeTab(state);
   const [sidebarView, setSidebarView] = useState<SidebarView | null>("changes");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const projectPath = tab?.project.path ?? "";
+
+  // Stable identity: the settings screen loads commands from an effect,
+  // and a fresh closure every render would re-run it forever.
+  const loadCommandsFor = useCallback(
+    (provider: ProviderId) => context.listCommands.forProvider(projectPath, provider),
+    [context, projectPath],
+  );
+  const probeProvider = useCallback(
+    (provider: ProviderId) => context.providerProbe.probe(provider, projectPath),
+    [context, projectPath],
+  );
 
   return (
     <div className="app">
@@ -38,10 +53,7 @@ export function App({ context }: { context: AppContext }) {
           tab={tab}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
-          defaultProvider={state.settings.defaultProvider}
-          onChangeDefaultProvider={(provider) =>
-            void context.setDefaultProvider.execute(provider)
-          }
+          onOpenSettings={() => setSettingsOpen(true)}
           loadHistory={() => context.sessionHistory.list(tab.project.id)}
           onOpenSession={(sessionId, native) =>
             context.sessionHistory.open(tab.project.id, sessionId, native)
@@ -90,6 +102,16 @@ export function App({ context }: { context: AppContext }) {
         />
       ) : (
         <EmptyState onOpenProject={() => void context.openProject.execute()} />
+      )}
+      {settingsOpen && (
+        <SettingsModal
+          settings={state.settings}
+          onChange={(patch) => void context.updateSettings.execute(patch)}
+          loadCommands={loadCommandsFor}
+          probeProvider={probeProvider}
+          newId={context.newId}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
     </div>
   );

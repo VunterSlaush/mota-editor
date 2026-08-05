@@ -17,7 +17,6 @@ import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
 import { PlanBar, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
-import { SettingsPanel } from "./SettingsPanel";
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
 const GIT_RELOAD_DEBOUNCE_MS = 400;
@@ -26,8 +25,7 @@ interface Props {
   tab: TabState;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
-  defaultProvider: ProviderId;
-  onChangeDefaultProvider: (provider: ProviderId) => void;
+  onOpenSettings: () => void;
   loadHistory: () => Promise<HistoryListing>;
   onOpenSession: (sessionId: string, native: boolean) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
@@ -58,8 +56,7 @@ export function ChatPanel({
   tab,
   sidebarView,
   onSelectSidebarView,
-  defaultProvider,
-  onChangeDefaultProvider,
+  onOpenSettings,
   loadHistory,
   onOpenSession,
   onDeleteSession,
@@ -187,7 +184,11 @@ export function ChatPanel({
         </div>
       </div>
       <div className="chat-panel__body">
-        <ActivityBar active={sidebarView} onSelect={onSelectSidebarView} />
+        <ActivityBar
+          active={sidebarView}
+          onSelect={onSelectSidebarView}
+          onOpenSettings={onOpenSettings}
+        />
         {sidebarView && (
           <>
             <div style={{ width: sidebar.width }} className="changes-container">
@@ -220,12 +221,6 @@ export function ChatPanel({
                     )
                   }
                   onNewChat={onNewChat}
-                />
-              )}
-              {sidebarView === "settings" && (
-                <SettingsPanel
-                  defaultProvider={defaultProvider}
-                  onChangeDefaultProvider={onChangeDefaultProvider}
                 />
               )}
             </div>

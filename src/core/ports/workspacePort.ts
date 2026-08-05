@@ -1,4 +1,6 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
+import type { CommandConfig } from "../entities/commandConfig";
+import type { McpServerConfig } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
 
 /**
@@ -19,10 +21,24 @@ export interface PersistedProject {
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
 }
 
+/**
+ * App-wide preferences as written to disk. Every field is optional: a
+ * workspace file written by an older build must still load.
+ */
+export interface PersistedSettings {
+  readonly defaultProvider?: ProviderId;
+  readonly defaultMode?: AgentMode;
+  readonly defaultPermission?: PermissionPolicy;
+  readonly defaultModel?: Readonly<Partial<Record<ProviderId, string>>>;
+  readonly defaultEffort?: Readonly<Partial<Record<ProviderId, string>>>;
+  readonly commandConfigs?: Readonly<Record<string, CommandConfig>>;
+  readonly mcpServers?: readonly McpServerConfig[];
+}
+
 export interface PersistedWorkspace {
   readonly projects: readonly PersistedProject[];
   readonly activeTabId: string | null;
-  readonly settings?: { readonly defaultProvider?: ProviderId };
+  readonly settings?: PersistedSettings;
 }
 
 export interface WorkspaceStore {

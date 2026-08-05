@@ -142,13 +142,49 @@ pub fn initialize_request(id: i64) -> Value {
     })
 }
 
-pub fn session_new_request(id: i64, cwd: &str) -> Value {
+/// The MCP servers a session is created with. Mota passes what the user
+/// configured; the agent adds whatever its own config already loaded, and
+/// the protocol gives us no way to see that half.
+pub fn session_new_request(id: i64, cwd: &str, mcp_servers: &[McpServer]) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "method": "session/new",
-        "params": { "cwd": cwd, "mcpServers": [] }
+        "params": { "cwd": cwd, "mcpServers": mcp_server_params(mcp_servers) }
     })
+}
+
+/// One stdio MCP server, in ACP's shape.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServer {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+/// ACP wants env as a list of name/value pairs, not an object.
+fn mcp_server_params(servers: &[McpServer]) -> Value {
+    Value::Array(
+        servers
+            .iter()
+            .map(|server| {
+                json!({
+                    "name": server.name,
+                    "command": server.command,
+                    "args": server.args,
+                    "env": server
+                        .env
+                        .iter()
+                        .map(|(name, value)| json!({ "name": name, "value": value }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
 }
 
 /// List the agent's own saved sessions for this project.
@@ -164,12 +200,21 @@ pub fn session_list_request(id: i64, cwd: &str) -> Value {
 /// Load (truly resume) one of the agent's saved sessions: the agent
 /// replays the whole conversation as `session/update` notifications,
 /// then continues WITH that context in memory.
-pub fn session_load_request(id: i64, session_id: &str, cwd: &str) -> Value {
+pub fn session_load_request(
+    id: i64,
+    session_id: &str,
+    cwd: &str,
+    mcp_servers: &[McpServer],
+) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "method": "session/load",
-        "params": { "sessionId": session_id, "cwd": cwd, "mcpServers": [] }
+        "params": {
+            "sessionId": session_id,
+            "cwd": cwd,
+            "mcpServers": mcp_server_params(mcp_servers)
+        }
     })
 }
 
@@ -569,10 +614,43 @@ mod tests {
     }
 
     #[test]
-    fn session_new_sends_cwd_and_empty_mcp_servers() {
-        let msg = session_new_request(1, "/work/alpha");
+    fn session_new_sends_cwd_and_no_servers_when_none_are_configured() {
+        let msg = session_new_request(1, "/work/alpha", &[]);
         assert_eq!(msg["params"]["cwd"], "/work/alpha");
         assert_eq!(msg["params"]["mcpServers"], json!([]));
+    }
+
+    fn test_server() -> McpServer {
+        McpServer {
+            name: "files".to_owned(),
+            command: "npx".to_owned(),
+            args: vec!["-y".to_owned(), "@modelcontextprotocol/server-filesystem".to_owned()],
+            env: [("ROOT".to_owned(), "/work".to_owned())].into_iter().collect(),
+        }
+    }
+
+    #[test]
+    fn session_new_passes_configured_servers_through() {
+        let msg = session_new_request(1, "/work/alpha", &[test_server()]);
+        let servers = msg["params"]["mcpServers"].as_array().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["name"], "files");
+        assert_eq!(servers[0]["command"], "npx");
+        assert_eq!(servers[0]["args"][0], "-y");
+    }
+
+    #[test]
+    fn env_is_sent_as_name_value_pairs_not_an_object() {
+        let msg = session_new_request(1, "/work/alpha", &[test_server()]);
+        let env = &msg["params"]["mcpServers"][0]["env"];
+        assert_eq!(env, &json!([{ "name": "ROOT", "value": "/work" }]));
+    }
+
+    #[test]
+    fn resuming_a_session_carries_the_same_servers() {
+        let msg = session_load_request(1, "sess_1", "/work/alpha", &[test_server()]);
+        assert_eq!(msg["params"]["sessionId"], "sess_1");
+        assert_eq!(msg["params"]["mcpServers"][0]["name"], "files");
     }
 
     #[test]
