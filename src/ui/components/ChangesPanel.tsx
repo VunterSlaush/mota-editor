@@ -16,15 +16,20 @@ import {
 } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { commitUrl } from "../../core/entities/gitRemote";
+import type { AgentEditedFile } from "../../core/entities/tool";
 import type { GitChange } from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import { openExternalLink } from "../externalLink";
 import { fileName } from "../fileName";
+import type { AgentDiff } from "./ToolCallContentView";
 
 interface Props {
   changes: GitChanges | null;
   busy: boolean;
+  /** Files the agent itself reported editing this session (first-hand,
+   *  unlike the git sections below). */
+  agentEdits: readonly AgentEditedFile[];
   onStage: (path: string) => Promise<GitActionResult>;
   onUnstage: (path: string) => Promise<GitActionResult>;
   onCommitPush: (message: string) => Promise<GitActionResult>;
@@ -37,10 +42,12 @@ interface Props {
   onOpenFile: (path: string) => Promise<string | null>;
   /** Show the file's diff in a modal. */
   onShowDiff: (file: GitChange, staged: boolean) => void;
+  /** Show an agent-reported diff (full old/new text) in the modal. */
+  onShowAgentDiff: (diff: AgentDiff) => void;
 }
 
 /** Which sections start open — all of them; collapsing is the exception. */
-const ALL_OPEN = { staged: true, unstaged: true, commits: true };
+const ALL_OPEN = { agent: true, staged: true, unstaged: true, commits: true };
 
 /**
  * UI — the project's source control, VS-style: fetch/pull/push, staged
@@ -51,6 +58,7 @@ const ALL_OPEN = { staged: true, unstaged: true, commits: true };
 export function ChangesPanel({
   changes,
   busy,
+  agentEdits,
   onStage,
   onUnstage,
   onCommitPush,
@@ -61,6 +69,7 @@ export function ChangesPanel({
   onRefresh,
   onOpenFile,
   onShowDiff,
+  onShowAgentDiff,
 }: Props) {
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState<GitActionResult | null>(null);
@@ -186,6 +195,44 @@ export function ChangesPanel({
         <p className={`changes__notice ${notice.ok ? "" : "changes__notice--error"}`}>
           {notice.message}
         </p>
+      )}
+
+      {agentEdits.length > 0 && (
+        <Section
+          title="Agent edits"
+          count={agentEdits.length}
+          open={open.agent}
+          onToggle={() => toggle("agent")}
+        >
+          <ul className="changes__list">
+            {agentEdits.map((file) => (
+              <li key={file.path} className="changes__item" title={file.path}>
+                <span className="changes__badge changes__badge--agent">
+                  <GitDiff size={12} />
+                </span>
+                <button
+                  type="button"
+                  className="changes__file"
+                  title={
+                    file.diff
+                      ? `Show the agent's change to ${file.path}`
+                      : `Open ${file.path}`
+                  }
+                  onClick={() =>
+                    file.diff
+                      ? onShowAgentDiff({ path: file.path, ...file.diff })
+                      : void onOpenFile(file.path)
+                  }
+                >
+                  <span className="changes__filename">{fileName(file.path)}</span>
+                  {parentDir(file.path) && (
+                    <span className="changes__dir">{parentDir(file.path)}</span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Section>
       )}
 
       {!changes ? (

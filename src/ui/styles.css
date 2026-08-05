@@ -489,6 +489,12 @@ body {
   max-width: 90%;
 }
 
+.changes__badge--agent {
+  color: var(--tool);
+  display: inline-flex;
+  align-items: center;
+}
+
 .msg__tool-row {
   display: flex;
   align-items: baseline;

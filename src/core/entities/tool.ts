@@ -1,5 +1,11 @@
 import type { ChatMessage } from "./message";
 
+/** One file the agent reported editing, with its diff when it sent one. */
+export interface AgentEditedFile {
+  readonly path: string;
+  readonly diff?: { readonly oldText?: string; readonly newText: string };
+}
+
 /**
  * Entities layer — what the agents' tools do to the working tree.
  *
@@ -42,10 +48,56 @@ export function changesFiles(toolName: string | undefined): boolean {
   return CHANGING.some((fragment) => name.includes(fragment));
 }
 
+/** Whether an ACP tool call plausibly touched the working tree: it
+ *  reported a diff or edit-flavoured locations, or its kind says so. */
+function toolCallChangesFiles(message: ChatMessage): boolean {
+  const call = message.toolCall;
+  if (!call) return false;
+  if (call.content.some((item) => item.type === "diff")) return true;
+  return ["edit", "delete", "move", "execute"].includes(call.toolKind);
+}
+
 /**
  * How many file-changing tools this conversation has run. The Changes
- * panel watches this number and reloads git when it moves.
+ * panel watches this number and reloads git when it moves. ACP tool
+ * calls answer from their reported kind/diffs; legacy rows fall back to
+ * the name heuristic.
  */
 export function countFileChangingTools(messages: readonly ChatMessage[]): number {
-  return messages.filter((m) => m.role === "tool" && changesFiles(m.toolName)).length;
+  return messages.filter(
+    (m) =>
+      m.role === "tool" &&
+      (m.toolCall ? toolCallChangesFiles(m) : changesFiles(m.toolName)),
+  ).length;
+}
+
+/**
+ * The files the agent itself reported editing this session, newest diff
+ * per path winning. First-hand knowledge for the Changes panel — unlike
+ * git, this survives the file being reverted-and-re-edited and needs no
+ * guessing about which tool touched what.
+ */
+export function agentEditedFiles(
+  messages: readonly ChatMessage[],
+): readonly AgentEditedFile[] {
+  const byPath = new Map<string, AgentEditedFile>();
+  for (const message of messages) {
+    const call = message.toolCall;
+    if (!call) continue;
+    for (const item of call.content) {
+      if (item.type === "diff") {
+        byPath.set(item.path, {
+          path: item.path,
+          diff: { oldText: item.oldText, newText: item.newText },
+        });
+      }
+    }
+    if (call.toolKind === "edit") {
+      for (const location of call.locations) {
+        if (!byPath.has(location.path))
+          byPath.set(location.path, { path: location.path });
+      }
+    }
+  }
+  return [...byPath.values()];
 }

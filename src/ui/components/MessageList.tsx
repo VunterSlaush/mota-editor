@@ -13,7 +13,7 @@ import {
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { permissionOptionHint } from "../../core/entities/approval";
 import { formatElapsed } from "../../core/entities/duration";
-import type { ChatMessage } from "../../core/entities/message";
+import type { ChatMessage, ToolCallState } from "../../core/entities/message";
 import { fileName } from "../fileName";
 import { CommandText } from "./CommandText";
 import { Markdown } from "./MarkdownLite";
@@ -139,8 +139,11 @@ export function MessageList({
             <ApprovalCard
               key={m.id}
               message={m}
+              guardedToolCall={findToolCall(messages, m.approval?.toolCallId)}
               onRespond={onRespondPermission}
               onShowPlan={onShowPlan}
+              onOpenFile={onOpenFile}
+              onShowAgentDiff={onShowAgentDiff}
             />
           ) : (
             <MessageBubble
@@ -254,6 +257,21 @@ function groupToolRuns(messages: readonly ChatMessage[]): Row[] {
   return rows;
 }
 
+/** The tool call an approval guards, by the id the agent attached. The
+ *  message object is referentially stable, so the memoized card only
+ *  re-renders when the call itself is updated. */
+function findToolCall(
+  messages: readonly ChatMessage[],
+  toolCallId: string | undefined,
+): ToolCallState | undefined {
+  if (!toolCallId) return undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const call = messages[i].toolCall;
+    if (call?.toolCallId === toolCallId) return call;
+  }
+  return undefined;
+}
+
 /** The most recent thing the user asked, whatever the agent has said since. */
 function lastUserMessage(messages: readonly ChatMessage[]): ChatMessage | undefined {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -342,17 +360,28 @@ function stageLabel(stage: string): string {
  *  re-renders the list, and settled rows must not re-render with it. */
 const ApprovalCard = memo(function ApprovalCard({
   message,
+  guardedToolCall,
   onRespond,
   onShowPlan,
+  onOpenFile,
+  onShowAgentDiff,
 }: {
   message: ChatMessage;
+  /** The tool call this request guards, when the agent named it — shown
+   *  so the user approves what will actually run, not just a title. */
+  guardedToolCall?: ToolCallState;
   onRespond: (requestId: string, optionId: string) => void;
   onShowPlan: () => void;
+  onOpenFile: (path: string) => void;
+  onShowAgentDiff: (diff: AgentDiff) => void;
 }) {
   const approval = message.approval;
   if (!approval) return null;
   const answered = Boolean(approval.resolvedOptionId) || Boolean(approval.cancelled);
   const chosen = approval.options.find((o) => o.optionId === approval.resolvedOptionId);
+  const preview =
+    guardedToolCall &&
+    (guardedToolCall.content.length > 0 || guardedToolCall.locations.length > 0);
 
   return (
     <div className="approval">
@@ -363,6 +392,15 @@ const ApprovalCard = memo(function ApprovalCard({
         <button type="button" className="approval__plan-link" onClick={onShowPlan}>
           <ClipboardText /> View the plan
         </button>
+      )}
+      {/* Force-shown while unanswered: what is being approved must be
+          visible at the moment of the decision. */}
+      {preview && !answered && guardedToolCall && (
+        <ToolCallContentView
+          toolCall={guardedToolCall}
+          onOpenFile={onOpenFile}
+          onShowDiff={onShowAgentDiff}
+        />
       )}
       <div className="approval__options">
         {approval.options.map((option) => {

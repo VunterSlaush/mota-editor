@@ -3,7 +3,7 @@ import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSetti
 import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
-import { countFileChangingTools } from "../../core/entities/tool";
+import { agentEditedFiles, countFileChangingTools } from "../../core/entities/tool";
 import type { TabState } from "../../core/state/appState";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryListing } from "../../core/usecases/history";
@@ -153,6 +153,14 @@ export function ChatPanel({
     [messageCount],
   );
 
+  // What the agent said it edited — first-hand data for the Changes
+  // panel, next to (not instead of) what git reports.
+  const agentEdits = useMemo(
+    () => agentEditedFiles(tab.messages),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [messageCount, fileChangingTools],
+  );
+
   // The running agent's own command list is the source of truth; the
   // static + discovered set covers the time before a session starts.
   const commands = tab.agentCommands.length > 0 ? tab.agentCommands : fallbackCommands;
@@ -257,6 +265,8 @@ export function ChatPanel({
                 <ChangesPanel
                   changes={changes}
                   busy={tab.busy}
+                  agentEdits={agentEdits}
+                  onShowAgentDiff={showAgentDiff}
                   onStage={onGitStage}
                   onUnstage={onGitUnstage}
                   onCommitPush={onGitCommitPush}
