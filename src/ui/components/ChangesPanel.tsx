@@ -236,7 +236,7 @@ export function ChangesPanel({
             <ul className="changes__list">
               {changes.commits.map((commit) => {
                 const url = commitUrl(changes.remote, commit.hash);
-                const label = `${commit.author} — ${commit.when}`;
+                const label = `${commit.subject}\n${commit.author} — ${commit.when}`;
                 return (
                   <li key={commit.hash}>
                     <button

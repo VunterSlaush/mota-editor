@@ -33,6 +33,10 @@ import { OptionPicker, type PickerOption } from "./OptionPicker";
 const MAX_INPUT_LINES = 4;
 const LINE_HEIGHT_PX = 22;
 
+/** Bounds for a hand-resized input: one line up to half the window. */
+const MIN_INPUT_HEIGHT_PX = LINE_HEIGHT_PX;
+const maxInputHeight = () => Math.round(window.innerHeight * 0.5);
+
 /**
  * Icons for the core's mode and permission descriptors. They live here,
  * not beside the descriptors: the entities layer knows nothing of icons.
@@ -115,6 +119,8 @@ export function Composer({
 }: Props) {
   const [paletteDismissed, setPaletteDismissed] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  // A height the user dragged the input to; null means auto-grow.
+  const [userHeight, setUserHeight] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
 
@@ -150,16 +156,41 @@ export function Composer({
     return !paletteDismissed && commandToken !== null;
   }
 
-  // Auto-grow: fit the content, capped at MAX_INPUT_LINES.
+  // Auto-grow: fit the content, capped at MAX_INPUT_LINES — unless the
+  // user dragged the input to a height of their own, which then wins.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+    if (userHeight !== null) {
+      el.style.height = `${userHeight}px`;
+      el.style.overflowY = "auto";
+      return;
+    }
     const max = MAX_INPUT_LINES * LINE_HEIGHT_PX;
     el.style.height = "auto";
     const next = Math.min(el.scrollHeight, max);
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
-  }, [draft]);
+  }, [draft, userHeight]);
+
+  // Drag the handle up for a taller input, down for a smaller one.
+  // Double-click returns to auto-grow.
+  const startInputResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = inputRef.current?.offsetHeight ?? MIN_INPUT_HEIGHT_PX;
+
+    const onMove = (move: PointerEvent) => {
+      const next = startHeight - (move.clientY - startY);
+      setUserHeight(Math.min(maxInputHeight(), Math.max(MIN_INPUT_HEIGHT_PX, next)));
+    };
+    const stopDrag = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stopDrag);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", stopDrag);
+  };
 
   // Sending while busy queues the message (Claude-Code style) — the use
   // case delivers it as soon as the running turn completes.
@@ -273,6 +304,13 @@ export function Composer({
         </div>
       )}
       <div className="composer-card">
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: a pointer-only affordance; the input itself stays fully keyboard-accessible at any height */}
+        <div
+          className="composer-card__resize"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={startInputResize}
+          onDoubleClick={() => setUserHeight(null)}
+        />
         <div className="composer-card__input-wrap">
           {/* A textarea cannot colour part of its own value, so the text
               is drawn again underneath and the textarea made

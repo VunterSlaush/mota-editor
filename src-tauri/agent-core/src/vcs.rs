@@ -98,28 +98,54 @@ pub fn parse_log(output: &str) -> Vec<Commit> {
         .collect()
 }
 
-/// One local branch.
+/// One checkout-able branch. `remote` marks a branch that exists only on
+/// a remote so far — checking it out lets git create the local
+/// tracking branch.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Branch {
     pub name: String,
     pub current: bool,
+    pub remote: bool,
 }
 
-/// Parse `git branch --format=%(HEAD)%09%(refname:short)` output:
-/// `*<TAB>name` for the current branch, ` <TAB>name` otherwise.
+/// Parse `git branch --all --format=%(HEAD)%09%(refname:short)%09%(refname)`
+/// output: `*<TAB>short<TAB>refs/...` for the current branch, a space
+/// instead of `*` otherwise.
+///
+/// Locals sort before remotes (refs/heads < refs/remotes), so a remote
+/// branch already checked out locally dedupes against the local entry.
+/// Remote entries keep the branch's own name — `origin/fix-login` shows
+/// (and checks out) as `fix-login`, which git resolves to a new tracking
+/// branch. `origin/HEAD` is a pointer, not a branch, and is skipped.
 pub fn parse_branches(output: &str) -> Vec<Branch> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let (head, name) = line.split_once('\t')?;
-            let name = name.trim();
-            (!name.is_empty()).then(|| Branch {
-                name: name.to_owned(),
-                current: head.trim() == "*",
-            })
-        })
-        .collect()
+    let mut branches: Vec<Branch> = Vec::new();
+    for line in output.lines() {
+        let mut parts = line.splitn(3, '\t');
+        let head = parts.next().unwrap_or_default().trim();
+        let short = parts.next().unwrap_or_default().trim();
+        let full = parts.next().unwrap_or_default().trim();
+        if short.is_empty() {
+            continue;
+        }
+        if let Some(rest) = full.strip_prefix("refs/remotes/") {
+            let Some((_, name)) = rest.split_once('/') else { continue };
+            if name == "HEAD" || name.is_empty() {
+                continue;
+            }
+            if branches.iter().any(|b| b.name == name) {
+                continue;
+            }
+            branches.push(Branch { name: name.to_owned(), current: false, remote: true });
+        } else {
+            branches.push(Branch {
+                name: short.to_owned(),
+                current: head == "*",
+                remote: false,
+            });
+        }
+    }
+    branches
 }
 
 #[cfg(test)]
@@ -165,14 +191,33 @@ mod tests {
 
     #[test]
     fn parses_branches_and_marks_the_current_one() {
-        let out = "*\tmain\n \tfeature/panel\n \tfix-login\n";
+        let out = "*\tmain\trefs/heads/main\n \
+                   \tfeature/panel\trefs/heads/feature/panel\n \
+                   \tfix-login\trefs/heads/fix-login\n";
         let branches = parse_branches(out);
         assert_eq!(branches.len(), 3);
         assert!(branches[0].current);
         assert_eq!(branches[0].name, "main");
+        assert!(!branches[0].remote);
         assert!(!branches[1].current);
         assert_eq!(branches[1].name, "feature/panel");
         assert!(parse_branches("").is_empty());
+    }
+
+    #[test]
+    fn remote_branches_show_without_their_remote_and_dedupe_against_locals() {
+        let out = "*\tmain\trefs/heads/main\n \
+                   \torigin\trefs/remotes/origin/HEAD\n \
+                   \torigin/main\trefs/remotes/origin/main\n \
+                   \torigin/fix-login\trefs/remotes/origin/fix-login\n";
+        let branches = parse_branches(out);
+        assert_eq!(branches.len(), 2);
+        assert_eq!(branches[0].name, "main");
+        assert!(!branches[0].remote);
+        // The remote-only branch appears under its own name, marked remote.
+        assert_eq!(branches[1].name, "fix-login");
+        assert!(branches[1].remote);
+        assert!(!branches[1].current);
     }
 
     #[test]

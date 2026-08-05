@@ -56,6 +56,7 @@ export function MessageList({
   const [following, setFollowing] = useState(true);
   const [promptScrolledAway, setPromptScrolledAway] = useState(false);
   const visible = verbose ? messages : messages.filter((m) => !QUIET_ROLES.has(m.role));
+  const rows = groupToolRuns(visible);
   const last = visible[visible.length - 1];
   const askedMessage = lastUserMessage(visible);
   const contentKey = `${visible.length}:${last?.text.length ?? 0}`;
@@ -110,7 +111,7 @@ export function MessageList({
         />
       )}
       <div className="message-list" ref={scrollerRef} onScroll={onScroll}>
-        {visible.map((m) =>
+        {rows.map(({ message: m, count, detail }) =>
           m.role === "question" ? (
             <QuestionCard key={m.id} message={m} onAnswer={onAnswerQuestion} />
           ) : m.role === "approval" ? (
@@ -124,6 +125,8 @@ export function MessageList({
             <MessageBubble
               key={m.id}
               message={m}
+              count={count}
+              detail={detail}
               commands={commands}
               streaming={m.id === streamingId}
               innerRef={m.id === askedMessage?.id ? promptRef : undefined}
@@ -144,6 +147,48 @@ export function MessageList({
       )}
     </div>
   );
+}
+
+/** A transcript row: one message, standing in for `count` grouped ones. */
+interface Row {
+  readonly message: ChatMessage;
+  readonly count: number;
+  /** Newline-joined details of every run in the group (tool rows only). */
+  readonly detail: string;
+}
+
+/**
+ * Collapse consecutive runs of the same tool into one row with a count.
+ * An agent that searches four times in a row would otherwise print four
+ * separate "search" lines; one row saying "search ×4" with the four
+ * queries stacked under it reads far better. Grouping is by tool name
+ * only — the individual details are kept and listed inside the row
+ * (exact duplicate details collapse to one line).
+ */
+function groupToolRuns(messages: readonly ChatMessage[]): Row[] {
+  const rows: Row[] = [];
+  for (const message of messages) {
+    const prev = rows[rows.length - 1];
+    if (
+      prev &&
+      message.role === "tool" &&
+      prev.message.role === "tool" &&
+      prev.message.toolName === message.toolName
+    ) {
+      const lines = prev.detail.split("\n");
+      const detail = lines.includes(message.text)
+        ? prev.detail
+        : `${prev.detail}\n${message.text}`;
+      rows[rows.length - 1] = {
+        message: prev.message,
+        count: prev.count + 1,
+        detail,
+      };
+    } else {
+      rows.push({ message, count: 1, detail: message.text });
+    }
+  }
+  return rows;
 }
 
 /** The most recent thing the user asked, whatever the agent has said since. */
@@ -272,21 +317,35 @@ const ApprovalCard = memo(function ApprovalCard({
  *  of re-parsing the whole transcript's markdown. */
 const MessageBubble = memo(function MessageBubble({
   message,
+  count = 1,
+  detail,
   commands,
   streaming,
   innerRef,
 }: {
   message: ChatMessage;
+  /** How many tool runs this row stands for (see groupToolRuns). */
+  count?: number;
+  /** Newline-joined details of every run in the group (tool rows only). */
+  detail?: string;
   commands: ReadonlySet<string>;
   streaming: boolean;
   /** Set on the message the PinnedPrompt tracks, so it can be measured. */
   innerRef?: React.Ref<HTMLDivElement>;
 }) {
   if (message.role === "tool") {
+    const lines = (detail ?? message.text).split("\n");
     return (
       <div className="msg msg--tool">
         <span className="msg__tool-name">{message.toolName}</span>
-        <code className="msg__tool-detail">{message.text}</code>
+        <span className="msg__tool-details">
+          {lines.map((line) => (
+            <code key={line} className="msg__tool-detail">
+              {line}
+            </code>
+          ))}
+        </span>
+        {count > 1 && <span className="msg__tool-count">×{count}</span>}
       </div>
     );
   }

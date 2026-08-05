@@ -20,6 +20,9 @@ export interface GitCommit {
 export interface GitBranch {
   readonly name: string;
   readonly current: boolean;
+  /** True for a branch that so far exists only on a remote; checking it
+   *  out creates the local tracking branch. */
+  readonly remote?: boolean;
 }
 
 export interface GitPort {
@@ -27,7 +30,7 @@ export interface GitPort {
   changes(projectPath: string): Promise<GitChange[]>;
   /** Most recent commits, newest first. */
   log(projectPath: string, limit: number): Promise<GitCommit[]>;
-  /** Local branches, with the current one marked. */
+  /** Local and remote-tracking branches, with the current one marked. */
   branches(projectPath: string): Promise<GitBranch[]>;
   /** The `origin` remote's URL, or "" when the repo has none. */
   remoteUrl(projectPath: string): Promise<string>;

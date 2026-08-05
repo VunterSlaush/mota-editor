@@ -151,9 +151,11 @@ pub async fn git_commit(project_path: String, message: String) -> Result<String,
 
 #[tauri::command]
 pub async fn git_branches(project_path: String) -> Result<Vec<Branch>, String> {
+    // --all includes remote-tracking refs, so branches that only exist
+    // on the remote (fetched, never checked out) are offered too.
     let out = run_git(
         &project_path,
-        &["branch", "--format=%(HEAD)%09%(refname:short)"],
+        &["branch", "--all", "--format=%(HEAD)%09%(refname:short)%09%(refname)"],
     )
     .await?;
     Ok(vcs::parse_branches(&out))

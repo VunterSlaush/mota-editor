@@ -589,14 +589,21 @@ pub fn bypass_choice(options: &[PermissionOptionInfo]) -> Option<&PermissionOpti
 /// under bypass permissions: approving a plan is the whole point of plan
 /// mode. Detected by the mode-switch option ids agents attach to
 /// exit-plan requests (Claude: auto/acceptEdits/default/plan/...) and by
-/// the request title as a fallback.
+/// the request title as a fallback. The title check matches "plan" as a
+/// whole word only: tool titles quote the command being run, and a
+/// substring match turned any command mentioning `roofPlane` or
+/// `planner.ts` into a "plan approval" that bypass refused to answer.
 pub fn is_plan_approval(title: &str, options: &[PermissionOptionInfo]) -> bool {
     const MODE_SWITCH_IDS: [&str; 5] =
         ["plan", "acceptEdits", "default", "auto", "bypassPermissions"];
     let has_mode_switch_option = options
         .iter()
         .any(|o| MODE_SWITCH_IDS.contains(&o.option_id.as_str()));
-    has_mode_switch_option || title.to_lowercase().contains("plan")
+    has_mode_switch_option
+        || title
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| word == "plan")
 }
 
 /// Translate `session/update` params into domain events.
@@ -1133,6 +1140,12 @@ mod tests {
         // A normal tool request is not a plan approval.
         assert!(!is_plan_approval(
             "Run npm test",
+            &[opt("allow", "allow_once"), opt("reject", "reject_once")]
+        ));
+        // "plan" must match as a whole word: a command that merely
+        // mentions roofPlane is an ordinary tool request.
+        assert!(!is_plan_approval(
+            "git commit -m \"align the roofPlane accent\"",
             &[opt("allow", "allow_once"), opt("reject", "reject_once")]
         ));
     }

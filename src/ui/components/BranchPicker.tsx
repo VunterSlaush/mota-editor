@@ -79,6 +79,7 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
             >
               <span className="branch-picker__name"> {branch.name}</span>
               {branch.current && <span className="branch-picker__current">current</span>}
+              {branch.remote && <span className="branch-picker__remote">remote</span>}
             </div>
           ))}
         </div>

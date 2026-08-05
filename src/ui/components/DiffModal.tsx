@@ -1,5 +1,5 @@
 import { X } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   countChanges,
   type DiffLine,
@@ -26,8 +26,40 @@ type Load =
  * UI — one file's change, old on the left and new on the right, in the
  * red/green everyone already reads. Escape or a click outside closes it.
  */
+/** A resized modal never goes below this; the CSS caps handle the top end. */
+const MIN_WIDTH_PX = 480;
+const MIN_HEIGHT_PX = 240;
+
 export function DiffModal({ path, staged, load, onClose }: Props) {
   const [result, setResult] = useState<Load>({ state: "loading" });
+  // A size the user dragged the modal to; null means the default layout.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Drag the bottom-right grip. The modal is horizontally centred, so
+  // each pixel of width is split between both edges — the ×2 keeps the
+  // grabbed corner under the cursor. Double-click returns to the default.
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const el = modalRef.current;
+    if (!el) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const { width, height } = el.getBoundingClientRect();
+
+    const onMove = (move: PointerEvent) => {
+      setSize({
+        width: Math.max(MIN_WIDTH_PX, width + (move.clientX - startX) * 2),
+        height: Math.max(MIN_HEIGHT_PX, height + (move.clientY - startY)),
+      });
+    };
+    const stopDrag = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stopDrag);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", stopDrag);
+  };
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -60,10 +92,12 @@ export function DiffModal({ path, staged, load, onClose }: Props) {
   return (
     <div className="modal-overlay" onMouseDown={onClose}>
       <div
+        ref={modalRef}
         className="diff-modal"
         role="dialog"
         aria-modal="true"
         aria-label={`Diff for ${path}`}
+        style={size ?? undefined}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <header className="diff-modal__header">
@@ -118,6 +152,13 @@ export function DiffModal({ path, staged, load, onClose }: Props) {
             </section>
           ))}
         </div>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: a pointer-only affordance; the modal is fully usable at its default size */}
+        <div
+          className="diff-modal__resize"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={startResize}
+          onDoubleClick={() => setSize(null)}
+        />
       </div>
     </div>
   );

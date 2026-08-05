@@ -441,10 +441,23 @@ body {
   font-weight: 600;
 }
 
+.msg__tool-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .msg__tool-detail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.msg__tool-count {
+  flex-shrink: 0;
+  color: var(--tool);
+  font-weight: 600;
+  opacity: 0.8;
 }
 
 /* ---- Chat body split (chat | changes) ---- */
@@ -1384,6 +1397,14 @@ body {
   padding: 0 5px;
 }
 
+.branch-picker__remote {
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
 .branch-picker__empty {
   padding: 12px 14px;
   color: var(--text-dim);
@@ -1753,6 +1774,7 @@ body {
 
 /* ---- Diff modal ---- */
 .diff-modal {
+  position: relative;
   width: 1100px;
   max-width: 94vw;
   max-height: calc(100vh - 140px);
@@ -1834,6 +1856,35 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+/* Grab corner: drag to resize the modal. The chevron marks the spot but
+   the whole 16px square is draggable. */
+.diff-modal__resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 1;
+}
+
+.diff-modal__resize::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  border-radius: 0 0 3px 0;
+}
+
+.diff-modal__resize:hover::after,
+.diff-modal__resize:active::after {
+  border-color: var(--text-dim);
 }
 
 /* Monospace belongs to the diff itself, not to the notes around it. */
@@ -2371,6 +2422,30 @@ body {
   overflow-wrap: break-word;
   word-break: normal;
   tab-size: 4;
+}
+
+/* Grab zone along the card's top edge: drag to resize the input. The
+   visible grip only appears on hover so the card stays clean. */
+.composer-card__resize {
+  height: 6px;
+  margin-bottom: -6px;
+  position: relative;
+  z-index: 1;
+  cursor: ns-resize;
+  border-radius: 14px 14px 0 0;
+}
+
+.composer-card__resize:hover::after,
+.composer-card__resize:active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 36px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--border);
 }
 
 .composer-card__input-wrap {
