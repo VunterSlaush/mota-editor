@@ -8,12 +8,13 @@ import {
   CaretDown,
   CaretRight,
   Check,
+  DotsThree,
   GitBranch,
   GitDiff,
   Minus,
   Plus,
 } from "@phosphor-icons/react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { commitUrl } from "../../core/entities/gitRemote";
 import type { GitChange } from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
@@ -340,36 +341,118 @@ function ChangeList({
                 <span className="changes__dir">{parentDir(file.path)}</span>
               )}
             </button>
-            <button
-              type="button"
-              className="changes__file-action"
-              title={`Show the diff for ${file.path}`}
-              onClick={() => onShowDiff(file)}
-            >
-              <GitDiff size={14} />
-            </button>
-            {onDisk && (
-              <button
-                type="button"
-                className="changes__file-action"
-                title={`Open ${file.path} in your editor`}
-                onClick={() => onOpenFile(file.path)}
-              >
-                <ArrowSquareOut size={14} />
-              </button>
-            )}
-            <button
-              type="button"
-              className="changes__file-action"
-              title={`${actionTitle} ${file.path}`}
-              disabled={disabled}
-              onClick={() => onAction(file.path)}
-            >
-              <ActionIcon size={14} />
-            </button>
+            <FileMenu
+              label={`Actions for ${file.path}`}
+              items={[
+                {
+                  label: "Show diff",
+                  icon: <GitDiff size={14} />,
+                  onSelect: () => onShowDiff(file),
+                },
+                ...(onDisk
+                  ? [
+                      {
+                        label: "Open in editor",
+                        icon: <ArrowSquareOut size={14} />,
+                        onSelect: () => onOpenFile(file.path),
+                      },
+                    ]
+                  : []),
+                {
+                  label: actionTitle,
+                  icon: <ActionIcon size={14} />,
+                  disabled,
+                  onSelect: () => onAction(file.path),
+                },
+              ]}
+            />
           </li>
         );
       })}
     </ul>
+  );
+}
+
+interface FileMenuItem {
+  label: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  onSelect: () => void;
+}
+
+/**
+ * UI — the kebab menu on a changed-file row. The actions used to be
+ * inline icon buttons, but three of them ate the row's width and long
+ * file names were cut off; one trigger keeps the name whole.
+ */
+function FileMenu({ label, items }: { label: string; items: FileMenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  // The sidebar scrolls, so a menu on the bottom-most rows would be
+  // clipped opening downward — flip it up when the room below is short.
+  const [placement, setPlacement] = useState<"bottom" | "top">("bottom");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const toggle = () => {
+    if (!open) {
+      const rect = rootRef.current?.getBoundingClientRect();
+      setPlacement(rect && window.innerHeight - rect.bottom < 140 ? "top" : "bottom");
+    }
+    setOpen(!open);
+  };
+
+  // A click anywhere else closes the panel (the OptionPicker's pattern).
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div className={`file-menu ${open ? "file-menu--open" : ""}`} ref={rootRef}>
+      <button
+        type="button"
+        className="changes__file-action"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={label}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+        }}
+      >
+        <DotsThree size={16} weight="bold" />
+      </button>
+      {open && (
+        <div
+          className={`file-menu__panel file-menu__panel--${placement}`}
+          role="menu"
+          aria-label={label}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+          }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              className="file-menu__option"
+              disabled={item.disabled}
+              onClick={() => {
+                setOpen(false);
+                item.onSelect();
+              }}
+            >
+              <span className="file-menu__icon">{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

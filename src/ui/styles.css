@@ -1496,7 +1496,9 @@ body {
 
 .changes__file-action {
   flex: none;
-  display: inline-flex;
+  /* Gone, not just invisible — the file name gets the space back
+     until the row is hovered. */
+  display: none;
   align-items: center;
   border: none;
   background: transparent;
@@ -1504,11 +1506,10 @@ body {
   cursor: pointer;
   padding: 0 4px;
   border-radius: 4px;
-  visibility: hidden;
 }
 
 .changes__item:hover .changes__file-action {
-  visibility: visible;
+  display: inline-flex;
 }
 
 .changes__file-action:hover {
@@ -1519,6 +1520,76 @@ body {
 .changes__file-action:disabled {
   opacity: 0.3;
   cursor: default;
+}
+
+/* ---- Per-file kebab menu ----
+   One trigger instead of a row of inline action icons, so long file
+   names keep the row's width. */
+.file-menu {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+/* The row hides its action button until hover; an open menu must keep
+   its trigger visible even when the pointer is over the panel. */
+.file-menu--open .changes__file-action {
+  display: inline-flex;
+}
+
+.file-menu__panel {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  min-width: 150px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.file-menu__panel--bottom {
+  top: calc(100% + 2px);
+}
+
+.file-menu__panel--top {
+  bottom: calc(100% + 2px);
+}
+
+.file-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-menu__option:hover:not(:disabled) {
+  background: var(--bg-input);
+}
+
+.file-menu__option:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.file-menu__icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-dim);
+}
+
+.file-menu__option:hover:not(:disabled) .file-menu__icon {
+  color: var(--accent);
 }
 
 /* ---- Agent questions ----
