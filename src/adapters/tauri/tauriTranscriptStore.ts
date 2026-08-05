@@ -33,7 +33,7 @@ export class TauriTranscriptStore implements TranscriptStore {
     await invoke("delete_session", { projectPath, id });
   }
 
-  async readPlanFile(path: string): Promise<string | null> {
-    return invoke<string | null>("read_plan_file", { path });
+  async readPlanFile(projectPath: string, path: string): Promise<string | null> {
+    return invoke<string | null>("read_plan_file", { projectPath, path });
   }
 }

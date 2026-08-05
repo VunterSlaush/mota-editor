@@ -87,6 +87,13 @@ pub async fn git_branches(project_path: String) -> Result<Vec<Branch>, String> {
 
 #[tauri::command]
 pub async fn git_checkout(project_path: String, branch: String) -> Result<String, String> {
+    // Branch names come from `git branch` output of the opened repo. A
+    // hostile repo can hold refs created via plumbing that start with
+    // `-`; git would parse those as option flags. Legitimate branches
+    // can never start with `-` (check-ref-format forbids it).
+    if branch.starts_with('-') {
+        return Err(format!("Refusing to check out suspicious ref name: {branch}"));
+    }
     run_git(&project_path, &["checkout", &branch]).await.map(summary)
 }
 

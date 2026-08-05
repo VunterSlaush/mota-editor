@@ -24,6 +24,19 @@ export type IdGenerator = () => string;
 export const AUTO_COMPACT_THRESHOLD = 0.85;
 
 /**
+ * Streamed text arrives at token rate, and every dispatch re-renders the
+ * transcript. Deltas are buffered and flushed at most this often — one
+ * render per frame-ish instead of one per token.
+ */
+const DELTA_FLUSH_MS = 33;
+
+interface DeltaBuffer {
+  role: "assistant" | "thought";
+  text: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/**
  * Use case — send the user's prompt to the tab's selected agent and fold
  * the agent's event stream back into the conversation. The heart of the
  * app. After every completed turn the conversation is persisted to the
@@ -111,7 +124,18 @@ export class SendPrompt {
     }
   }
 
+  private readonly deltas = new Map<string, DeltaBuffer>();
+
   private onEvent(tabId: string, event: AgentTurnEvent): void {
+    // Deltas coalesce; everything else flushes first so ordering holds
+    // (a tool row must land after the text that preceded it).
+    if (event.kind === "assistantDelta" || event.kind === "thoughtDelta") {
+      const role = event.kind === "assistantDelta" ? "assistant" : "thought";
+      this.bufferDelta(tabId, role, event.text);
+      return;
+    }
+    this.flushDeltas(tabId);
+
     const tab = tabById(this.store.getState(), tabId);
     if (!tab) return;
     const provider = tab.project.provider;
@@ -133,34 +157,6 @@ export class SendPrompt {
           message: assistantMessage(event.text),
         });
         break;
-
-      case "assistantDelta": {
-        const last = tab.messages[tab.messages.length - 1];
-        if (last?.role === "assistant") {
-          this.store.dispatch({ type: "chat/assistantDelta", tabId, text: event.text });
-        } else {
-          this.store.dispatch({
-            type: "chat/messageAppended",
-            tabId,
-            message: assistantMessage(event.text),
-          });
-        }
-        break;
-      }
-
-      case "thoughtDelta": {
-        const last = tab.messages[tab.messages.length - 1];
-        if (last?.role === "thought") {
-          this.store.dispatch({ type: "chat/thoughtDelta", tabId, text: event.text });
-        } else {
-          this.store.dispatch({
-            type: "chat/messageAppended",
-            tabId,
-            message: thoughtMessage(event.text),
-          });
-        }
-        break;
-      }
 
       case "plan":
         this.store.dispatch({ type: "tab/planUpdated", tabId, plan: event.entries });
@@ -246,6 +242,48 @@ export class SendPrompt {
         break;
       }
     }
+  }
+
+  private bufferDelta(tabId: string, role: "assistant" | "thought", text: string): void {
+    const existing = this.deltas.get(tabId);
+    if (existing && existing.role !== role) this.flushDeltas(tabId);
+    const buffer = this.deltas.get(tabId);
+    if (buffer) {
+      buffer.text += text;
+      return;
+    }
+    this.deltas.set(tabId, {
+      role,
+      text,
+      timer: setTimeout(() => this.flushDeltas(tabId), DELTA_FLUSH_MS),
+    });
+  }
+
+  private flushDeltas(tabId: string): void {
+    const buffer = this.deltas.get(tabId);
+    if (!buffer) return;
+    this.deltas.delete(tabId);
+    clearTimeout(buffer.timer);
+
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return;
+    const last = tab.messages[tab.messages.length - 1];
+    if (last?.role === buffer.role) {
+      if (buffer.role === "assistant") {
+        this.store.dispatch({ type: "chat/assistantDelta", tabId, text: buffer.text });
+      } else {
+        this.store.dispatch({ type: "chat/thoughtDelta", tabId, text: buffer.text });
+      }
+      return;
+    }
+    this.store.dispatch({
+      type: "chat/messageAppended",
+      tabId,
+      message:
+        buffer.role === "assistant"
+          ? assistantMessage(buffer.text)
+          : thoughtMessage(buffer.text),
+    });
   }
 
   /**

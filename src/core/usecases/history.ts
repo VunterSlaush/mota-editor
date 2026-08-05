@@ -165,7 +165,9 @@ export class SessionHistory {
     }));
     // The plan is stored as a PATH — read the content back from disk.
     const planMarkdown = transcript.planFilePath
-      ? await this.transcriptStore.readPlanFile(transcript.planFilePath).catch(() => null)
+      ? await this.transcriptStore
+          .readPlanFile(tab.project.path, transcript.planFilePath)
+          .catch(() => null)
       : null;
 
     this.store.dispatch({

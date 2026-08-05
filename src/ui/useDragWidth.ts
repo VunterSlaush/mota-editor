@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Which way the panel grows as the pointer moves right. */
 export type GrowDirection = "right" | "left";
@@ -22,6 +22,9 @@ export function useDragWidth(
   grow: GrowDirection = "right",
 ): DragWidth {
   const [width, setWidth] = useState(initial);
+  // Unmounting mid-drag (tab closed) must not leave window listeners behind.
+  const stopDragRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopDragRef.current?.(), []);
 
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -33,13 +36,16 @@ export function useDragWidth(
       const next = startWidth + sign * (move.clientX - startX);
       setWidth(Math.min(max, Math.max(min, next)));
     };
-    const onUp = () => {
+    const stopDrag = () => {
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointerup", stopDrag);
+      stopDragRef.current = null;
     };
 
+    stopDragRef.current?.();
+    stopDragRef.current = stopDrag;
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", stopDrag);
   };
 
   return { width, startResize };

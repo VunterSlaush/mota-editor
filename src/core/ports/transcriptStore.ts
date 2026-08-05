@@ -36,6 +36,11 @@ export interface TranscriptStore {
   list(projectPath: string): Promise<TranscriptMeta[]>;
   load(projectPath: string, id: string): Promise<PersistedTranscript | null>;
   remove(projectPath: string, id: string): Promise<void>;
-  /** Content of a plan file by path; null when it no longer exists. */
-  readPlanFile(path: string): Promise<string | null>;
+  /**
+   * Content of a plan file by path; null when it no longer exists. The
+   * path was recorded from AGENT output, so implementations must confine
+   * reads to the project folder (or the agent's own plan directory) —
+   * never treat it as a free file-read.
+   */
+  readPlanFile(projectPath: string, path: string): Promise<string | null>;
 }

@@ -80,7 +80,7 @@ class FakeTranscriptStore implements TranscriptStore {
     return null;
   }
   async remove(): Promise<void> {}
-  async readPlanFile(): Promise<string | null> {
+  async readPlanFile(_projectPath: string, _path: string): Promise<string | null> {
     return null;
   }
 }

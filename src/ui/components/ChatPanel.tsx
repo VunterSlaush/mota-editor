@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import type { CommandInfo } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
@@ -93,10 +93,18 @@ export function ChatPanel({
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
 
+  // Reaches memoized transcript rows — must not be a fresh arrow per render.
+  const showPlan = useCallback(() => setPlanOpen(true), []);
+
   // Bumps every time the agent runs a tool that could touch the tree.
+  // Keyed on length, not the array: deltas replace the array per token
+  // but only ever mutate the LAST message's text; tool rows always add
+  // a message, so length is the sufficient (and cheap) dependency.
+  const messageCount = tab.messages.length;
   const fileChangingTools = useMemo(
     () => countFileChangingTools(tab.messages),
-    [tab.messages],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [messageCount],
   );
 
   // The running agent's own command list is the source of truth; the
@@ -234,17 +242,13 @@ export function ChatPanel({
           </>
         )}
         <div className="chat-panel__main">
-          <PlanBar
-            plan={tab.plan}
-            planMarkdown={tab.planMarkdown}
-            onOpen={() => setPlanOpen(true)}
-          />
+          <PlanBar plan={tab.plan} planMarkdown={tab.planMarkdown} onOpen={showPlan} />
           <MessageList
             messages={tab.messages}
             busy={tab.busy}
             verbose={tab.project.verbose}
             onRespondPermission={onRespondPermission}
-            onShowPlan={() => setPlanOpen(true)}
+            onShowPlan={showPlan}
           />
           <Composer
             busy={tab.busy}

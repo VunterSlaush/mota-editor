@@ -50,6 +50,10 @@ impl Provider for Gemini {
         parse_json_payload(line).unwrap_or_default()
     }
 
+    fn wants_full_output(&self) -> bool {
+        true // the JSON payload may span lines; parse_final needs it all
+    }
+
     fn parse_final(&self, full_output: &str, emitted_message: bool) -> Vec<AgentEvent> {
         if emitted_message {
             return Vec::new();

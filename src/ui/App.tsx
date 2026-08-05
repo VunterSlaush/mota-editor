@@ -30,6 +30,16 @@ export function App({ context }: { context: AppContext }) {
     (provider: ProviderId) => context.providerProbe.probe(provider, projectPath),
     [context, projectPath],
   );
+  // Stable identities: these reach memoized transcript rows (ApprovalCard)
+  // and a document-level keydown effect; fresh arrows every render would
+  // defeat the memo / re-register the listener on every streamed token.
+  const activeProjectId = tab?.project.id ?? "";
+  const respondPermission = useCallback(
+    (requestId: string, optionId: string) =>
+      void context.respondPermission.execute(activeProjectId, requestId, optionId),
+    [context, activeProjectId],
+  );
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   return (
     <div className="app">
@@ -94,9 +104,7 @@ export function App({ context }: { context: AppContext }) {
           onGitCheckout={(branch) => context.gitActions.checkout(tab.project.id, branch)}
           onGitPush={() => context.gitActions.push(tab.project.id)}
           onGitPull={() => context.gitActions.pull(tab.project.id)}
-          onRespondPermission={(requestId, optionId) =>
-            void context.respondPermission.execute(tab.project.id, requestId, optionId)
-          }
+          onRespondPermission={respondPermission}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
           onPickFiles={() => context.filePicker.pickFiles()}
         />
@@ -110,7 +118,7 @@ export function App({ context }: { context: AppContext }) {
           loadCommands={loadCommandsFor}
           probeProvider={probeProvider}
           newId={context.newId}
-          onClose={() => setSettingsOpen(false)}
+          onClose={closeSettings}
         />
       )}
     </div>

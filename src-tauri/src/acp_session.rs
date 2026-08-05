@@ -7,7 +7,10 @@
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+// Locks recover from poisoning: the guarded state (session maps,
+// pending-call tables) stays coherent even if a holder panicked, and
+// permanently wedging every future turn is the worse failure.
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use agent_core::acp;
@@ -63,11 +66,11 @@ pub struct AcpSession {
 
 impl AcpSessions {
     fn get(&self, tab_id: &str) -> Option<Arc<AcpSession>> {
-        self.0.lock().unwrap().get(tab_id).cloned()
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).get(tab_id).cloned()
     }
 
     pub fn end_session(&self, tab_id: &str) {
-        if let Some(session) = self.0.lock().unwrap().remove(tab_id) {
+        if let Some(session) = self.0.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id) {
             session.shutdown();
         }
     }
@@ -79,11 +82,11 @@ impl AcpSession {
     }
 
     fn sid(&self) -> String {
-        self.session_id.lock().unwrap().clone()
+        self.session_id.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn set_sid(&self, session_id: String) {
-        *self.session_id.lock().unwrap() = session_id;
+        *self.session_id.lock().unwrap_or_else(PoisonError::into_inner) = session_id;
     }
 
     async fn write_message(&self, message: &Value) -> Result<(), String> {
@@ -99,7 +102,7 @@ impl AcpSession {
     /// Send a request and await its response (no timeout — callers wrap).
     async fn call(&self, message: Value, id: i64) -> Result<Value, String> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        self.pending.lock().unwrap_or_else(PoisonError::into_inner).insert(id, tx);
         self.write_message(&message).await?;
         rx.await
             .unwrap_or_else(|_| Err("The agent ended before responding.".to_owned()))
@@ -114,16 +117,16 @@ impl AcpSession {
         tokio::time::timeout(timeout, self.call(message, id))
             .await
             .unwrap_or_else(|_| {
-                self.pending.lock().unwrap().remove(&id);
+                self.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
                 Err("The agent did not respond in time.".to_owned())
             })
     }
 
     fn shutdown(&self) {
-        for (_, tx) in self.pending.lock().unwrap().drain() {
+        for (_, tx) in self.pending.lock().unwrap_or_else(PoisonError::into_inner).drain() {
             let _ = tx.send(Err("Session closed.".to_owned()));
         }
-        if let Some(mut child) = self.child.lock().unwrap().take() {
+        if let Some(mut child) = self.child.lock().unwrap_or_else(PoisonError::into_inner).take() {
             let _ = child.start_kill();
         }
     }
@@ -163,7 +166,7 @@ pub async fn start_turn(
 
     let id = session.request_id();
     let prompt = acp::prompt_request_for_provider(id, &session.sid(), provider_id, &request);
-    *session.current_turn.lock().unwrap() = Some(id);
+    *session.current_turn.lock().unwrap_or_else(PoisonError::into_inner) = Some(id);
 
     let app_for_task = app.clone();
     let tab = tab_id.to_owned();
@@ -171,7 +174,7 @@ pub async fn start_turn(
     tauri::async_runtime::spawn(async move {
         let result = session_for_task.call(prompt, id).await;
         session_for_task.turn_active.store(false, Ordering::SeqCst);
-        let mut current = session_for_task.current_turn.lock().unwrap();
+        let mut current = session_for_task.current_turn.lock().unwrap_or_else(PoisonError::into_inner);
         if *current == Some(id) {
             *current = None;
         }
@@ -203,7 +206,7 @@ const CANCEL_GRACE: Duration = Duration::from_secs(8);
 /// even if the agent never responds.
 pub async fn cancel_turn(sessions: &AcpSessions, tab_id: &str) {
     let Some(session) = sessions.get(tab_id) else { return };
-    let pending: Vec<i64> = session.pending_permissions.lock().unwrap().drain(..).collect();
+    let pending: Vec<i64> = session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).drain(..).collect();
     for id in pending {
         let _ = session.write_message(&acp::permission_cancelled_response(id)).await;
     }
@@ -213,15 +216,15 @@ pub async fn cancel_turn(sessions: &AcpSessions, tab_id: &str) {
 
     // Watchdog: if the cancelled prompt's response never arrives, fail
     // its pending call so `turn_active` clears and the tab stays usable.
-    let cancelled_turn = *session.current_turn.lock().unwrap();
+    let cancelled_turn = *session.current_turn.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(turn_id) = cancelled_turn {
         let session = Arc::clone(&session);
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(CANCEL_GRACE).await;
-            if *session.current_turn.lock().unwrap() != Some(turn_id) {
+            if *session.current_turn.lock().unwrap_or_else(PoisonError::into_inner) != Some(turn_id) {
                 return; // resolved normally in the meantime
             }
-            if let Some(tx) = session.pending.lock().unwrap().remove(&turn_id) {
+            if let Some(tx) = session.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&turn_id) {
                 let _ = tx.send(Err("Cancelled.".to_owned()));
             }
         });
@@ -241,7 +244,7 @@ pub async fn respond_permission(
     let id: i64 = request_id
         .parse()
         .map_err(|_| format!("Invalid permission request id: {request_id}"))?;
-    session.pending_permissions.lock().unwrap().retain(|p| *p != id);
+    session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).retain(|p| *p != id);
     session
         .write_message(&acp::permission_selected_response(id, option_id))
         .await
@@ -452,10 +455,10 @@ pub(crate) fn spawn_agent(
 
     let mut last_error: Option<std::io::Error> = None;
     for candidate in &candidates {
-        // On Windows every spawn goes through `cmd /C`, which "succeeds"
-        // even for missing programs — check existence explicitly instead
-        // of relying on the spawn error.
-        if !binary_exists(&candidate.program) {
+        // Only try candidates that actually resolve on PATH, so the
+        // install hint (not a raw spawn error) reaches the user when
+        // nothing is installed. The lookup is cached — no process spawn.
+        if runner::resolve_program(&candidate.program).is_none() {
             continue;
         }
         let mut command = runner::os_command(&candidate.program, &candidate.args);
@@ -479,27 +482,6 @@ pub(crate) fn spawn_agent(
     Err(AcpStartError::Unavailable(format!(
         "{detail} (install with: {install_hint})"
     )))
-}
-
-#[cfg(windows)]
-fn binary_exists(program: &str) -> bool {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("where")
-        .arg(program)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-#[cfg(not(windows))]
-fn binary_exists(program: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(program)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 fn spawn_reader(
@@ -532,7 +514,7 @@ fn spawn_reader(
 async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, line: &str) {
     match acp::parse_incoming(line) {
         Some(acp::Incoming::Response { id, result }) => {
-            if let Some(tx) = session.pending.lock().unwrap().remove(&id) {
+            if let Some(tx) = session.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id) {
                 let _ = tx.send(result);
             }
         }
@@ -555,7 +537,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                     return;
                 }
             }
-            session.pending_permissions.lock().unwrap().push(id);
+            session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).push(id);
             runner::emit(
                 app,
                 tab_id,

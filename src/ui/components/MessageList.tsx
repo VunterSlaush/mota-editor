@@ -5,7 +5,7 @@ import {
   LockKey,
   Paperclip,
 } from "@phosphor-icons/react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { permissionOptionHint } from "../../core/entities/approval";
 import type { ChatMessage } from "../../core/entities/message";
 import { fileName } from "../fileName";
@@ -166,8 +166,10 @@ function WorkingIndicator() {
   );
 }
 
-/** The agent asked for permission: title + one button per option. */
-function ApprovalCard({
+/** The agent asked for permission: title + one button per option.
+ *  Memoized (like MessageBubble): while a turn streams, every delta
+ *  re-renders the list, and settled rows must not re-render with it. */
+const ApprovalCard = memo(function ApprovalCard({
   message,
   onRespond,
   onShowPlan,
@@ -216,9 +218,12 @@ function ApprovalCard({
       )}
     </div>
   );
-}
+});
 
-function MessageBubble({
+/** Memoized: message objects are referentially stable except the one
+ *  still streaming, so each delta re-renders exactly one bubble instead
+ *  of re-parsing the whole transcript's markdown. */
+const MessageBubble = memo(function MessageBubble({
   message,
   streaming,
   innerRef,
@@ -258,4 +263,4 @@ function MessageBubble({
       )}
     </div>
   );
-}
+});

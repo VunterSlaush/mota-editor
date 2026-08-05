@@ -33,6 +33,13 @@ pub trait Provider: Send + Sync {
     fn parse_final(&self, _full_output: &str, _emitted_message: bool) -> Vec<AgentEvent> {
         Vec::new()
     }
+
+    /// Whether the runner must retain the full stdout for
+    /// [`Provider::parse_final`]. Off by default so long line-oriented
+    /// streams (Claude, Codex) are not accumulated in memory.
+    fn wants_full_output(&self) -> bool {
+        false
+    }
 }
 
 /// Registry of available providers (the only place adapters are listed).

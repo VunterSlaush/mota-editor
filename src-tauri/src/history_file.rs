@@ -42,50 +42,69 @@ fn session_path(app: &AppHandle, project_path: &str, id: &str) -> io::Result<Pat
 }
 
 #[tauri::command]
-pub fn save_session(
+pub async fn save_session(
     app: AppHandle,
     project_path: String,
     id: String,
     json: String,
 ) -> Result<(), String> {
-    let path = session_path(&app, &project_path, &id).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    crate::commands::run_blocking(move || {
+        let path = session_path(&app, &project_path, &id).map_err(|e| e.to_string())?;
+        crate::workspace_file::write_atomic(&path, json.as_bytes()).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_sessions(app: AppHandle, project_path: String) -> Result<Vec<SessionMeta>, String> {
-    let dir = sessions_dir(&app, &project_path).map_err(|e| e.to_string())?;
-    let mut sessions: Vec<SessionMeta> = fs::read_dir(dir)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .filter_map(|entry| read_meta(&entry.path()))
-        .collect();
-    sessions.sort_by_key(|s| std::cmp::Reverse(s.saved_at));
-    Ok(sessions)
+pub async fn list_sessions(
+    app: AppHandle,
+    project_path: String,
+) -> Result<Vec<SessionMeta>, String> {
+    crate::commands::run_blocking(move || {
+        let dir = sessions_dir(&app, &project_path).map_err(|e| e.to_string())?;
+        let mut sessions: Vec<SessionMeta> = fs::read_dir(dir)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .filter_map(|entry| read_meta(&entry.path()))
+            .collect();
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.saved_at));
+        Ok(sessions)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn load_session(
+pub async fn load_session(
     app: AppHandle,
     project_path: String,
     id: String,
 ) -> Result<Option<String>, String> {
-    let path = session_path(&app, &project_path, &id).map_err(|e| e.to_string())?;
-    match fs::read_to_string(path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+    crate::commands::run_blocking(move || {
+        let path = session_path(&app, &project_path, &id).map_err(|e| e.to_string())?;
+        match fs::read_to_string(path) {
+            Ok(contents) => Ok(Some(contents)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_session(app: AppHandle, project_path: String, id: String) -> Result<(), String> {
-    let path = session_path(&app, &project_path, &id).map_err(|e| e.to_string())?;
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+pub async fn delete_session(
+    app: AppHandle,
+    project_path: String,
+    id: String,
+) -> Result<(), String> {
+    crate::commands::run_blocking(move || {
+        let path = session_path(&app, &project_path, &id).map_err(|e| e.to_string())?;
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await
 }
 
 fn read_meta(path: &std::path::Path) -> Option<SessionMeta> {

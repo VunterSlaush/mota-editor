@@ -3,19 +3,26 @@
 // screenshots at each interesting state. Run: node scripts/ui-probe.mjs
 
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { chromium } from "playwright";
 
-const OUT = "/tmp/ui-shots";
-fs.mkdirSync(OUT, { recursive: true });
+// A private temp dir per run: a fixed /tmp path is world-writable, so a
+// pre-planted symlink could redirect these screenshots.
+const OUT = fs.mkdtempSync(path.join(os.tmpdir(), "ui-shots-"));
+console.log(`screenshots: ${OUT}`);
 
 const shot = async (page, name) => {
   await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: false });
   console.log(`shot: ${name}`);
 };
 
+// The sandbox stays ON by default — it is the barrier between page
+// content and this machine. Containers that genuinely cannot use it must
+// opt in explicitly.
 const browser = await chromium.launch({
-  executablePath: "/opt/pw-browsers/chromium",
-  args: ["--no-sandbox"],
+  executablePath: process.env.PW_CHROMIUM_PATH || undefined,
+  args: process.env.PW_NO_SANDBOX === "1" ? ["--no-sandbox"] : [],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on("pageerror", (e) => console.log("pageerror:", e.message));

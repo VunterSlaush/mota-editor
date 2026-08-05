@@ -47,22 +47,32 @@ interface WireEvent {
 }
 
 export class TauriAgentGateway implements AgentGateway {
+  /**
+   * One process-wide listener routes events to the active handler per
+   * tab. Registering a listener per turn leaked them (a cancelled turn
+   * never saw the `completed` that tore its listener down) and a leaked
+   * one folded every later event twice.
+   */
+  private readonly handlers = new Map<string, (event: AgentTurnEvent) => void>();
+  private listening: Promise<UnlistenFn> | null = null;
+
+  private async ensureListener(): Promise<void> {
+    this.listening ??= listen<WireEvent>("agent-event", ({ payload }) => {
+      const handler = this.handlers.get(payload.tabId);
+      if (!handler) return;
+      const event = toDomainEvent(payload.event);
+      handler(event);
+      if (event.kind === "completed") this.handlers.delete(payload.tabId);
+    });
+    await this.listening;
+  }
+
   async startTurn(
     request: AgentTurnRequest,
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<void> {
-    let unlisten: UnlistenFn | null = null;
-    const stopListening = () => {
-      unlisten?.();
-      unlisten = null;
-    };
-
-    unlisten = await listen<WireEvent>("agent-event", ({ payload }) => {
-      if (payload.tabId !== request.tabId) return;
-      const event = toDomainEvent(payload.event);
-      onEvent(event);
-      if (event.kind === "completed") stopListening();
-    });
+    await this.ensureListener();
+    this.handlers.set(request.tabId, onEvent);
 
     try {
       await invoke("start_turn", {
@@ -81,7 +91,7 @@ export class TauriAgentGateway implements AgentGateway {
         },
       });
     } catch (e) {
-      stopListening();
+      this.handlers.delete(request.tabId);
       throw e instanceof Error ? e : new Error(String(e));
     }
   }
@@ -151,6 +161,9 @@ export class TauriAgentGateway implements AgentGateway {
     },
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<void> {
+    // A stale per-tab handler (e.g. left by a cancelled headless turn)
+    // must not also fold the replay into the live chat.
+    this.handlers.delete(request.tabId);
     const unlisten = await listen<WireEvent>("agent-event", ({ payload }) => {
       if (payload.tabId !== request.tabId) return;
       onEvent(toDomainEvent(payload.event));

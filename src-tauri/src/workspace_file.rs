@@ -30,8 +30,25 @@ pub fn load(app: &AppHandle) -> io::Result<Option<String>> {
 
 pub fn save(app: &AppHandle, json: &str) -> io::Result<()> {
     let path = workspace_path(app)?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(&tmp, &path)?;
-    Ok(())
+    write_atomic(&path, json.as_bytes())
+}
+
+/// Write via a fresh temp file + atomic rename. `create_new` refuses to
+/// write through anything pre-planted at the temp path (a symlink would
+/// redirect the write), and a crash mid-write can never truncate the
+/// real file.
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let _ = fs::remove_file(&tmp);
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let result = file.write_all(bytes);
+    drop(file);
+    match result.and_then(|()| fs::rename(&tmp, path)) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
 }

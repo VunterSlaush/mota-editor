@@ -36,9 +36,14 @@ impl Provider for Codex {
             args.push("--model".to_owned());
             args.push(model.to_owned());
         }
+        // The effort lands inside a TOML string literal; anything beyond
+        // a plain identifier could close the quote and append arbitrary
+        // config overrides (e.g. relaxing the sandbox), so drop it.
         if let Some(effort) = request.effort.as_deref() {
-            args.push("-c".to_owned());
-            args.push(format!("model_reasoning_effort=\"{effort}\""));
+            if effort.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                args.push("-c".to_owned());
+                args.push(format!("model_reasoning_effort=\"{effort}\""));
+            }
         }
         match (request.mode, request.permission) {
             (Mode::Plan, _) => {

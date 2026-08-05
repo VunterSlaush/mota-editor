@@ -251,7 +251,7 @@ export class DemoTranscriptStore implements TranscriptStore {
   async remove(_p: string, id: string) {
     this.transcripts.delete(id);
   }
-  async readPlanFile(): Promise<string | null> {
+  async readPlanFile(_projectPath: string, _path: string): Promise<string | null> {
     return "# Demo plan\n\n1. Step one\n2. Step two";
   }
 }

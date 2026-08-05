@@ -35,7 +35,7 @@ class FakeTranscriptStore implements TranscriptStore {
   async remove(_p: string, id: string): Promise<void> {
     this.transcripts.delete(id);
   }
-  async readPlanFile(path: string): Promise<string | null> {
+  async readPlanFile(_projectPath: string, path: string): Promise<string | null> {
     return this.planFiles.get(path) ?? null;
   }
 }

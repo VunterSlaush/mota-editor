@@ -2,14 +2,21 @@
 //! stdout through the provider's parser, emitting domain events to the
 //! frontend. The only file that touches child processes.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
 
 use agent_core::{AgentEvent, Provider, TurnCommand};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
+
+/// Upper bound on retained child output (stdout kept for `parse_final`,
+/// stderr kept for error summaries). A misbehaving CLI can stream
+/// without limit; the app must not buffer it all.
+const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -36,20 +43,95 @@ pub fn spawn(command: &TurnCommand, project_path: &Path) -> std::io::Result<Chil
     cmd.spawn()
 }
 
-/// On Windows, CLIs installed via npm are `.cmd` shims that only `cmd /C`
-/// can resolve; also suppress the console window.
+/// Resolve a program name to an absolute path by scanning PATH (and
+/// PATHEXT on Windows) — never the process or project working
+/// directory, so a hostile project folder cannot shadow a tool with a
+/// planted `npx.cmd`. Real executables (`.com`/`.exe`) are preferred
+/// over batch shims across all PATH entries. Results are cached for the
+/// process lifetime.
+pub fn resolve_program(program: &str) -> Option<PathBuf> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(found) = cache.get(program) {
+        return found.clone();
+    }
+    let found = find_on_path(program);
+    cache.insert(program.to_owned(), found.clone());
+    found
+}
+
+fn find_on_path(program: &str) -> Option<PathBuf> {
+    let as_path = Path::new(program);
+    if as_path.is_absolute() {
+        return as_path.is_file().then(|| as_path.to_owned());
+    }
+    let dirs: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH")?)
+        .filter(|d| !d.as_os_str().is_empty())
+        .collect();
+    for name in candidate_names(program) {
+        for dir in &dirs {
+            let full = dir.join(&name);
+            if full.is_file() {
+                return Some(full);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn candidate_names(program: &str) -> Vec<String> {
+    if Path::new(program).extension().is_some() {
+        return vec![program.to_owned()];
+    }
+    // Extension-major (not the dir-major CreateProcess order): a native
+    // .exe anywhere on PATH beats a .cmd shim, because argv can be
+    // passed to an .exe verbatim while batch files re-parse it.
+    let pathext =
+        std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+    let (mut exes, mut shims): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    for ext in pathext.split(';').filter(|e| !e.is_empty()) {
+        let name = format!("{program}{ext}");
+        if ext.eq_ignore_ascii_case(".bat") || ext.eq_ignore_ascii_case(".cmd") {
+            shims.push(name);
+        } else {
+            exes.push(name);
+        }
+    }
+    exes.extend(shims);
+    exes
+}
+
+#[cfg(not(windows))]
+fn candidate_names(program: &str) -> Vec<String> {
+    vec![program.to_owned()]
+}
+
+/// Spawn the program directly — never through `cmd /C`. Arguments here
+/// include repo-controlled strings (branch names, file paths) and raw
+/// prompts; handing them to `cmd.exe` lets metacharacters (`&`, `|`,
+/// `"`) break out into arbitrary commands. Spawning the resolved
+/// absolute path keeps argv intact for `.exe`s, and for `.cmd`/`.bat`
+/// shims Rust applies strict batch escaping and refuses arguments it
+/// cannot make safe — failing closed instead of injecting.
 #[cfg(windows)]
 pub fn os_command(program: &str, args: &[String]) -> Command {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut cmd = Command::new("cmd");
-    cmd.arg("/C").arg(program).args(args);
+    let resolved = resolve_program(program).unwrap_or_else(|| PathBuf::from(program));
+    let mut cmd = Command::new(resolved);
+    cmd.args(args);
+    // Children that themselves shell out must not resolve programs from
+    // our cwd either (it is the untrusted project folder).
+    cmd.env("NoDefaultCurrentDirectoryInExePath", "1");
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
 }
 
 #[cfg(not(windows))]
 pub fn os_command(program: &str, args: &[String]) -> Command {
-    let mut cmd = Command::new(program);
+    let resolved = resolve_program(program).unwrap_or_else(|| PathBuf::from(program));
+    let mut cmd = Command::new(resolved);
     cmd.args(args);
     cmd
 }
@@ -65,6 +147,21 @@ pub async fn stream_turn(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
+    // Drain stderr concurrently with stdout: a child that fills the
+    // ~64 KB stderr pipe while we are still reading stdout would block
+    // on its next stderr write and the whole turn would deadlock.
+    let stderr_task = stderr.map(|stderr| {
+        tokio::spawn(async move {
+            let mut text = String::new();
+            let _ = stderr
+                .take(MAX_CAPTURE_BYTES as u64)
+                .read_to_string(&mut text)
+                .await;
+            text
+        })
+    });
+
+    let wants_full_output = provider.wants_full_output();
     let mut full_output = String::new();
     let mut emitted_message = false;
     let mut completed = false;
@@ -72,8 +169,10 @@ pub async fn stream_turn(
     if let Some(stdout) = stdout {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            full_output.push_str(&line);
-            full_output.push('\n');
+            if wants_full_output && full_output.len() < MAX_CAPTURE_BYTES {
+                full_output.push_str(&line);
+                full_output.push('\n');
+            }
             for event in provider.parse_line(&line) {
                 track(&event, &mut emitted_message, &mut completed);
                 emit(&app, &tab_id, &event);
@@ -81,10 +180,10 @@ pub async fn stream_turn(
         }
     }
 
-    let mut stderr_text = String::new();
-    if let Some(mut stderr) = stderr {
-        let _ = stderr.read_to_string(&mut stderr_text).await;
-    }
+    let stderr_text = match stderr_task {
+        Some(task) => task.await.unwrap_or_default(),
+        None => String::new(),
+    };
     let status = child.wait().await;
 
     for event in provider.parse_final(&full_output, emitted_message) {

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 use agent_core::{provider_for, AgentEvent, Mode, Permission, TurnRequest};
 use serde::Deserialize;
@@ -57,7 +57,7 @@ pub async fn start_turn(
     }
 
     {
-        let running = turns.0.lock().unwrap();
+        let running = turns.0.lock().unwrap_or_else(PoisonError::into_inner);
         if running.contains_key(&args.tab_id) {
             return Err("A turn is already running in this tab.".to_owned());
         }
@@ -70,8 +70,8 @@ pub async fn start_turn(
         mode: args.mode,
         permission: args.permission,
         attachments: args.attachments,
-        model: args.model.filter(|m| !m.trim().is_empty()),
-        effort: args.effort.filter(|e| !e.trim().is_empty()),
+        model: validate_token(args.model, "model")?,
+        effort: validate_token(args.effort, "effort")?,
     };
 
     // Preferred transport: a persistent ACP session (interactive
@@ -108,7 +108,7 @@ pub async fn start_turn(
         runner::spawn(&command, &project_path).map_err(|e| spawn_error(provider.id(), &e))?;
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::channel::<()>(1);
-    turns.0.lock().unwrap().insert(args.tab_id.clone(), cancel_tx);
+    turns.0.lock().unwrap_or_else(PoisonError::into_inner).insert(args.tab_id.clone(), cancel_tx);
 
     let app_for_task = app.clone();
     let tab_id = args.tab_id.clone();
@@ -120,7 +120,7 @@ pub async fn start_turn(
             }
         }
         let turns = app_for_task.state::<RunningTurns>();
-        turns.0.lock().unwrap().remove(&tab_id);
+        turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
     });
 
     Ok(())
@@ -143,14 +143,43 @@ pub struct WarmSessionArgs {
 impl WarmSessionArgs {
     /// Blank strings arrive from empty pickers; they mean "the provider's
     /// own default", not a model literally called "".
-    fn spec(&self) -> SessionSpec {
-        SessionSpec {
+    fn spec(&self) -> Result<SessionSpec, String> {
+        Ok(SessionSpec {
             project_path: self.project_path.clone(),
-            model: self.model.clone().filter(|m| !m.trim().is_empty()),
-            effort: self.effort.clone().filter(|e| !e.trim().is_empty()),
+            model: validate_token(self.model.clone(), "model")?,
+            effort: validate_token(self.effort.clone(), "effort")?,
             mcp_servers: self.mcp_servers.clone(),
-        }
+        })
     }
+}
+
+/// Models and efforts are picker values in the UI, but they travel into
+/// provider command lines and config strings — restrict them to plain
+/// tokens so nothing can smuggle flags or quoting along.
+fn validate_token(value: Option<String>, what: &str) -> Result<Option<String>, String> {
+    let Some(value) = value else { return Ok(None) };
+    let value = value.trim().to_owned();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let plain = value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':'));
+    if plain {
+        Ok(Some(value))
+    } else {
+        Err(format!("Invalid {what} name: {value}"))
+    }
+}
+
+/// Run filesystem work off the main thread so a slow disk (network
+/// home dir, antivirus scan, cold cache) can never stall the UI.
+pub(crate) async fn run_blocking<T: Send + 'static>(
+    task: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Pre-start a tab's agent session in the background so the first
@@ -164,7 +193,7 @@ pub async fn warm_session(
     if !PathBuf::from(&args.project_path).is_dir() {
         return Ok(());
     }
-    acp_session::warm(app, &acp, &args.tab_id, &args.provider_id, &args.spec()).await;
+    acp_session::warm(app, &acp, &args.tab_id, &args.provider_id, &args.spec()?).await;
     Ok(())
 }
 
@@ -175,7 +204,7 @@ pub async fn list_agent_sessions(
     acp: State<'_, AcpSessions>,
     args: WarmSessionArgs,
 ) -> Result<serde_json::Value, String> {
-    acp_session::list_native_sessions(app, &acp, &args.tab_id, &args.provider_id, &args.spec())
+    acp_session::list_native_sessions(app, &acp, &args.tab_id, &args.provider_id, &args.spec()?)
         .await
 }
 
@@ -199,24 +228,53 @@ pub async fn load_agent_session(
         &acp,
         &args.warm.tab_id,
         &args.warm.provider_id,
-        &args.warm.spec(),
+        &args.warm.spec()?,
         &args.session_id,
     )
     .await
 }
 
 /// Read a plan file the agent saved (history stores the path, not the
-/// content). Restricted to markdown files.
+/// content). The path originates from the AGENT, not the user, so it is
+/// confined: markdown only, and only inside the project folder or the
+/// user's `.claude` directory (where agents keep plan files) — a
+/// prompt-injected agent must not turn this into an arbitrary-file read.
 #[tauri::command]
-pub fn read_plan_file(path: String) -> Result<Option<String>, String> {
-    if !path.ends_with(".md") {
-        return Err("Not a markdown file.".to_owned());
-    }
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+pub async fn read_plan_file(
+    app: AppHandle,
+    project_path: String,
+    path: String,
+) -> Result<Option<String>, String> {
+    run_blocking(move || {
+        if !path.ends_with(".md") {
+            return Err("Not a markdown file.".to_owned());
+        }
+        // Canonicalize both sides so prefix checks compare real paths
+        // (resolves `..`, symlinks, and Windows' \\?\ prefix alike).
+        let file = match std::fs::canonicalize(&path) {
+            Ok(p) => p,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+        };
+        let mut allowed = Vec::new();
+        if let Ok(project) = std::fs::canonicalize(&project_path) {
+            allowed.push(project);
+        }
+        if let Ok(home) = app.path().home_dir() {
+            if let Ok(claude_dir) = std::fs::canonicalize(home.join(".claude")) {
+                allowed.push(claude_dir);
+            }
+        }
+        if !allowed.iter().any(|root| file.starts_with(root)) {
+            return Err("The plan file is outside the project.".to_owned());
+        }
+        match std::fs::read_to_string(&file) {
+            Ok(contents) => Ok(Some(contents)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -226,7 +284,7 @@ pub async fn cancel_turn(
     tab_id: String,
 ) -> Result<(), String> {
     acp_session::cancel_turn(&acp, &tab_id).await;
-    let sender = turns.0.lock().unwrap().remove(&tab_id);
+    let sender = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
     if let Some(sender) = sender {
         let _ = sender.send(()).await;
     }
@@ -250,7 +308,7 @@ pub async fn end_session(
     tab_id: String,
 ) -> Result<(), String> {
     acp.end_session(&tab_id);
-    let sender = turns.0.lock().unwrap().remove(&tab_id);
+    let sender = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
     if let Some(sender) = sender {
         let _ = sender.send(()).await;
     }
@@ -258,22 +316,59 @@ pub async fn end_session(
 }
 
 #[tauri::command]
-pub fn list_custom_commands(
+pub async fn list_custom_commands(
     app: AppHandle,
     project_path: String,
     provider_id: String,
 ) -> Result<Vec<command_discovery::CustomCommand>, String> {
-    Ok(command_discovery::discover(&app, &project_path, &provider_id))
+    run_blocking(move || Ok(command_discovery::discover(&app, &project_path, &provider_id)))
+        .await
 }
 
 #[tauri::command]
-pub fn load_workspace(app: AppHandle) -> Result<Option<String>, String> {
-    workspace_file::load(&app).map_err(|e| e.to_string())
+pub async fn load_workspace(app: AppHandle) -> Result<Option<String>, String> {
+    run_blocking(move || workspace_file::load(&app).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-pub fn save_workspace(app: AppHandle, json: String) -> Result<(), String> {
-    workspace_file::save(&app, &json).map_err(|e| e.to_string())
+pub async fn save_workspace(app: AppHandle, json: String) -> Result<(), String> {
+    run_blocking(move || workspace_file::save(&app, &json).map_err(|e| e.to_string())).await
+}
+
+/// Open a link from agent-rendered markdown in the system browser. The
+/// webview itself never navigates; only web-ish schemes get out.
+#[tauri::command]
+pub fn open_external(url: String) -> Result<(), String> {
+    let trimmed = url.trim().to_owned();
+    let lower = trimmed.to_ascii_lowercase();
+    let allowed = ["http://", "https://", "mailto:"];
+    if !allowed.iter().any(|scheme| lower.starts_with(scheme)) {
+        return Err("Only http(s) and mailto links can be opened.".to_owned());
+    }
+    open_in_browser(&trimmed).map_err(|e| format!("Could not open the link: {e}"))
+}
+
+/// The URL travels as plain argv — no shell ever parses it.
+#[cfg(windows)]
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("rundll32")
+        .arg("url.dll,FileProtocolHandler")
+        .arg(url)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    std::process::Command::new("open").arg(url).spawn().map(|_| ())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 
 fn spawn_error(provider_id: &str, error: &std::io::Error) -> String {
