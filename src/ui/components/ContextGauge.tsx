@@ -2,7 +2,9 @@ const RADIUS = 7;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 interface Props {
-  usage: { readonly used: number; readonly size: number } | undefined;
+  usage:
+    | { readonly used: number; readonly size: number; readonly estimated?: boolean }
+    | undefined;
   /** Fraction at which the app auto-compacts (colors the ring). */
   threshold: number;
 }
@@ -27,7 +29,7 @@ export function ContextGauge({ usage, threshold }: Props) {
     <span
       className="context-gauge"
       role="img"
-      title={`Context: ${percent}% used (${format(usage.used)} of ${format(usage.size)} tokens). Auto-compacts at ${Math.round(threshold * 100)}%.`}
+      title={`${usage.estimated ? "≈ estimated — " : ""}Context: ${percent}% used (${format(usage.used)} of ${format(usage.size)} tokens). Auto-compacts at ${Math.round(threshold * 100)}%.`}
       aria-label={`Context ${percent} percent used`}
     >
       {/* Decorative: the accessible name lives on the wrapper above. */}

@@ -1,5 +1,12 @@
 import { serversForProvider } from "../entities/mcpServer";
-import { type ChatMessage, infoMessage, toolMessage } from "../entities/message";
+import {
+  type ChatMessage,
+  errorMessage,
+  infoMessage,
+  mergeToolCall,
+  toolCallMessage,
+  toolMessage,
+} from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
@@ -30,8 +37,14 @@ export interface HistoryListing {
 class ReplayedSession {
   readonly messages: ChatMessage[] = [];
   plan: readonly PlanEntry[] = [];
+  /** The last usage the replay reported, restored with the transcript. */
+  usage?: { used: number; size: number };
+  /** Replayed tool calls by id, so their updates fold into place. */
+  private readonly toolCalls = new Map<string, number>();
 
-  /** Replay events → chat messages (approvals/completions don't replay). */
+  /** Replay events → chat messages, at full fidelity: thoughts, tool
+   *  calls with their final status/output, errors, and usage all come
+   *  back. (Approvals/questions don't replay — they were answered.) */
   fold(event: AgentTurnEvent): void {
     switch (event.kind) {
       case "userDelta":
@@ -40,14 +53,46 @@ class ReplayedSession {
       case "assistantDelta":
         this.appendOrExtend("assistant", event.text);
         break;
+      case "thoughtDelta":
+        this.appendOrExtend("thought", event.text);
+        break;
       case "tool":
         this.messages.push(toolMessage(event.name, event.detail));
+        break;
+      case "toolCall": {
+        this.toolCalls.set(event.toolCallId, this.messages.length);
+        this.messages.push(
+          toolCallMessage(event.toolCallId, event.toolKind, event.title, event.status),
+        );
+        break;
+      }
+      case "toolCallUpdate": {
+        const index = this.toolCalls.get(event.toolCallId);
+        const message = index === undefined ? undefined : this.messages[index];
+        if (index === undefined || !message?.toolCall) break;
+        this.messages[index] = {
+          ...message,
+          text: event.title ?? message.text,
+          toolCall: mergeToolCall(message.toolCall, event),
+        };
+        break;
+      }
+      case "error":
+        this.messages.push(
+          errorMessage(event.message, {
+            context: event.context,
+            stderrTail: event.stderrTail,
+          }),
+        );
+        break;
+      case "usage":
+        this.usage = { used: event.used, size: event.size };
         break;
       case "plan":
         this.plan = event.entries;
         break;
       default:
-        break; // usage, thoughts, etc.: not part of the restored view
+        break; // session ids, stages, completions: not part of the view
     }
   }
 
@@ -56,7 +101,7 @@ class ReplayedSession {
   }
 
   /** Streamed text extends the last message when the role still matches. */
-  private appendOrExtend(role: "user" | "assistant", text: string): void {
+  private appendOrExtend(role: "user" | "assistant" | "thought", text: string): void {
     const last = this.messages[this.messages.length - 1];
     if (last?.role === role) {
       this.messages[this.messages.length - 1] = { ...last, text: last.text + text };
@@ -106,7 +151,7 @@ export class SessionHistory {
             title: s.title?.trim() || s.sessionId.slice(0, 8),
             savedAt: Number.isNaN(savedAt) ? 0 : savedAt,
             provider,
-            messageCount: 0,
+            messageCount: undefined,
           };
         })
         .sort((a, b) => b.savedAt - a.savedAt);
@@ -170,6 +215,9 @@ export class SessionHistory {
         messages: replay.messages,
         plan: replay.plan,
       });
+      if (replay.usage) {
+        this.store.dispatch({ type: "tab/usageUpdated", tabId, ...replay.usage });
+      }
     } else {
       // A resume that failed must not leave the tab claiming that session.
       for (const message of replay.messages) {
@@ -220,10 +268,31 @@ export class SessionHistory {
     }
   }
 
-  startNew(tabId: string): void {
-    const tab = tabById(this.store.getState(), tabId);
+  /**
+   * A new conversation means a NEW AGENT CONTEXT, not just an empty
+   * screen: the backend session is ended (so the agent forgets), the
+   * resume id/usage/commands are dropped, and a fresh session pre-warms
+   * so the first message stays fast.
+   */
+  async startNew(tabId: string): Promise<void> {
+    const state = this.store.getState();
+    const tab = tabById(state, tabId);
     if (!tab || tab.busy) return;
+    const { provider, path, model, effort } = tab.project;
+
+    await this.agentGateway.endSession(tabId).catch(() => undefined);
     this.store.dispatch({ type: "chat/cleared", tabId });
+    this.store.dispatch({ type: "chat/sessionReset", tabId, provider });
+    void this.agentGateway
+      .warmSession(
+        tabId,
+        provider,
+        path,
+        model,
+        effort,
+        serversForProvider(state.settings.mcpServers, provider),
+      )
+      .catch(() => undefined); // warm-up is best-effort
   }
 
   async remove(tabId: string, sessionId: string): Promise<void> {

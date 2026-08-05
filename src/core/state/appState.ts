@@ -51,8 +51,13 @@ export interface TabState {
   readonly historySessionId?: string;
   /** True when a turn finished while the user was on another tab. */
   readonly attention?: boolean;
-  /** Context-window usage of the tab's agent session. */
-  readonly usage?: { readonly used: number; readonly size: number };
+  /** Context-window usage of the tab's agent session. `estimated` marks
+   *  a client-side approximation (no `usage_update` from the agent). */
+  readonly usage?: {
+    readonly used: number;
+    readonly size: number;
+    readonly estimated?: boolean;
+  };
   /** Where session startup stands (installing|booting|creating|recovering);
    *  undefined once ready or failed. */
   readonly sessionStage?: string;
@@ -123,8 +128,17 @@ export type Action =
       markdown: string;
       filePath?: string;
     }
-  | { type: "tab/usageUpdated"; tabId: string; used: number; size: number }
+  | {
+      type: "tab/usageUpdated";
+      tabId: string;
+      used: number;
+      size: number;
+      estimated?: boolean;
+    }
   | { type: "tab/sessionStageChanged"; tabId: string; stage: string | undefined }
+  /** The backend agent session was ended on purpose: forget everything
+   *  tied to it (resume id, usage, advertised commands). */
+  | { type: "chat/sessionReset"; tabId: string; provider: ProviderId }
   | { type: "chat/messageAppended"; tabId: string; message: ChatMessage }
   | {
       type: "chat/toolCallUpdated";
@@ -285,8 +299,24 @@ export function reduce(state: AppState, action: Action): AppState {
     case "tab/usageUpdated":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
-        usage: { used: action.used, size: action.size },
+        usage: {
+          used: action.used,
+          size: action.size,
+          ...(action.estimated ? { estimated: true } : {}),
+        },
       }));
+
+    case "chat/sessionReset":
+      return mapTab(state, action.tabId, (tab) => {
+        const sessions = { ...tab.project.providerSessions };
+        delete sessions[action.provider];
+        return {
+          ...tab,
+          usage: undefined,
+          agentCommands: [],
+          project: { ...tab.project, providerSessions: sessions },
+        };
+      });
 
     case "tab/sessionStageChanged":
       return mapTab(state, action.tabId, (tab) => ({

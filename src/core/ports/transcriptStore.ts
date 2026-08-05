@@ -27,7 +27,9 @@ export interface TranscriptMeta {
   readonly title: string;
   readonly savedAt: number;
   readonly provider: string;
-  readonly messageCount: number;
+  /** Absent when the source (native agent history) doesn't report one —
+   *  render nothing rather than a fake 0. */
+  readonly messageCount?: number;
 }
 
 export interface TranscriptStore {

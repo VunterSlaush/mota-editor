@@ -61,7 +61,11 @@ export function HistoryPanel({
               session.id === activeSessionId ? "history__item--active" : ""
             }`}
             onClick={() => !busy && onOpen(session.id)}
-            title={`${session.messageCount} messages · ${session.provider}`}
+            title={
+              session.messageCount !== undefined
+                ? `${session.messageCount} messages · ${session.provider}`
+                : session.provider
+            }
           >
             <div className="history__title">{session.title}</div>
             <div className="history__meta">

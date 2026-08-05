@@ -45,14 +45,20 @@ class FakeGateway implements AgentGateway {
   nativeSessions: { sessionId: string; title?: string; updatedAt?: string }[] | null =
     null;
   replay: AgentTurnEvent[] = [];
+  ended: string[] = [];
+  warmed: string[] = [];
 
   async startTurn(_r: AgentTurnRequest, _e: (event: AgentTurnEvent) => void) {}
   subscribeSessionEvents() {}
   async cancelTurn() {}
   async respondPermission() {}
   async respondQuestion() {}
-  async endSession() {}
-  async warmSession() {}
+  async endSession(tabId: string) {
+    this.ended.push(tabId);
+  }
+  async warmSession(tabId: string) {
+    this.warmed.push(tabId);
+  }
   async listNativeSessions() {
     if (!this.nativeSessions) throw new Error("native history unavailable");
     return this.nativeSessions;
@@ -167,6 +173,67 @@ describe("SessionHistory", () => {
     expect(tab.messages[3].text).toContain("remembers");
     expect(tab.historySessionId).toBe("abc-123");
     expect(tab.busy).toBe(false);
+  });
+
+  it("replays thoughts, tool calls with final status, errors, and usage", async () => {
+    const { store, gateway, history } = setup();
+    gateway.replay = [
+      { kind: "userDelta", text: "run the tests" },
+      { kind: "thoughtDelta", text: "Let me check…" },
+      {
+        kind: "toolCall",
+        toolCallId: "c1",
+        toolKind: "execute",
+        title: "npm test",
+        status: "pending",
+      },
+      {
+        kind: "toolCallUpdate",
+        toolCallId: "c1",
+        status: "completed",
+        content: [{ type: "text", text: "42 passed" }],
+      },
+      { kind: "error", message: "one flaky retry", context: "agent-exited" },
+      { kind: "usage", used: 1200, size: 200000 },
+      { kind: "assistantDelta", text: "All green." },
+    ];
+
+    await history.open("t1", "abc-123", true);
+
+    const tab = store.getState().tabs[0];
+    expect(tab.messages.map((m) => m.role)).toEqual([
+      "user",
+      "thought",
+      "tool",
+      "error",
+      "assistant",
+      "info",
+    ]);
+    const tool = tab.messages[2];
+    expect(tool.toolCall?.status).toBe("completed");
+    expect(tool.toolCall?.content).toEqual([{ type: "text", text: "42 passed" }]);
+    expect(tab.messages[3].error?.context).toBe("agent-exited");
+    expect(tab.usage).toEqual({ used: 1200, size: 200000 });
+  });
+
+  it("startNew ends the backend session, resets state, and re-warms", async () => {
+    const { store, gateway, history } = setup();
+    store.dispatch({
+      type: "chat/sessionRecorded",
+      tabId: "t1",
+      provider: "claude",
+      sessionId: "old-session",
+    });
+    store.dispatch({ type: "tab/usageUpdated", tabId: "t1", used: 5, size: 10 });
+
+    await history.startNew("t1");
+
+    const tab = store.getState().tabs[0];
+    expect(gateway.ended).toEqual(["t1"]);
+    expect(gateway.warmed).toEqual(["t1"]);
+    expect(tab.project.providerSessions.claude).toBeUndefined();
+    expect(tab.usage).toBeUndefined();
+    expect(tab.messages).toEqual([]);
   });
 
   it("lands a replayed session in one update, however long the conversation", async () => {

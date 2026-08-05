@@ -13,6 +13,7 @@ import {
   userMessage,
 } from "../entities/message";
 import { COMPACT_COMMAND, providerById } from "../entities/provider";
+import { estimateTokens } from "../entities/tokens";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { TranscriptStore } from "../ports/transcriptStore";
@@ -326,6 +327,7 @@ export class SendPrompt {
         this.store.dispatch({ type: "tab/sessionStageChanged", tabId, stage: undefined });
         // A cancel already has the user's full attention.
         if (event.stopReason !== "cancelled") this.requestAttention(tabId);
+        this.estimateUsageIfUnreported(tabId);
         void persistWorkspace(this.store.getState(), this.workspaceStore);
         void this.saveTranscript(tabId);
         this.autoCompactIfNeeded(tabId);
@@ -429,6 +431,23 @@ export class SendPrompt {
     if (!next) return;
     this.store.dispatch({ type: "chat/queueShifted", tabId });
     void this.execute(tabId, next.prompt, next.attachments);
+  }
+
+  /**
+   * When the agent never sent a `usage_update`, keep the context gauge
+   * (and auto-compact's trigger) alive with a client-side estimate. A
+   * real report — present and not itself an estimate — always wins.
+   */
+  private estimateUsageIfUnreported(tabId: string): void {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab || (tab.usage && !tab.usage.estimated)) return;
+    this.store.dispatch({
+      type: "tab/usageUpdated",
+      tabId,
+      used: estimateTokens(tab.messages),
+      size: providerById(tab.project.provider).contextWindow,
+      estimated: true,
+    });
   }
 
   /**

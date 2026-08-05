@@ -10,12 +10,34 @@ export interface ProviderDescriptor {
   readonly vendor: string;
   /** Whether the provider can continue a previous conversation turn. */
   readonly supportsResume: boolean;
+  /** Typical context window (tokens) of the provider's default model —
+   *  the denominator for ESTIMATED usage when the agent reports none.
+   *  Deliberately conservative; real `usage_update`s always win. */
+  readonly contextWindow: number;
 }
 
 export const PROVIDERS: readonly ProviderDescriptor[] = [
-  { id: "claude", displayName: "Claude", vendor: "Anthropic", supportsResume: true },
-  { id: "codex", displayName: "ChatGPT (Codex)", vendor: "OpenAI", supportsResume: true },
-  { id: "gemini", displayName: "Gemini", vendor: "Google", supportsResume: false },
+  {
+    id: "claude",
+    displayName: "Claude",
+    vendor: "Anthropic",
+    supportsResume: true,
+    contextWindow: 200_000,
+  },
+  {
+    id: "codex",
+    displayName: "ChatGPT (Codex)",
+    vendor: "OpenAI",
+    supportsResume: true,
+    contextWindow: 200_000,
+  },
+  {
+    id: "gemini",
+    displayName: "Gemini",
+    vendor: "Google",
+    supportsResume: false,
+    contextWindow: 1_000_000,
+  },
 ];
 
 export function providerById(id: ProviderId): ProviderDescriptor {
