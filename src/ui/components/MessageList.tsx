@@ -23,6 +23,10 @@ interface Props {
   busy: boolean;
   /** When the running turn started, for the elapsed counter. */
   turnStartedAt?: number;
+  /** Session startup stage (installing|booting|creating|recovering). */
+  sessionStage?: string;
+  /** Re-send the last prompt; offered on the trailing error bubble. */
+  onRetry: () => void;
   /** Lowercased slash-command names, for highlighting in user messages.
    *  Must be a stable identity — it reaches memoized rows. */
   commands: ReadonlySet<string>;
@@ -50,6 +54,8 @@ export function MessageList({
   messages,
   busy,
   turnStartedAt,
+  sessionStage,
+  onRetry,
   commands,
   verbose,
   onRespondPermission,
@@ -135,11 +141,19 @@ export function MessageList({
               status={status}
               commands={commands}
               streaming={m.id === streamingId}
+              onRetry={
+                !busy && m.role === "error" && m.id === last?.id ? onRetry : undefined
+              }
               innerRef={m.id === askedMessage?.id ? promptRef : undefined}
             />
           ),
         )}
-        {busy && <WorkingIndicator startedAt={turnStartedAt} />}
+        {busy && <WorkingIndicator startedAt={turnStartedAt} stage={sessionStage} />}
+        {!busy && sessionStage && (
+          <div className="session-stage" aria-live="polite">
+            <span className="working__dot" /> {stageLabel(sessionStage)}
+          </div>
+        )}
       </div>
       {!following && (
         <button
@@ -265,7 +279,7 @@ function PinnedPrompt({
  * The start time comes from the tab, not from this component's mount, so
  * switching away and back doesn't restart the count.
  */
-function WorkingIndicator({ startedAt }: { startedAt?: number }) {
+function WorkingIndicator({ startedAt, stage }: { startedAt?: number; stage?: string }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -278,12 +292,28 @@ function WorkingIndicator({ startedAt }: { startedAt?: number }) {
   return (
     <div className="working" aria-live="polite">
       <span className="working__dot" />
-      Working…
+      {stage ? stageLabel(stage) : "Working…"}
       {startedAt !== undefined && (
         <span className="working__elapsed">{formatElapsed(now - startedAt)}</span>
       )}
     </div>
   );
+}
+
+/** Human words for a session startup stage. */
+function stageLabel(stage: string): string {
+  switch (stage) {
+    case "installing":
+      return "Installing the agent adapter (first run)…";
+    case "booting":
+      return "Starting the agent…";
+    case "creating":
+      return "Creating the session…";
+    case "recovering":
+      return "Recovering the previous session…";
+    default:
+      return `${stage}…`;
+  }
 }
 
 /** The agent asked for permission: title + one button per option.
@@ -365,6 +395,7 @@ const MessageBubble = memo(function MessageBubble({
   status,
   commands,
   streaming,
+  onRetry,
   innerRef,
 }: {
   message: ChatMessage;
@@ -376,6 +407,8 @@ const MessageBubble = memo(function MessageBubble({
   status?: "running" | "completed" | "failed";
   commands: ReadonlySet<string>;
   streaming: boolean;
+  /** Set only on the trailing error bubble while idle: offer a retry. */
+  onRetry?: () => void;
   /** Set on the message the PinnedPrompt tracks, so it can be measured. */
   innerRef?: React.Ref<HTMLDivElement>;
 }) {
@@ -401,6 +434,27 @@ const MessageBubble = memo(function MessageBubble({
       <div className={`msg msg--assistant ${streaming ? "msg--streaming" : ""}`}>
         <Markdown text={message.text} />
         {streaming && <span className="stream-caret" aria-hidden="true" />}
+      </div>
+    );
+  }
+  if (message.role === "error") {
+    return (
+      <div className="msg msg--error">
+        {message.error?.context && (
+          <div className="msg__error-context">{message.error.context}</div>
+        )}
+        <div className="msg__text">{message.text}</div>
+        {message.error?.stderrTail && (
+          <details className="msg__error-stderr">
+            <summary>Agent output</summary>
+            <pre>{message.error.stderrTail}</pre>
+          </details>
+        )}
+        {onRetry && (
+          <button type="button" className="msg__retry" onClick={onRetry}>
+            Retry
+          </button>
+        )}
       </div>
     );
   }

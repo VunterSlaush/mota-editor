@@ -34,6 +34,7 @@ import { OpenProject } from "../core/usecases/openProject";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
 import { SendPrompt } from "../core/usecases/sendPrompt";
+import { SessionStatus } from "../core/usecases/sessionStatus";
 import {
   SelectEffort,
   SelectMode,
@@ -94,6 +95,10 @@ export function createAppContext(): AppContext {
     : new DemoTranscriptStore();
   const notifications = inTauri ? new TauriNotifications() : new DemoNotifications();
   const newId = () => crypto.randomUUID();
+
+  // Session-level events (warm-up stages, agent mode switches) arrive
+  // outside turns; registering the listener is the whole job.
+  new SessionStatus(store, agentGateway);
 
   // Shared: the settings a slash command applies are the same use cases
   // the toolbar drives, so both routes persist and restart identically.

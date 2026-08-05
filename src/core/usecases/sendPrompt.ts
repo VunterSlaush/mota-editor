@@ -406,6 +406,19 @@ export class SendPrompt {
   }
 
   /**
+   * Re-send the last user prompt — the "Retry" on an error bubble. The
+   * failed exchange stays in the transcript; retrying appends a fresh
+   * attempt rather than rewriting history.
+   */
+  async retryLast(tabId: string): Promise<void> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab || tab.busy) return;
+    const lastUser = [...tab.messages].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    await this.execute(tabId, lastUser.text, lastUser.attachments ?? []);
+  }
+
+  /**
    * Deliver the next queued prompt, if the tab is idle. When auto-compact
    * claimed the turn instead, the queue simply drains after that turn.
    */

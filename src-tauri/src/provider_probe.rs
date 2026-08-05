@@ -80,9 +80,17 @@ async fn probe(provider_id: &str, project_path: &str) -> ProviderStatus {
 /// Only the second one fails when the user hasn't signed in, which is why
 /// the probe pays for both.
 async fn handshake(provider_id: &str, project_path: &str) -> Result<String, AcpStartError> {
-    let (mut child, _) = spawn_agent(provider_id, project_path, None, None)?;
+    let mut child = spawn_agent(provider_id, project_path, None, None)?.child;
     let mut stdin = child.stdin.take().expect("stdin piped");
     let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+    // Drain stderr to nowhere: an undrained pipe can fill and wedge the
+    // probed agent mid-handshake. (L5 folds this whole probe onto the
+    // session code, which keeps stderr properly.)
+    tokio::spawn(async move {
+        let mut noise = BufReader::new(stderr).lines();
+        while let Ok(Some(_)) = noise.next_line().await {}
+    });
     let mut lines = BufReader::new(stdout).lines();
 
     let result = tokio::time::timeout(PROBE_TIMEOUT, async {

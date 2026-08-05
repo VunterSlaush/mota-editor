@@ -45,6 +45,10 @@ export function App({ context }: { context: AppContext }) {
       void context.respondQuestion.execute(activeProjectId, requestId, answers),
     [context, activeProjectId],
   );
+  const retryLast = useCallback(
+    () => void context.sendPrompt.retryLast(activeProjectId),
+    [context, activeProjectId],
+  );
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   return (
@@ -120,6 +124,7 @@ export function App({ context }: { context: AppContext }) {
           onOpenFile={(path) => openFileExternally(tab.project.path, path)}
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}
+          onRetry={retryLast}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
           onPickFiles={() => context.filePicker.pickFiles()}
         />

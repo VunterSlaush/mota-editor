@@ -47,6 +47,7 @@ class FakeGateway implements AgentGateway {
   replay: AgentTurnEvent[] = [];
 
   async startTurn(_r: AgentTurnRequest, _e: (event: AgentTurnEvent) => void) {}
+  subscribeSessionEvents() {}
   async cancelTurn() {}
   async respondPermission() {}
   async respondQuestion() {}

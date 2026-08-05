@@ -53,6 +53,7 @@ interface Props {
   onToggleVerbose: (verbose: boolean) => void;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
+  onRetry: () => void;
   loadCommands: () => Promise<CommandInfo[]>;
   loadGitChanges: () => Promise<GitChanges | null>;
   onGitStage: (path: string) => Promise<GitActionResult>;
@@ -93,6 +94,7 @@ export function ChatPanel({
   onToggleVerbose,
   onRespondPermission,
   onAnswerQuestion,
+  onRetry,
   loadCommands,
   loadGitChanges,
   onGitStage,
@@ -292,6 +294,8 @@ export function ChatPanel({
             messages={tab.messages}
             busy={tab.busy}
             turnStartedAt={tab.turnStartedAt}
+            sessionStage={tab.sessionStage}
+            onRetry={onRetry}
             commands={commandNameSet}
             verbose={tab.project.verbose}
             onRespondPermission={onRespondPermission}

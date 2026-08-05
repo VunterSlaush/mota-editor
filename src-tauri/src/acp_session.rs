@@ -4,7 +4,8 @@
 //! `agent_core::acp`, which keeps this file mechanical: spawn, route,
 //! respond.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::io::Write as _;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 // Locks recover from poisoning: the guarded state (session maps,
@@ -70,7 +71,21 @@ pub struct AcpSession {
     /// A dead session must never be handed out again — writes to it can
     /// only fail or hang.
     dead: AtomicBool,
+    /// What the agent advertised at `initialize` — gates optional calls
+    /// (`session/list`, `session/load`) instead of assuming support.
+    caps: Mutex<acp::AgentCaps>,
+    /// Mode ids `session/set_mode` may name, per `session/new`. Empty
+    /// means the agent reported none — requests are then sent untested.
+    available_modes: Mutex<Vec<String>>,
+    /// The agent's most recent stderr lines. Diagnostics live here: a
+    /// handshake timeout with the real complaint attached beats "did not
+    /// respond in time" every time.
+    stderr_tail: Mutex<VecDeque<String>>,
 }
+
+/// Cap on the retained stderr ring — enough to carry a stack trace,
+/// small enough to never matter.
+const STDERR_TAIL_LINES: usize = 200;
 
 impl AcpSessions {
     fn get(&self, tab_id: &str) -> Option<Arc<AcpSession>> {
@@ -96,6 +111,27 @@ impl AcpSessions {
 impl AcpSession {
     fn request_id(&self) -> i64 {
         self.next_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn caps(&self) -> acp::AgentCaps {
+        self.caps.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// The agent's recent stderr as one block, or empty when silent.
+    fn stderr_tail_text(&self) -> String {
+        let tail = self.stderr_tail.lock().unwrap_or_else(PoisonError::into_inner);
+        tail.iter().cloned().collect::<Vec<_>>().join("\n")
+    }
+
+    /// Append the agent's stderr to an error message, when there is any
+    /// — the difference between "timed out" and knowing why.
+    fn with_stderr(&self, message: String) -> String {
+        let tail = self.stderr_tail_text();
+        if tail.is_empty() {
+            message
+        } else {
+            format!("{message}\n--- agent stderr ---\n{tail}")
+        }
     }
 
     fn sid(&self) -> String {
@@ -247,6 +283,15 @@ async fn apply_mode(session: &Arc<AcpSession>, provider_id: &str, mode: agent_co
     let Some(mode_id) = acp::native_mode_id(provider_id, mode) else {
         return;
     };
+    // Only name modes the agent actually offered; an adapter that renamed
+    // its ids gets no bogus request (empty list = agent reported none,
+    // send untested as before).
+    {
+        let available = session.available_modes.lock().unwrap_or_else(PoisonError::into_inner);
+        if !available.is_empty() && !available.iter().any(|m| m == mode_id) {
+            return;
+        }
+    }
     let id = session.request_id();
     let message = acp::set_mode_request(id, &session.sid(), mode_id);
     let _ = session.call_with_timeout(message, id, SET_MODE_TIMEOUT).await;
@@ -398,8 +443,12 @@ async fn ensure_session(
         sessions.end_session(tab_id);
     }
 
-    let session = boot_agent(app, tab_id, provider_id, spec).await?;
+    let session = boot_agent(app, tab_id, provider_id, spec, true).await.map_err(|e| {
+        emit_stage(app, tab_id, "ready"); // never leave the chip stuck
+        e
+    })?;
 
+    emit_stage(app, tab_id, "creating");
     let new_id = session.request_id();
     let new_result = session
         .call_with_timeout(
@@ -409,48 +458,66 @@ async fn ensure_session(
         )
         .await
         .map_err(|e| {
-            session.shutdown();
-            AcpStartError::Failed(format!(
+            let detail = session.with_stderr(format!(
                 "Could not start an agent session: {e}. If this is an authentication \
                  problem, sign in to the {provider_id} CLI in a terminal first."
-            ))
+            ));
+            session.shutdown();
+            emit_stage(app, tab_id, "ready");
+            AcpStartError::Failed(detail)
         })?;
 
-    let session_id = new_result
-        .get("sessionId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            session.shutdown();
-            AcpStartError::Failed("The agent returned no session id.".to_owned())
-        })?
-        .to_owned();
+    let (session_id, modes) = acp::parse_session_new_result(&new_result);
+    let Some(session_id) = session_id else {
+        session.shutdown();
+        emit_stage(app, tab_id, "ready");
+        return Err(AcpStartError::Failed("The agent returned no session id.".to_owned()));
+    };
 
     session.set_sid(session_id);
+    // Kept for validating `session/set_mode` requests — NOT emitted as a
+    // ModeChanged: the user's picker choice is applied right after this
+    // (apply_mode), and stomping it with the agent's default would be
+    // the exact desync this field exists to prevent. Only genuine
+    // `current_mode_update` notifications move the picker.
+    *session.available_modes.lock().unwrap_or_else(PoisonError::into_inner) =
+        modes.available;
     sessions
         .0
         .lock()
-        .unwrap()
+        .unwrap_or_else(PoisonError::into_inner)
         .insert(tab_id.to_owned(), Arc::clone(&session));
+    emit_stage(app, tab_id, "ready");
     Ok(session)
 }
 
 /// Spawn the provider's ACP adapter and complete `initialize` — the
 /// session-agnostic half of a session. `session/new` is deliberately
-/// not part of this: it boots the provider's full CLI (measured at
-/// ~50s with MCP servers configured), which session-agnostic requests
-/// like `session/list` never need.
+/// not part of this: it can boot the provider's full CLI (tens of
+/// seconds on slow adapters), which session-agnostic requests like
+/// `session/list` never need.
+///
+/// `emit_stages` gates the startup progress events: real sessions want
+/// them; throwaway probes (history panel, settings) must not flash the
+/// UI with stages for a process the user never asked to watch.
 async fn boot_agent(
     app: &AppHandle,
     tab_id: &str,
     provider_id: &str,
     spec: &SessionSpec,
+    emit_stages: bool,
 ) -> Result<Arc<AcpSession>, AcpStartError> {
     let SessionSpec { project_path, model, effort, mcp_servers } = spec;
-    let (child, install_hint) =
+    let spawned =
         spawn_agent(provider_id, project_path, model.as_deref(), effort.as_deref())?;
-    let mut child = child;
+    let SpawnedAgent { mut child, install_hint, via_npx } = spawned;
     let stdin = child.stdin.take().expect("stdin piped");
     let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+
+    if emit_stages {
+        emit_stage(app, tab_id, if via_npx { "installing" } else { "booting" });
+    }
 
     let session = Arc::new(AcpSession {
         provider_id: provider_id.to_owned(),
@@ -469,19 +536,71 @@ async fn boot_agent(
         plan_mode: AtomicBool::new(false),
         turn_active: AtomicBool::new(false),
         dead: AtomicBool::new(false),
+        caps: Mutex::new(acp::AgentCaps::default()),
+        available_modes: Mutex::new(Vec::new()),
+        stderr_tail: Mutex::new(VecDeque::new()),
     });
 
     spawn_reader(app.clone(), tab_id.to_owned(), Arc::clone(&session), stdout);
+    spawn_stderr_reader(app, provider_id, Arc::clone(&session), stderr);
 
     let init_id = session.request_id();
-    session
+    let init_result = session
         .call_with_timeout(acp::initialize_request(init_id), init_id, HANDSHAKE_TIMEOUT)
         .await
         .map_err(|e| {
+            let detail = session.with_stderr(format!("{e} (install with: {install_hint})"));
             session.shutdown();
-            AcpStartError::Unavailable(format!("{e} (install with: {install_hint})"))
+            AcpStartError::Unavailable(detail)
         })?;
+    match acp::parse_initialize_result(&init_result) {
+        Ok(caps) => {
+            *session.caps.lock().unwrap_or_else(PoisonError::into_inner) = caps;
+        }
+        Err(message) => {
+            session.shutdown();
+            return Err(AcpStartError::Failed(message));
+        }
+    }
     Ok(session)
+}
+
+/// One startup-stage breadcrumb for the UI's progress chip.
+fn emit_stage(app: &AppHandle, tab_id: &str, stage: &str) {
+    runner::emit(app, tab_id, &AgentEvent::SessionStage { stage: stage.to_owned() });
+}
+
+/// Drain the agent's stderr forever: every line goes into the session's
+/// ring (attached to errors) and, best-effort, a per-provider log file.
+/// Draining is not optional — a full pipe blocks the agent mid-write.
+fn spawn_stderr_reader(
+    app: &AppHandle,
+    provider_id: &str,
+    session: Arc<AcpSession>,
+    stderr: tokio::process::ChildStderr,
+) {
+    let log_path = app
+        .path()
+        .app_log_dir()
+        .ok()
+        .map(|dir| dir.join(format!("acp-{provider_id}.log")));
+    tauri::async_runtime::spawn(async move {
+        let mut log_file = log_path.and_then(|path| {
+            std::fs::create_dir_all(path.parent()?).ok()?;
+            std::fs::OpenOptions::new().create(true).append(true).open(path).ok()
+        });
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let Some(file) = log_file.as_mut() {
+                let _ = writeln!(file, "{line}");
+            }
+            let mut tail = session.stderr_tail.lock().unwrap_or_else(PoisonError::into_inner);
+            if tail.len() >= STDERR_TAIL_LINES {
+                tail.pop_front();
+            }
+            tail.push_back(line);
+        }
+    });
 }
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -507,9 +626,10 @@ pub async fn list_native_sessions(
             return list_sessions_via(&existing, &spec.project_path).await;
         }
     }
-    let probe = boot_agent(&app, tab_id, provider_id, spec).await.map_err(|e| match e {
-        AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
-    })?;
+    let probe =
+        boot_agent(&app, tab_id, provider_id, spec, false).await.map_err(|e| match e {
+            AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
+        })?;
     let result = list_sessions_via(&probe, &spec.project_path).await;
     probe.shutdown();
     result
@@ -519,6 +639,11 @@ async fn list_sessions_via(
     session: &Arc<AcpSession>,
     project_path: &str,
 ) -> Result<Value, String> {
+    // `session/list` is an extension — calling it unadvertised earns a
+    // -32601 and a confusing error row in the History panel.
+    if !session.caps().session_list {
+        return Ok(Value::Array(vec![]));
+    }
     let id = session.request_id();
     let result = session
         .call_with_timeout(acp::session_list_request(id, project_path), id, LIST_TIMEOUT)
@@ -552,6 +677,9 @@ pub async fn load_native_session(
         .map_err(|e| match e {
             AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
         })?;
+    if !session.caps().load_session {
+        return Err("This agent cannot resume saved sessions.".to_owned());
+    }
     let id = session.request_id();
     session
         .call_with_timeout(
@@ -564,17 +692,27 @@ pub async fn load_native_session(
     Ok(())
 }
 
+/// A freshly launched (not yet initialized) ACP agent process.
+pub(crate) struct SpawnedAgent {
+    pub child: Child,
+    pub install_hint: &'static str,
+    /// True when the npx fallback launched — the first run may be
+    /// downloading the adapter, which is worth telling the user.
+    pub via_npx: bool,
+}
+
 /// Try each launch candidate in order (global binary first, then npx);
 /// return the first child that spawns, with the install hint for errors.
 /// Launch a provider's ACP agent. `pub(crate)` because the connection
 /// probe launches one too, and how an agent starts must be described in
-/// exactly one place.
+/// exactly one place. stderr is always piped — the caller must drain it
+/// (an undrained pipe eventually blocks the agent mid-write).
 pub(crate) fn spawn_agent(
     provider_id: &str,
     project_path: &str,
     model: Option<&str>,
     effort: Option<&str>,
-) -> Result<(Child, &'static str), AcpStartError> {
+) -> Result<SpawnedAgent, AcpStartError> {
     let candidates = acp::agent_commands(provider_id);
     let install_hint = candidates
         .first()
@@ -596,13 +734,19 @@ pub(crate) fn spawn_agent(
             .current_dir(project_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         for (key, value) in acp::agent_env(provider_id, model, effort) {
             command.env(key, value);
         }
         match command.spawn() {
-            Ok(child) => return Ok((child, install_hint)),
+            Ok(child) => {
+                return Ok(SpawnedAgent {
+                    child,
+                    install_hint,
+                    via_npx: candidate.program == "npx",
+                })
+            }
             Err(e) => last_error = Some(e),
         }
     }
@@ -631,7 +775,9 @@ fn spawn_reader(
                 &app,
                 &tab_id,
                 &AgentEvent::TurnCompleted {
-                    result: Some("The agent process ended unexpectedly.".to_owned()),
+                    result: Some(
+                        session.with_stderr("The agent process ended unexpectedly.".to_owned()),
+                    ),
                     provider_session_id: None,
                     is_error: true,
                     stop_reason: None,

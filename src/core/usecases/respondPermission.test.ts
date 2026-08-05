@@ -17,6 +17,7 @@ class RecordingGateway implements AgentGateway {
     _request: AgentTurnRequest,
     _onEvent: (event: AgentTurnEvent) => void,
   ): Promise<void> {}
+  subscribeSessionEvents(): void {}
   async cancelTurn(): Promise<void> {}
   async endSession(): Promise<void> {}
   async warmSession(): Promise<void> {}

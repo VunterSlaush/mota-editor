@@ -415,6 +415,59 @@ body {
   background: transparent;
 }
 
+.msg__error-context {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.75;
+  margin-bottom: 2px;
+}
+
+.msg__error-stderr {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.msg__error-stderr summary {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.msg__error-stderr pre {
+  margin: 6px 0 0;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.msg__retry {
+  margin-top: 8px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--error);
+  background: transparent;
+  color: var(--error);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.msg__retry:hover {
+  background: rgba(229, 83, 75, 0.12);
+}
+
+/* Warm-up progress shown while no turn is running. */
+.session-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 0;
+}
+
 .msg--info {
   align-self: center;
   color: var(--text-dim);

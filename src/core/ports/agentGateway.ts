@@ -111,6 +111,14 @@ export interface AgentGateway {
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<void>;
 
+  /**
+   * Receive session-level events (startup stages, agent mode switches)
+   * that arrive OUTSIDE a turn — e.g. while a session warms in the
+   * background. At most one subscriber; events during a turn keep going
+   * to the turn's own callback.
+   */
+  subscribeSessionEvents(onEvent: (tabId: string, event: AgentTurnEvent) => void): void;
+
   /** Cancel the in-flight turn for a tab, if any. */
   cancelTurn(tabId: string): Promise<void>;
 

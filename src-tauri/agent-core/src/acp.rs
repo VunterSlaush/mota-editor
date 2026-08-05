@@ -151,9 +151,100 @@ pub fn initialize_request(id: i64) -> Value {
                 // send the user out to a browser mid-turn.
                 "elicitation": { "form": {} }
             },
-            "clientInfo": { "name": "mota-editor", "title": "Mota Editor", "version": "0.1.0" }
+            "clientInfo": {
+                "name": "mota-editor",
+                "title": "Mota Editor",
+                "version": env!("CARGO_PKG_VERSION")
+            }
         }
     })
+}
+
+/// What the agent advertised at `initialize` — the parts this client
+/// acts on. Omitted capabilities parse as unsupported, per spec.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AgentCaps {
+    pub load_session: bool,
+    /// `session/list` is an extension (advertised via
+    /// `sessionCapabilities.list`); never call it unadvertised.
+    pub session_list: bool,
+    pub prompt_image: bool,
+    pub prompt_embedded_context: bool,
+    pub agent_name: Option<String>,
+    pub auth_method_count: usize,
+}
+
+/// Read the `initialize` response. Errs when the agent answered with a
+/// protocol version this client does not speak — per spec the agent
+/// must respond with a version ≤ ours, so anything newer means the two
+/// sides would talk past each other.
+pub fn parse_initialize_result(result: &Value) -> Result<AgentCaps, String> {
+    let version = result
+        .get("protocolVersion")
+        .and_then(Value::as_u64)
+        .ok_or("The agent reported no protocol version.")?;
+    if version > PROTOCOL_VERSION {
+        return Err(format!(
+            "The agent speaks ACP v{version}; this app speaks v{PROTOCOL_VERSION}. \
+             Update the app (or pin an older agent adapter)."
+        ));
+    }
+    let caps = result.get("agentCapabilities").cloned().unwrap_or(Value::Null);
+    Ok(AgentCaps {
+        load_session: caps.get("loadSession").and_then(Value::as_bool).unwrap_or(false),
+        session_list: caps.pointer("/sessionCapabilities/list").is_some(),
+        prompt_image: caps
+            .pointer("/promptCapabilities/image")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        prompt_embedded_context: caps
+            .pointer("/promptCapabilities/embeddedContext")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        agent_name: result
+            .pointer("/agentInfo/name")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        auth_method_count: result
+            .get("authMethods")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0),
+    })
+}
+
+/// Session modes as `session/new` reported them: what the agent is in
+/// now, and which ids `session/set_mode` may name.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SessionModes {
+    pub current: Option<String>,
+    pub available: Vec<String>,
+}
+
+/// Read the `session/new` result: the session id plus the mode state.
+pub fn parse_session_new_result(result: &Value) -> (Option<String>, SessionModes) {
+    let session_id = result
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let modes = SessionModes {
+        current: result
+            .pointer("/modes/currentModeId")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        available: result
+            .pointer("/modes/availableModes")
+            .and_then(Value::as_array)
+            .map(|modes| {
+                modes
+                    .iter()
+                    .filter_map(|m| m.get("id").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+    (session_id, modes)
 }
 
 /// The MCP servers a session is created with. Mota passes what the user
@@ -883,6 +974,59 @@ mod tests {
         let msg = initialize_request(0);
         assert_eq!(msg["params"]["protocolVersion"], 1);
         assert_eq!(msg["params"]["clientCapabilities"]["fs"]["readTextFile"], false);
+    }
+
+    #[test]
+    fn initialize_result_parses_capabilities_and_rejects_newer_protocols() {
+        // Shape captured from claude-agent-acp 0.64.2.
+        let ok = parse_initialize_result(&json!({
+            "protocolVersion": 1,
+            "agentCapabilities": {
+                "promptCapabilities": { "image": true, "embeddedContext": true },
+                "loadSession": true,
+                "sessionCapabilities": { "list": {}, "resume": {} }
+            },
+            "agentInfo": { "name": "claude-agent-acp", "version": "0.64.2" },
+            "authMethods": []
+        }))
+        .unwrap();
+        assert!(ok.load_session);
+        assert!(ok.session_list);
+        assert!(ok.prompt_image);
+        assert!(ok.prompt_embedded_context);
+        assert_eq!(ok.agent_name.as_deref(), Some("claude-agent-acp"));
+        assert_eq!(ok.auth_method_count, 0);
+
+        // Omitted capabilities are unsupported, per spec.
+        let bare = parse_initialize_result(&json!({ "protocolVersion": 1 })).unwrap();
+        assert!(!bare.load_session);
+        assert!(!bare.session_list);
+
+        // A newer protocol than ours means the two sides would talk past
+        // each other — refuse instead of limping.
+        assert!(parse_initialize_result(&json!({ "protocolVersion": 2 })).is_err());
+        assert!(parse_initialize_result(&json!({})).is_err());
+    }
+
+    #[test]
+    fn session_new_result_parses_id_and_modes() {
+        let (id, modes) = parse_session_new_result(&json!({
+            "sessionId": "s1",
+            "modes": {
+                "currentModeId": "default",
+                "availableModes": [
+                    { "id": "default", "name": "Manual" },
+                    { "id": "plan", "name": "Plan Mode" }
+                ]
+            }
+        }));
+        assert_eq!(id.as_deref(), Some("s1"));
+        assert_eq!(modes.current.as_deref(), Some("default"));
+        assert_eq!(modes.available, vec!["default", "plan"]);
+
+        let (bare_id, bare_modes) = parse_session_new_result(&json!({ "sessionId": "s2" }));
+        assert_eq!(bare_id.as_deref(), Some("s2"));
+        assert_eq!(bare_modes, SessionModes::default());
     }
 
     #[test]

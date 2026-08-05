@@ -33,6 +33,8 @@ class FakeAgentGateway implements AgentGateway {
     this.script.forEach(onEvent);
   }
 
+  subscribeSessionEvents(): void {}
+
   async cancelTurn(): Promise<void> {}
 
   async respondQuestion(): Promise<void> {}

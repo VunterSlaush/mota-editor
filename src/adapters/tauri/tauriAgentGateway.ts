@@ -91,17 +91,31 @@ export class TauriAgentGateway implements AgentGateway {
    * one folded every later event twice.
    */
   private readonly handlers = new Map<string, (event: AgentTurnEvent) => void>();
+  private sessionHandler: ((tabId: string, event: AgentTurnEvent) => void) | null = null;
   private listening: Promise<UnlistenFn> | null = null;
 
   private async ensureListener(): Promise<void> {
     this.listening ??= listen<WireEvent>("agent-event", ({ payload }) => {
-      const handler = this.handlers.get(payload.tabId);
-      if (!handler) return;
       const event = toDomainEvent(payload.event);
-      handler(event);
-      if (event.kind === "completed") this.handlers.delete(payload.tabId);
+      const handler = this.handlers.get(payload.tabId);
+      if (handler) {
+        handler(event);
+        if (event.kind === "completed") this.handlers.delete(payload.tabId);
+        return;
+      }
+      // No turn in flight: session-level events (warm-up stages, mode
+      // switches) still matter; everything else is a stray and drops.
+      if (event.kind === "sessionStage" || event.kind === "modeChanged") {
+        this.sessionHandler?.(payload.tabId, event);
+      }
     });
     await this.listening;
+  }
+
+  subscribeSessionEvents(onEvent: (tabId: string, event: AgentTurnEvent) => void): void {
+    this.sessionHandler = onEvent;
+    // Warm-up stages can arrive before any turn ever starts.
+    void this.ensureListener();
   }
 
   async startTurn(

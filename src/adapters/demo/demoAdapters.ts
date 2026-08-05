@@ -45,6 +45,8 @@ export class DemoAgentGateway implements AgentGateway {
     void this.run(request, onEvent);
   }
 
+  subscribeSessionEvents(): void {} // demo sessions have no warm-up
+
   private async run(
     request: AgentTurnRequest,
     onEvent: (event: AgentTurnEvent) => void,
