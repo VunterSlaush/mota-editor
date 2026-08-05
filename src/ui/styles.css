@@ -447,6 +447,30 @@ body {
   min-width: 0;
 }
 
+.msg__tool-status {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.msg__tool-status--spin {
+  animation: tool-spin 0.9s linear infinite;
+  color: var(--tool);
+}
+
+.msg__tool-status--done {
+  color: var(--success, #4caf7d);
+}
+
+.msg__tool-status--failed {
+  color: var(--danger, #e5534b);
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .msg__tool-detail {
   overflow: hidden;
   text-overflow: ellipsis;

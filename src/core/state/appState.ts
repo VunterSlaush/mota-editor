@@ -3,7 +3,13 @@ import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { McpServerConfig } from "../entities/mcpServer";
-import type { ChatMessage, MessageRole } from "../entities/message";
+import type {
+  ChatMessage,
+  MessageRole,
+  ToolCallContent,
+  ToolLocation,
+} from "../entities/message";
+import { mergeToolCall } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
 import type { ProviderId } from "../entities/provider";
@@ -47,6 +53,9 @@ export interface TabState {
   readonly attention?: boolean;
   /** Context-window usage of the tab's agent session. */
   readonly usage?: { readonly used: number; readonly size: number };
+  /** Where session startup stands (installing|booting|creating|recovering);
+   *  undefined once ready or failed. */
+  readonly sessionStage?: string;
 }
 
 /**
@@ -115,7 +124,19 @@ export type Action =
       filePath?: string;
     }
   | { type: "tab/usageUpdated"; tabId: string; used: number; size: number }
+  | { type: "tab/sessionStageChanged"; tabId: string; stage: string | undefined }
   | { type: "chat/messageAppended"; tabId: string; message: ChatMessage }
+  | {
+      type: "chat/toolCallUpdated";
+      tabId: string;
+      toolCallId: string;
+      patch: {
+        readonly status?: string;
+        readonly title?: string;
+        readonly content?: readonly ToolCallContent[];
+        readonly locations?: readonly ToolLocation[];
+      };
+    }
   | { type: "chat/assistantDelta"; tabId: string; text: string }
   | { type: "chat/userDelta"; tabId: string; text: string }
   | { type: "chat/thoughtDelta"; tabId: string; text: string }
@@ -267,10 +288,32 @@ export function reduce(state: AppState, action: Action): AppState {
         usage: { used: action.used, size: action.size },
       }));
 
+    case "tab/sessionStageChanged":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        sessionStage: action.stage,
+      }));
+
     case "chat/messageAppended":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         messages: [...tab.messages, action.message],
+      }));
+
+    // A tool call progressed: update its message in place. Exactly one
+    // message object changes, so memoized rows elsewhere don't re-render.
+    case "chat/toolCallUpdated":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        messages: tab.messages.map((m) =>
+          m.toolCall?.toolCallId === action.toolCallId
+            ? {
+                ...m,
+                text: action.patch.title ?? m.text,
+                toolCall: mergeToolCall(m.toolCall, action.patch),
+              }
+            : m,
+        ),
       }));
 
     case "chat/assistantDelta":

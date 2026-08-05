@@ -1,6 +1,6 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { McpServerSpec } from "../entities/mcpServer";
-import type { Question } from "../entities/message";
+import type { Question, ToolCallContent, ToolLocation } from "../entities/message";
 import type { ProviderId } from "../entities/provider";
 
 /**
@@ -31,6 +31,23 @@ export type AgentTurnEvent =
     }
   | { kind: "usage"; used: number; size: number }
   | { kind: "tool"; name: string; detail: string }
+  | {
+      kind: "toolCall";
+      toolCallId: string;
+      toolKind: string;
+      title: string;
+      status: string;
+    }
+  | {
+      kind: "toolCallUpdate";
+      toolCallId: string;
+      status?: string;
+      title?: string;
+      content?: readonly ToolCallContent[];
+      locations?: readonly ToolLocation[];
+    }
+  | { kind: "modeChanged"; modeId: string }
+  | { kind: "sessionStage"; stage: string }
   | { kind: "commands"; commands: readonly { name: string; description: string }[] }
   | {
       kind: "permission";
@@ -41,6 +58,8 @@ export type AgentTurnEvent =
       planMarkdown?: string;
       /** Where the agent saved the plan on disk, when it did. */
       planFilePath?: string;
+      /** The tool call this request guards, when the agent named it. */
+      toolCallId?: string;
     }
   | {
       kind: "question";
@@ -49,12 +68,21 @@ export type AgentTurnEvent =
       message: string;
       questions: readonly Question[];
     }
-  | { kind: "error"; message: string }
+  | {
+      kind: "error";
+      message: string;
+      /** Machine-readable tag ("agent-exited", ...). */
+      context?: string;
+      /** The agent process's last stderr lines, when relevant. */
+      stderrTail?: string;
+    }
   | {
       kind: "completed";
       result?: string;
       providerSessionId?: string;
       isError: boolean;
+      /** ACP stopReason (end_turn|max_tokens|max_turn_requests|refusal|cancelled). */
+      stopReason?: string;
     };
 
 export interface AgentTurnRequest {

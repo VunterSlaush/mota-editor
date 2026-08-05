@@ -45,3 +45,27 @@ export const PERMISSIONS: readonly OptionDescriptor<PermissionPolicy>[] = [
 
 export const DEFAULT_MODE: AgentMode = "agent";
 export const DEFAULT_PERMISSION: PermissionPolicy = "manual";
+
+/**
+ * Map an agent's native session-mode id (ACP `current_mode_update`) to
+ * the app's mode vocabulary. The agent's ids are its own (Claude:
+ * auto/default/acceptEdits/plan/dontAsk/bypassPermissions; Codex:
+ * read-only/agent); anything unrecognized returns null and the picker
+ * stays as it is — better than guessing a mode the user never chose.
+ */
+export function modeFromAgentModeId(modeId: string): AgentMode | null {
+  switch (modeId) {
+    case "plan":
+    case "read-only":
+      return "plan";
+    case "default":
+    case "auto":
+    case "acceptEdits":
+    case "dontAsk":
+    case "bypassPermissions":
+    case "agent":
+      return "agent";
+    default:
+      return null;
+  }
+}

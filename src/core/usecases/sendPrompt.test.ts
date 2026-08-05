@@ -283,6 +283,87 @@ describe("SendPrompt", () => {
     expect(roles).toEqual(["user", "tool", "assistant"]);
   });
 
+  it("tracks a tool call through its updates to one settled message", async () => {
+    const { store, useCase } = setup([
+      {
+        kind: "toolCall",
+        toolCallId: "c1",
+        toolKind: "execute",
+        title: "npm test",
+        status: "pending",
+      },
+      { kind: "toolCallUpdate", toolCallId: "c1", status: "in_progress" },
+      {
+        kind: "toolCallUpdate",
+        toolCallId: "c1",
+        status: "completed",
+        content: [{ type: "text", text: "42 passed" }],
+        locations: [{ path: "/work/alpha/a.ts", line: 3 }],
+      },
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "run the tests");
+
+    const tools = store.getState().tabs[0].messages.filter((m) => m.role === "tool");
+    expect(tools).toHaveLength(1);
+    expect(tools[0].toolCall?.status).toBe("completed");
+    expect(tools[0].toolCall?.content).toEqual([{ type: "text", text: "42 passed" }]);
+    expect(tools[0].toolCall?.locations).toEqual([{ path: "/work/alpha/a.ts", line: 3 }]);
+  });
+
+  it("an update for an unknown tool call changes nothing", async () => {
+    const { store, useCase } = setup([
+      { kind: "toolCallUpdate", toolCallId: "ghost", status: "completed" },
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "hello");
+
+    const roles = store.getState().tabs[0].messages.map((m) => m.role);
+    expect(roles).toEqual(["user"]);
+  });
+
+  it("follows the agent's own mode switches, ignoring unknown ids", async () => {
+    const { store, useCase } = setup([
+      { kind: "modeChanged", modeId: "plan" },
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "hello");
+    expect(store.getState().tabs[0].project.mode).toBe("plan");
+
+    const second = setup([
+      { kind: "modeChanged", modeId: "some-exotic-mode" },
+      { kind: "completed", isError: false },
+    ]);
+    await second.useCase.execute("t1", "hello");
+    expect(second.store.getState().tabs[0].project.mode).toBe("agent");
+  });
+
+  it("says so when the reply was cut short by a token limit", async () => {
+    const { store, useCase } = setup([
+      { kind: "assistantDelta", text: "partial…" },
+      { kind: "completed", isError: false, stopReason: "max_tokens" },
+    ]);
+
+    await useCase.execute("t1", "hello");
+
+    const info = store.getState().tabs[0].messages.find((m) => m.role === "info");
+    expect(info?.text).toContain("cut short");
+  });
+
+  it("a cancelled turn completes quietly without demanding attention", async () => {
+    const { store, notifications, useCase } = setup([
+      { kind: "completed", isError: false, stopReason: "cancelled" },
+    ]);
+
+    await useCase.execute("t1", "hello");
+
+    expect(store.getState().tabs[0].busy).toBe(false);
+    expect(notifications.calls).toHaveLength(0);
+  });
+
   it("passes the tab's model to the agent", async () => {
     const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
     store.dispatch({ type: "tab/modelChanged", tabId: "t1", model: "opus" });

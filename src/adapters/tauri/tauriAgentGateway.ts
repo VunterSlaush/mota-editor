@@ -28,6 +28,17 @@ interface WireEvent {
       }
     | { type: "usageUpdated"; used: number; size: number }
     | { type: "toolUse"; name: string; detail: string }
+    | { type: "toolCall"; id: string; kind: string; title: string; status: string }
+    | {
+        type: "toolCallUpdate";
+        id: string;
+        status: string | null;
+        title: string | null;
+        content: WireToolContent[];
+        locations: { path: string; line: number | null }[];
+      }
+    | { type: "modeChanged"; modeId: string }
+    | { type: "sessionStage"; stage: string }
     | { type: "commandsUpdated"; commands: { name: string; description: string }[] }
     | {
         type: "permissionRequested";
@@ -36,6 +47,7 @@ interface WireEvent {
         options: { optionId: string; name: string; kind: string }[];
         planMarkdown: string | null;
         planFilePath: string | null;
+        toolCallId: string | null;
       }
     | {
         type: "questionAsked";
@@ -50,14 +62,26 @@ interface WireEvent {
           customField: string | null;
         }[];
       }
-    | { type: "errorOccurred"; message: string }
+    | {
+        type: "errorOccurred";
+        message: string;
+        context: string | null;
+        stderrTail: string | null;
+      }
     | {
         type: "turnCompleted";
         result: string | null;
         providerSessionId: string | null;
         isError: boolean;
+        stopReason: string | null;
       };
 }
+
+/** Tool-call content block as the backend serializes it. */
+type WireToolContent =
+  | { type: "text"; text: string }
+  | { type: "diff"; path: string; oldText: string | null; newText: string }
+  | { type: "terminal"; terminalId: string };
 
 export class TauriAgentGateway implements AgentGateway {
   /**
@@ -111,9 +135,16 @@ export class TauriAgentGateway implements AgentGateway {
 
   async cancelTurn(tabId: string): Promise<void> {
     // Stopping means "stop": whatever the turn still emits while dying
-    // (deltas, tool use, its eventual `completed`) must not fold into
-    // the chat after the "Turn cancelled." notice.
-    this.handlers.delete(tabId);
+    // (deltas, tool use) must not fold into the chat after the "Turn
+    // cancelled." notice — but the turn's real `completed` must still
+    // land, or pending approval/question cards stay answerable and busy
+    // teardown never runs. Filter instead of deleting outright.
+    const original = this.handlers.get(tabId);
+    if (original) {
+      this.handlers.set(tabId, (event) => {
+        if (event.kind === "completed") original(event);
+      });
+    }
     await invoke("cancel_turn", { tabId });
   }
 
@@ -252,6 +283,7 @@ function toDomainEvent(wire: WireEvent["event"]): AgentTurnEvent {
         options: wire.options,
         planMarkdown: wire.planMarkdown ?? undefined,
         planFilePath: wire.planFilePath ?? undefined,
+        toolCallId: wire.toolCallId ?? undefined,
       };
     case "questionAsked":
       // Rust serializes absent values as null; the core models them as
@@ -275,16 +307,62 @@ function toDomainEvent(wire: WireEvent["event"]): AgentTurnEvent {
       };
     case "toolUse":
       return { kind: "tool", name: wire.name, detail: wire.detail };
+    case "toolCall":
+      return {
+        kind: "toolCall",
+        toolCallId: wire.id,
+        toolKind: wire.kind,
+        title: wire.title,
+        status: wire.status,
+      };
+    case "toolCallUpdate":
+      return {
+        kind: "toolCallUpdate",
+        toolCallId: wire.id,
+        status: wire.status ?? undefined,
+        title: wire.title ?? undefined,
+        content: wire.content.map(toDomainToolContent),
+        locations: wire.locations.map((l) => ({
+          path: l.path,
+          line: l.line ?? undefined,
+        })),
+      };
+    case "modeChanged":
+      return { kind: "modeChanged", modeId: wire.modeId };
+    case "sessionStage":
+      return { kind: "sessionStage", stage: wire.stage };
     case "commandsUpdated":
       return { kind: "commands", commands: wire.commands };
     case "errorOccurred":
-      return { kind: "error", message: wire.message };
+      return {
+        kind: "error",
+        message: wire.message,
+        context: wire.context ?? undefined,
+        stderrTail: wire.stderrTail ?? undefined,
+      };
     case "turnCompleted":
       return {
         kind: "completed",
         result: wire.result ?? undefined,
         providerSessionId: wire.providerSessionId ?? undefined,
         isError: wire.isError,
+        stopReason: wire.stopReason ?? undefined,
       };
+  }
+}
+
+function toDomainToolContent(wire: WireToolContent) {
+  switch (wire.type) {
+    case "text":
+      return { type: "text" as const, text: wire.text };
+    case "diff":
+      return {
+        type: "diff" as const,
+        path: wire.path,
+        oldText: wire.oldText ?? undefined,
+        newText: wire.newText,
+      };
+    case "terminal":
+      return { type: "terminal" as const, terminalId: wire.terminalId };
   }
 }

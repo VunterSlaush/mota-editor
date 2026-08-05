@@ -1,9 +1,12 @@
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  CircleNotch,
   ClipboardText,
   LockKey,
   Paperclip,
+  X,
 } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { permissionOptionHint } from "../../core/entities/approval";
@@ -24,14 +27,16 @@ interface Props {
    *  Must be a stable identity — it reaches memoized rows. */
   commands: ReadonlySet<string>;
   /** When false, only the conversation itself shows: user + assistant
-   *  messages, approvals, and errors — no tools, thoughts, or status. */
+   *  messages, approvals, errors, and info notices — no tools or thoughts. */
   verbose: boolean;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
   onShowPlan: () => void;
 }
 
-const QUIET_ROLES = new Set(["tool", "thought", "info"]);
+// Info stays visible: cancellations, fallback notices, and stop-reason
+// warnings are part of the conversation, not diagnostics.
+const QUIET_ROLES = new Set(["tool", "thought"]);
 
 /** How close to the bottom (px) still counts as "following the stream". */
 const FOLLOW_THRESHOLD = 48;
@@ -111,7 +116,7 @@ export function MessageList({
         />
       )}
       <div className="message-list" ref={scrollerRef} onScroll={onScroll}>
-        {rows.map(({ message: m, count, detail }) =>
+        {rows.map(({ message: m, count, detail, status }) =>
           m.role === "question" ? (
             <QuestionCard key={m.id} message={m} onAnswer={onAnswerQuestion} />
           ) : m.role === "approval" ? (
@@ -127,6 +132,7 @@ export function MessageList({
               message={m}
               count={count}
               detail={detail}
+              status={status}
               commands={commands}
               streaming={m.id === streamingId}
               innerRef={m.id === askedMessage?.id ? promptRef : undefined}
@@ -149,12 +155,33 @@ export function MessageList({
   );
 }
 
+/** Aggregate lifecycle of a (possibly grouped) tool row. */
+type RowStatus = "running" | "completed" | "failed";
+
 /** A transcript row: one message, standing in for `count` grouped ones. */
 interface Row {
   readonly message: ChatMessage;
   readonly count: number;
   /** Newline-joined details of every run in the group (tool rows only). */
   readonly detail: string;
+  /** Worst status across the group; undefined for legacy tool rows. */
+  readonly status?: RowStatus;
+}
+
+/** One tool call's contribution to its row's aggregate status. */
+function statusOf(message: ChatMessage): RowStatus | undefined {
+  const status = message.toolCall?.status;
+  if (!status) return undefined;
+  if (status === "failed") return "failed";
+  if (status === "completed") return "completed";
+  return "running"; // pending, in_progress, and unknown strings
+}
+
+/** Failed beats running beats completed: the group shows its worst news. */
+function mergeStatus(a?: RowStatus, b?: RowStatus): RowStatus | undefined {
+  if (a === "failed" || b === "failed") return "failed";
+  if (a === "running" || b === "running") return "running";
+  return a ?? b;
 }
 
 /**
@@ -183,9 +210,10 @@ function groupToolRuns(messages: readonly ChatMessage[]): Row[] {
         message: prev.message,
         count: prev.count + 1,
         detail,
+        status: mergeStatus(prev.status, statusOf(message)),
       };
     } else {
-      rows.push({ message, count: 1, detail: message.text });
+      rows.push({ message, count: 1, detail: message.text, status: statusOf(message) });
     }
   }
   return rows;
@@ -312,6 +340,21 @@ const ApprovalCard = memo(function ApprovalCard({
   );
 });
 
+/** Spinner while a tool runs; check or cross once it settled. */
+function ToolStatusIcon({ status }: { status: "running" | "completed" | "failed" }) {
+  if (status === "running") {
+    return <CircleNotch size={12} className="msg__tool-status msg__tool-status--spin" />;
+  }
+  if (status === "failed") {
+    return (
+      <X size={12} weight="bold" className="msg__tool-status msg__tool-status--failed" />
+    );
+  }
+  return (
+    <Check size={12} weight="bold" className="msg__tool-status msg__tool-status--done" />
+  );
+}
+
 /** Memoized: message objects are referentially stable except the one
  *  still streaming, so each delta re-renders exactly one bubble instead
  *  of re-parsing the whole transcript's markdown. */
@@ -319,6 +362,7 @@ const MessageBubble = memo(function MessageBubble({
   message,
   count = 1,
   detail,
+  status,
   commands,
   streaming,
   innerRef,
@@ -328,6 +372,8 @@ const MessageBubble = memo(function MessageBubble({
   count?: number;
   /** Newline-joined details of every run in the group (tool rows only). */
   detail?: string;
+  /** Aggregate tool-call status; undefined for legacy rows (no icon). */
+  status?: "running" | "completed" | "failed";
   commands: ReadonlySet<string>;
   streaming: boolean;
   /** Set on the message the PinnedPrompt tracks, so it can be measured. */
@@ -336,7 +382,8 @@ const MessageBubble = memo(function MessageBubble({
   if (message.role === "tool") {
     const lines = (detail ?? message.text).split("\n");
     return (
-      <div className="msg msg--tool">
+      <div className={`msg msg--tool ${status ? `msg--tool-${status}` : ""}`}>
+        {status && <ToolStatusIcon status={status} />}
         <span className="msg__tool-name">{message.toolName}</span>
         <span className="msg__tool-details">
           {lines.map((line) => (

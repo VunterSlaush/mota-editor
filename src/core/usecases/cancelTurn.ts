@@ -15,6 +15,10 @@ export class CancelTurn {
     if (!tab?.busy) return;
 
     await this.agentGateway.cancelTurn(tabId);
+    // Belt and braces: the turn's real `completed` normally cancels
+    // pending cards, but if the agent never acknowledges the cancel the
+    // cards must not sit there looking answerable.
+    this.store.dispatch({ type: "chat/approvalsCancelled", tabId });
     const queuedCount = tab.queued.length;
     if (queuedCount > 0) {
       // Stopping means "stop" — don't fire messages the user queued

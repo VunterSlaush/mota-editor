@@ -1,3 +1,4 @@
+import { modeFromAgentModeId } from "../entities/agentSettings";
 import { dedupeCommands } from "../entities/command";
 import { serversForProvider } from "../entities/mcpServer";
 import {
@@ -7,6 +8,7 @@ import {
   infoMessage,
   questionMessage,
   thoughtMessage,
+  toolCallMessage,
   toolMessage,
   userMessage,
 } from "../entities/message";
@@ -196,6 +198,7 @@ export class SendPrompt {
             event.requestId,
             event.options,
             event.planMarkdown,
+            event.toolCallId,
           ),
         });
         break;
@@ -229,12 +232,61 @@ export class SendPrompt {
         });
         break;
 
+      case "toolCall":
+        this.store.dispatch({
+          type: "chat/messageAppended",
+          tabId,
+          message: toolCallMessage(
+            event.toolCallId,
+            event.toolKind,
+            event.title,
+            event.status,
+          ),
+        });
+        break;
+
+      case "toolCallUpdate":
+        this.store.dispatch({
+          type: "chat/toolCallUpdated",
+          tabId,
+          toolCallId: event.toolCallId,
+          patch: {
+            status: event.status,
+            title: event.title,
+            content: event.content,
+            locations: event.locations,
+          },
+        });
+        break;
+
+      case "modeChanged": {
+        // Keep the composer's picker honest when the agent switches its
+        // own mode (e.g. leaving plan mode after an approved plan).
+        const mapped = modeFromAgentModeId(event.modeId);
+        if (mapped && mapped !== tab.project.mode) {
+          this.store.dispatch({ type: "tab/modeChanged", tabId, mode: mapped });
+        }
+        break;
+      }
+
+      case "sessionStage":
+        this.store.dispatch({
+          type: "tab/sessionStageChanged",
+          tabId,
+          stage: event.stage === "ready" ? undefined : event.stage,
+        });
+        break;
+
       case "error":
         this.store.dispatch({
           type: "chat/messageAppended",
           tabId,
-          message: errorMessage(event.message),
+          message: errorMessage(event.message, {
+            context: event.context,
+            stderrTail: event.stderrTail,
+          }),
         });
+        this.store.dispatch({ type: "tab/sessionStageChanged", tabId, stage: undefined });
         break;
 
       case "completed": {
@@ -253,9 +305,27 @@ export class SendPrompt {
             message: errorMessage(event.result),
           });
         }
+        // A turn cut short by limits is not a success to pass off
+        // silently — say so where the user will see it.
+        if (
+          event.stopReason === "max_tokens" ||
+          event.stopReason === "max_turn_requests"
+        ) {
+          this.store.dispatch({
+            type: "chat/messageAppended",
+            tabId,
+            message: infoMessage(
+              event.stopReason === "max_tokens"
+                ? "The reply was cut short: the agent hit its output-token limit."
+                : "The turn stopped early: the agent hit its per-turn request limit.",
+            ),
+          });
+        }
         this.store.dispatch({ type: "chat/approvalsCancelled", tabId });
         this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
-        this.requestAttention(tabId);
+        this.store.dispatch({ type: "tab/sessionStageChanged", tabId, stage: undefined });
+        // A cancel already has the user's full attention.
+        if (event.stopReason !== "cancelled") this.requestAttention(tabId);
         void persistWorkspace(this.store.getState(), this.workspaceStore);
         void this.saveTranscript(tabId);
         this.autoCompactIfNeeded(tabId);
