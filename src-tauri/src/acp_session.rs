@@ -35,11 +35,27 @@ pub enum AcpStartError {
     Failed(String),
 }
 
+/// A session id worth trying to restore after its process died.
+struct RecoveredSession {
+    provider_id: String,
+    session_id: String,
+}
+
 #[derive(Default)]
-pub struct AcpSessions(Mutex<HashMap<String, Arc<AcpSession>>>);
+pub struct AcpSessions {
+    map: Mutex<HashMap<String, Arc<AcpSession>>>,
+    /// Last known agent-side session per tab, for crash recovery: when
+    /// the process dies unexpectedly, the next turn tries `session/load`
+    /// on a fresh agent instead of silently starting a blank context.
+    /// Cleared by `end_session` — the user asked for a reset there.
+    recovery: Mutex<HashMap<String, RecoveredSession>>,
+}
 
 pub struct AcpSession {
     provider_id: String,
+    /// The project folder — the confinement root for the agent's
+    /// client-fs requests.
+    project_path: String,
     /// Model the agent was spawned with (env-based; change = respawn).
     model: Option<String>,
     /// Effort the agent was spawned with (env-based; change = respawn).
@@ -71,6 +87,10 @@ pub struct AcpSession {
     /// A dead session must never be handed out again — writes to it can
     /// only fail or hang.
     dead: AtomicBool,
+    /// True while a crash-recovery `session/load` replays: its
+    /// `session/update` stream restores the AGENT's memory, not the
+    /// chat (which never lost the conversation), so updates are muted.
+    replaying: AtomicBool,
     /// What the agent advertised at `initialize` — gates optional calls
     /// (`session/list`, `session/load`) instead of assuming support.
     caps: Mutex<acp::AgentCaps>,
@@ -89,19 +109,49 @@ const STDERR_TAIL_LINES: usize = 200;
 
 impl AcpSessions {
     fn get(&self, tab_id: &str) -> Option<Arc<AcpSession>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).get(tab_id).cloned()
+        self.map.lock().unwrap_or_else(PoisonError::into_inner).get(tab_id).cloned()
     }
 
     pub fn end_session(&self, tab_id: &str) {
-        if let Some(session) = self.0.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id) {
+        if let Some(session) = self.map.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id) {
             session.shutdown();
         }
+        // An intentional reset must not resurrect the old context later.
+        self.recovery.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id);
+    }
+
+    /// App exit: kill every agent subprocess deliberately rather than
+    /// hoping `kill_on_drop` still runs.
+    pub fn shutdown_all(&self) {
+        for (_, session) in self.map.lock().unwrap_or_else(PoisonError::into_inner).drain() {
+            session.shutdown();
+        }
+    }
+
+    /// Remember the tab's live agent session for crash recovery.
+    fn record_recovery(&self, tab_id: &str, provider_id: &str, session_id: &str) {
+        self.recovery.lock().unwrap_or_else(PoisonError::into_inner).insert(
+            tab_id.to_owned(),
+            RecoveredSession {
+                provider_id: provider_id.to_owned(),
+                session_id: session_id.to_owned(),
+            },
+        );
+    }
+
+    /// The session id to try restoring for this tab+provider, if any.
+    fn recoverable_session(&self, tab_id: &str, provider_id: &str) -> Option<String> {
+        let recovery = self.recovery.lock().unwrap_or_else(PoisonError::into_inner);
+        recovery
+            .get(tab_id)
+            .filter(|r| r.provider_id == provider_id)
+            .map(|r| r.session_id.clone())
     }
 
     /// Evict a session only if the map still holds THIS one — a respawn
     /// may already have replaced it under the same tab id.
     fn evict(&self, tab_id: &str, session: &Arc<AcpSession>) {
-        let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut map = self.map.lock().unwrap_or_else(PoisonError::into_inner);
         if map.get(tab_id).is_some_and(|s| Arc::ptr_eq(s, session)) {
             map.remove(tab_id);
         }
@@ -448,6 +498,57 @@ async fn ensure_session(
         e
     })?;
 
+    // Crash recovery: when the previous process died with a conversation
+    // in it, try to reload that session into the fresh agent instead of
+    // silently starting a blank context (the tab still shows the chat —
+    // the agent should still remember it).
+    if let Some(old_id) = sessions.recoverable_session(tab_id, provider_id) {
+        if session.caps().load_session {
+            emit_stage(app, tab_id, "recovering");
+            let id = session.request_id();
+            // The replayed conversation must not flood the chat — the
+            // transcript is already on screen; only the agent's memory
+            // is being restored.
+            session.replaying.store(true, Ordering::SeqCst);
+            let loaded = session
+                .call_with_timeout(
+                    acp::session_load_request(id, &old_id, project_path, mcp_servers),
+                    id,
+                    LOAD_TIMEOUT,
+                )
+                .await;
+            session.replaying.store(false, Ordering::SeqCst);
+            match loaded {
+                Ok(_) => {
+                    session.set_sid(old_id.clone());
+                    sessions
+                        .map
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(tab_id.to_owned(), Arc::clone(&session));
+                    emit_stage(app, tab_id, "ready");
+                    return Ok(session);
+                }
+                Err(e) => {
+                    // Fall through to a fresh session — but say so, or the
+                    // agent's sudden amnesia looks like a model failure.
+                    runner::emit(
+                        app,
+                        tab_id,
+                        &AgentEvent::ErrorOccurred {
+                            message: format!(
+                                "The previous conversation could not be restored ({e}); \
+                                 the agent starts fresh."
+                            ),
+                            context: Some("session-not-restored".to_owned()),
+                            stderr_tail: None,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
     emit_stage(app, tab_id, "creating");
     let new_id = session.request_id();
     let new_result = session
@@ -474,6 +575,7 @@ async fn ensure_session(
         return Err(AcpStartError::Failed("The agent returned no session id.".to_owned()));
     };
 
+    sessions.record_recovery(tab_id, provider_id, &session_id);
     session.set_sid(session_id);
     // Kept for validating `session/set_mode` requests — NOT emitted as a
     // ModeChanged: the user's picker choice is applied right after this
@@ -483,7 +585,7 @@ async fn ensure_session(
     *session.available_modes.lock().unwrap_or_else(PoisonError::into_inner) =
         modes.available;
     sessions
-        .0
+        .map
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .insert(tab_id.to_owned(), Arc::clone(&session));
@@ -521,6 +623,7 @@ async fn boot_agent(
 
     let session = Arc::new(AcpSession {
         provider_id: provider_id.to_owned(),
+        project_path: project_path.clone(),
         model: model.clone(),
         effort: effort.clone(),
         mcp_servers: mcp_servers.clone(),
@@ -536,6 +639,7 @@ async fn boot_agent(
         plan_mode: AtomicBool::new(false),
         turn_active: AtomicBool::new(false),
         dead: AtomicBool::new(false),
+        replaying: AtomicBool::new(false),
         caps: Mutex::new(acp::AgentCaps::default()),
         available_modes: Mutex::new(Vec::new()),
         stderr_tail: Mutex::new(VecDeque::new()),
@@ -689,25 +793,24 @@ pub async fn load_native_session(
         )
         .await?;
     session.set_sid(session_id.to_owned());
+    sessions.record_recovery(tab_id, provider_id, session_id);
     Ok(())
 }
 
 /// A freshly launched (not yet initialized) ACP agent process.
-pub(crate) struct SpawnedAgent {
-    pub child: Child,
-    pub install_hint: &'static str,
+struct SpawnedAgent {
+    child: Child,
+    install_hint: &'static str,
     /// True when the npx fallback launched — the first run may be
     /// downloading the adapter, which is worth telling the user.
-    pub via_npx: bool,
+    via_npx: bool,
 }
 
 /// Try each launch candidate in order (global binary first, then npx);
 /// return the first child that spawns, with the install hint for errors.
-/// Launch a provider's ACP agent. `pub(crate)` because the connection
-/// probe launches one too, and how an agent starts must be described in
-/// exactly one place. stderr is always piped — the caller must drain it
-/// (an undrained pipe eventually blocks the agent mid-write).
-pub(crate) fn spawn_agent(
+/// stderr is always piped — the caller must drain it (an undrained pipe
+/// eventually blocks the agent mid-write).
+fn spawn_agent(
     provider_id: &str,
     project_path: &str,
     model: Option<&str>,
@@ -758,6 +861,82 @@ pub(crate) fn spawn_agent(
     )))
 }
 
+/// One-shot connection check for the settings screen: boot the agent,
+/// open (and immediately abandon) a session, report what it advertised.
+/// Runs on the same wire code as real sessions — the probe used to be a
+/// second hand-rolled JSON-RPC loop, and two implementations of one
+/// protocol only ever drift apart. Never registered in the session map;
+/// no stage events (nothing the user asked to watch).
+pub(crate) async fn probe_handshake(
+    app: &AppHandle,
+    provider_id: &str,
+    project_path: &str,
+    timeout: Duration,
+) -> Result<acp::AgentCaps, AcpStartError> {
+    let spec = SessionSpec {
+        project_path: project_path.to_owned(),
+        model: None,
+        effort: None,
+        // No MCP servers: the probe asks "can you work at all?", and a
+        // failing server would answer a different question.
+        mcp_servers: Vec::new(),
+    };
+    let tab_id = format!("probe:{provider_id}");
+    let session = boot_agent(app, &tab_id, provider_id, &spec, false).await?;
+
+    let id = session.request_id();
+    let opened = session
+        .call_with_timeout(acp::session_new_request(id, project_path, &[]), id, timeout)
+        .await;
+    let result = match opened {
+        Ok(_) => Ok(session.caps()),
+        // Started but refused to open a session — almost always a
+        // missing login; the agent's stderr usually says so.
+        Err(e) => Err(AcpStartError::Failed(session.with_stderr(e))),
+    };
+    session.shutdown();
+    result
+}
+
+/// Resolve an agent-supplied path and require it inside the project.
+/// Canonicalizes real paths so `..` and symlinks cannot escape; for a
+/// write to a not-yet-existing file the PARENT directory must exist and
+/// be inside instead (the spec says create the file, not directories).
+fn confine_to_project(
+    project_path: &str,
+    requested: &str,
+    must_exist: bool,
+) -> Result<std::path::PathBuf, String> {
+    let project = std::fs::canonicalize(project_path)
+        .map_err(|e| format!("Project folder unavailable: {e}"))?;
+    match std::fs::canonicalize(requested) {
+        Ok(file) => {
+            if file.starts_with(&project) {
+                Ok(file)
+            } else {
+                Err(format!("Path is outside the project: {requested}"))
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !must_exist => {
+            let path = std::path::Path::new(requested);
+            let parent = path
+                .parent()
+                .ok_or_else(|| format!("Path has no parent directory: {requested}"))?;
+            let file_name = path
+                .file_name()
+                .ok_or_else(|| format!("Path names no file: {requested}"))?;
+            let parent = std::fs::canonicalize(parent)
+                .map_err(|e| format!("Parent directory unavailable: {e}"))?;
+            if parent.starts_with(&project) {
+                Ok(parent.join(file_name))
+            } else {
+                Err(format!("Path is outside the project: {requested}"))
+            }
+        }
+        Err(e) => Err(format!("Could not resolve {requested}: {e}")),
+    }
+}
+
 fn spawn_reader(
     app: AppHandle,
     tab_id: String,
@@ -771,13 +950,23 @@ fn spawn_reader(
         }
         // Agent process ended.
         if session.turn_active.swap(false, Ordering::SeqCst) {
+            let tail = session.stderr_tail_text();
+            runner::emit(
+                &app,
+                &tab_id,
+                &AgentEvent::ErrorOccurred {
+                    message: "The agent process ended unexpectedly. The next message \
+                              will restart it and try to restore the conversation."
+                        .to_owned(),
+                    context: Some("agent-exited".to_owned()),
+                    stderr_tail: (!tail.is_empty()).then_some(tail),
+                },
+            );
             runner::emit(
                 &app,
                 &tab_id,
                 &AgentEvent::TurnCompleted {
-                    result: Some(
-                        session.with_stderr("The agent process ended unexpectedly.".to_owned()),
-                    ),
+                    result: None,
                     provider_session_id: None,
                     is_error: true,
                     stop_reason: None,
@@ -864,9 +1053,54 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 .await;
         }
         Some(acp::Incoming::Updates(events)) => {
+            // A crash-recovery replay restores agent memory, not the
+            // chat — the transcript on screen never went anywhere.
+            if session.replaying.load(Ordering::SeqCst) {
+                return;
+            }
             for event in events {
                 runner::emit(app, tab_id, &event);
             }
+        }
+        // Client fs, spawned off the reader loop (disk must never stall
+        // the wire). Paths come from the AGENT and are confined to the
+        // project folder — a prompt-injected agent must not turn this
+        // into an arbitrary-file read or write.
+        Some(acp::Incoming::FsReadRequest { id, path, line, limit }) => {
+            let session = Arc::clone(session);
+            tauri::async_runtime::spawn(async move {
+                let response = match confine_to_project(&session.project_path, &path, true)
+                {
+                    Ok(file) => match tokio::fs::read_to_string(&file).await {
+                        Ok(text) => {
+                            acp::fs_read_response(id, &acp::slice_lines(&text, line, limit))
+                        }
+                        Err(e) => acp::internal_error_response(
+                            id,
+                            &format!("Could not read {path}: {e}"),
+                        ),
+                    },
+                    Err(message) => acp::internal_error_response(id, &message),
+                };
+                let _ = session.write_message(&response).await;
+            });
+        }
+        Some(acp::Incoming::FsWriteRequest { id, path, content }) => {
+            let session = Arc::clone(session);
+            tauri::async_runtime::spawn(async move {
+                let response =
+                    match confine_to_project(&session.project_path, &path, false) {
+                        Ok(file) => match tokio::fs::write(&file, &content).await {
+                            Ok(()) => acp::fs_write_response(id),
+                            Err(e) => acp::internal_error_response(
+                                id,
+                                &format!("Could not write {path}: {e}"),
+                            ),
+                        },
+                        Err(message) => acp::internal_error_response(id, &message),
+                    };
+                let _ = session.write_message(&response).await;
+            });
         }
         Some(acp::Incoming::UnsupportedRequest { id, method }) => {
             let _ = session

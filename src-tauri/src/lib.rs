@@ -76,6 +76,18 @@ pub fn run() {
             history_file::load_session,
             history_file::delete_session,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running mota-editor");
+        .build(tauri::generate_context!())
+        .expect("error while running mota-editor")
+        .run(|app, event| {
+            // Kill agent subprocesses on the way out. `kill_on_drop` is
+            // the fallback, but drops are not guaranteed at process exit
+            // — an explicit shutdown is. (Windows caveat: TerminateProcess
+            // reaches the direct child only; an `npx` shim's node
+            // grandchild can outlive it. A job object would close that —
+            // deliberate follow-up.)
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                app.state::<AcpSessions>().shutdown_all();
+            }
+        });
 }

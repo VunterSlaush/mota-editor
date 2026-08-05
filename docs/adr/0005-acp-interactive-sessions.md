@@ -48,9 +48,12 @@ Key mappings:
 - **Streaming** → `agent_message_chunk` updates become token-level
   deltas in the chat; `tool_call` updates become tool rows.
 - **Attachments** → baseline `resource_link` content blocks (file:// URIs).
-- The client declares `fs` and `terminal` capabilities false, so agents
-  do their own file I/O; any unexpected agent→client method gets a
-  `-32601` response.
+- ~~The client declares `fs` and `terminal` capabilities false, so agents
+  do their own file I/O~~ *(amended 2026-08-05 by the ACP review)*: the
+  client now serves `fs/read_text_file` and `fs/write_text_file`,
+  confined to the project folder (`acp_session.rs::confine_to_project`).
+  `terminal` remains false until C4 lands; any unexpected agent→client
+  method still gets a `-32601` response.
 
 **Fallback:** if the ACP agent can't be launched (adapter not installed,
 binary missing, handshake timeout), the tab falls back automatically to

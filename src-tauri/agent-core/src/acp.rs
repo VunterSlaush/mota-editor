@@ -140,7 +140,9 @@ pub fn initialize_request(id: i64) -> Value {
         "params": {
             "protocolVersion": PROTOCOL_VERSION,
             "clientCapabilities": {
-                "fs": { "readTextFile": false, "writeTextFile": false },
+                // Real client-side fs: reads/writes are served by the
+                // shell, confined to the project folder.
+                "fs": { "readTextFile": true, "writeTextFile": true },
                 "terminal": false,
                 // Declaring form elicitation is what lets the agent ASK the
                 // user things. Claude's adapter puts `AskUserQuestion` in
@@ -391,6 +393,42 @@ pub fn method_not_found_response(id: i64, method: &str) -> Value {
     })
 }
 
+/// Successful `fs/read_text_file` answer.
+pub fn fs_read_response(id: i64, content: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": { "content": content } })
+}
+
+/// Successful `fs/write_text_file` answer (empty result per spec).
+pub fn fs_write_response(id: i64) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": {} })
+}
+
+/// A request this client understood but could not serve (I/O failure,
+/// path outside the project, non-UTF-8 file).
+pub fn internal_error_response(id: i64, message: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": -32603, "message": message }
+    })
+}
+
+/// Slice a file's text per `fs/read_text_file`: `line` is 1-based and
+/// `limit` counts lines from there; both optional. A start past EOF
+/// yields empty rather than an error — the agent asked about a region
+/// that simply has no text.
+pub fn slice_lines(text: &str, line: Option<u64>, limit: Option<u64>) -> String {
+    let start = line.unwrap_or(1).saturating_sub(1) as usize;
+    let take = limit.map(|l| l as usize).unwrap_or(usize::MAX);
+    let mut lines = text.lines().skip(start).take(take).collect::<Vec<_>>().join("\n");
+    // Preserve a trailing newline when the slice runs to the end of a
+    // newline-terminated file.
+    if !lines.is_empty() && limit.is_none() && text.ends_with('\n') {
+        lines.push('\n');
+    }
+    lines
+}
+
 /// The prompt request for one turn: mode preamble folded into the text
 /// block (skipped when the mode is enforced natively via
 /// `session/set_mode`); attachments as baseline `resource_link` blocks.
@@ -466,7 +504,18 @@ pub enum Incoming {
     UnsupportedElicitation { id: i64 },
     /// `session/update` notification, already translated to domain events.
     Updates(Vec<AgentEvent>),
-    /// Any other request from the agent (fs/terminal/...) — must be
+    /// The agent wants to read a file through the client (`fs/read_text_file`).
+    FsReadRequest {
+        id: i64,
+        path: String,
+        /// 1-based first line to include, when the agent asked for a slice.
+        line: Option<u64>,
+        /// Number of lines to include from `line`.
+        limit: Option<u64>,
+    },
+    /// The agent wants to write a file through the client (`fs/write_text_file`).
+    FsWriteRequest { id: i64, path: String, content: String },
+    /// Any other request from the agent (terminal/...) — must be
     /// answered with an error since we advertise no such capabilities.
     UnsupportedRequest { id: i64, method: String },
     /// Notification or noise we deliberately ignore.
@@ -484,6 +533,41 @@ pub fn parse_incoming(line: &str) -> Option<Incoming> {
             Some(classify_permission_request(id, &value))
         }
         (Some("elicitation/create"), Some(id)) => Some(classify_elicitation(id, &value)),
+        // Malformed fs requests (no path/content) fall through to the
+        // UnsupportedRequest arm below via this guard-less structure —
+        // the agent always gets SOME answer, never silence.
+        (Some("fs/read_text_file"), Some(id)) => {
+            let params = value.get("params").cloned().unwrap_or(Value::Null);
+            match params.get("path").and_then(Value::as_str) {
+                Some(path) => Some(Incoming::FsReadRequest {
+                    id,
+                    path: path.to_owned(),
+                    line: params.get("line").and_then(Value::as_u64),
+                    limit: params.get("limit").and_then(Value::as_u64),
+                }),
+                None => Some(Incoming::UnsupportedRequest {
+                    id,
+                    method: "fs/read_text_file (missing path)".to_owned(),
+                }),
+            }
+        }
+        (Some("fs/write_text_file"), Some(id)) => {
+            let params = value.get("params").cloned().unwrap_or(Value::Null);
+            match (
+                params.get("path").and_then(Value::as_str),
+                params.get("content").and_then(Value::as_str),
+            ) {
+                (Some(path), Some(content)) => Some(Incoming::FsWriteRequest {
+                    id,
+                    path: path.to_owned(),
+                    content: content.to_owned(),
+                }),
+                _ => Some(Incoming::UnsupportedRequest {
+                    id,
+                    method: "fs/write_text_file (missing path or content)".to_owned(),
+                }),
+            }
+        }
         (Some("session/update"), None) => Some(Incoming::Updates(
             value.get("params").map(translate_update).unwrap_or_default(),
         )),
@@ -1070,10 +1154,55 @@ mod tests {
     }
 
     #[test]
-    fn initialize_declares_version_1_and_no_fs_capabilities() {
+    fn initialize_declares_version_1_and_full_fs_capabilities() {
         let msg = initialize_request(0);
         assert_eq!(msg["params"]["protocolVersion"], 1);
-        assert_eq!(msg["params"]["clientCapabilities"]["fs"]["readTextFile"], false);
+        assert_eq!(msg["params"]["clientCapabilities"]["fs"]["readTextFile"], true);
+        assert_eq!(msg["params"]["clientCapabilities"]["fs"]["writeTextFile"], true);
+        assert_eq!(msg["params"]["clientCapabilities"]["terminal"], false);
+    }
+
+    #[test]
+    fn fs_requests_are_parsed_with_their_slices() {
+        let read = r#"{"jsonrpc":"2.0","id":21,"method":"fs/read_text_file","params":{"sessionId":"s","path":"/w/a.ts","line":10,"limit":5}}"#;
+        assert_eq!(
+            parse_incoming(read),
+            Some(Incoming::FsReadRequest {
+                id: 21,
+                path: "/w/a.ts".into(),
+                line: Some(10),
+                limit: Some(5),
+            })
+        );
+        let write = r#"{"jsonrpc":"2.0","id":22,"method":"fs/write_text_file","params":{"sessionId":"s","path":"/w/a.ts","content":"hello"}}"#;
+        assert_eq!(
+            parse_incoming(write),
+            Some(Incoming::FsWriteRequest {
+                id: 22,
+                path: "/w/a.ts".into(),
+                content: "hello".into(),
+            })
+        );
+        // Malformed requests still get SOME answer, never silence.
+        let broken = r#"{"jsonrpc":"2.0","id":23,"method":"fs/write_text_file","params":{"path":"/w/a.ts"}}"#;
+        assert!(matches!(
+            parse_incoming(broken),
+            Some(Incoming::UnsupportedRequest { id: 23, .. })
+        ));
+        assert_eq!(fs_read_response(21, "text")["result"]["content"], "text");
+        assert_eq!(fs_write_response(22)["result"], json!({}));
+        assert_eq!(internal_error_response(23, "nope")["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn slice_lines_is_one_based_and_forgiving() {
+        let text = "a\nb\nc\nd\n";
+        assert_eq!(slice_lines(text, None, None), text);
+        assert_eq!(slice_lines(text, Some(2), None), "b\nc\nd\n");
+        assert_eq!(slice_lines(text, Some(2), Some(2)), "b\nc");
+        assert_eq!(slice_lines(text, Some(99), None), "");
+        assert_eq!(slice_lines(text, Some(0), Some(1)), "a"); // 0 treated as 1
+        assert_eq!(slice_lines("", None, None), "");
     }
 
     #[test]
@@ -1596,12 +1725,12 @@ mod tests {
 
     #[test]
     fn other_agent_requests_are_flagged_unsupported() {
-        let line = r#"{"jsonrpc":"2.0","id":4,"method":"fs/read_text_file","params":{}}"#;
+        let line = r#"{"jsonrpc":"2.0","id":4,"method":"terminal/create","params":{}}"#;
         assert_eq!(
             parse_incoming(line),
-            Some(Incoming::UnsupportedRequest { id: 4, method: "fs/read_text_file".into() })
+            Some(Incoming::UnsupportedRequest { id: 4, method: "terminal/create".into() })
         );
-        let response = method_not_found_response(4, "fs/read_text_file");
+        let response = method_not_found_response(4, "terminal/create");
         assert_eq!(response["error"]["code"], -32601);
     }
 
