@@ -11,10 +11,11 @@ interface Props {
  * UI — the agent asking the user something it can't decide alone.
  *
  * Deliberately not an approval card: nothing is being consented to, so
- * there is no allow/deny framing. A single-choice question submits the
- * moment an option is clicked (the common case is one question with a
- * handful of answers); anything with several questions, a multi-select,
- * or a typed answer gets an explicit Send.
+ * there is no allow/deny framing. Several questions present as steps,
+ * Claude-Code style: one at a time, answering advances, and a single
+ * Send at the end delivers everything at once. Answered steps stay
+ * visible as compact rows — click one to go back and change it. A lone
+ * single-choice question still submits the moment an option is clicked.
  */
 export const QuestionCard = memo(function QuestionCard({ message, onAnswer }: Props) {
   const state = message.question;
@@ -22,10 +23,13 @@ export const QuestionCard = memo(function QuestionCard({ message, onAnswer }: Pr
   // is the shape the agent reads back.
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
+  const [step, setStep] = useState(0);
 
   if (!state) return null;
   const answered = Boolean(state.answers) || state.skipped || state.cancelled;
   const questions = state.questions;
+  const current = questions[step];
+  const isLast = step === questions.length - 1;
 
   /** One click answers the simple case; everything else needs Send. */
   const submitsOnClick =
@@ -34,6 +38,16 @@ export const QuestionCard = memo(function QuestionCard({ message, onAnswer }: Pr
   function hasTyping(): boolean {
     return Object.values(typed).some((t) => t.trim() !== "");
   }
+
+  /** What the user settled on for one question, custom text winning. */
+  const answerText = (
+    question: Question,
+    selections: Record<string, string[]> = picked,
+  ): string => {
+    const custom = question.customField ? typed[question.customField]?.trim() : "";
+    if (custom) return custom;
+    return (selections[question.field] ?? []).join(", ");
+  };
 
   const answersFor = (overrides?: Record<string, string[]>): Record<string, string> => {
     const selections = overrides ?? picked;
@@ -58,88 +72,119 @@ export const QuestionCard = memo(function QuestionCard({ message, onAnswer }: Pr
       const next = { ...picked, [question.field]: [value] };
       setPicked(next);
       if (submitsOnClick) onAnswer(state.requestId, answersFor(next));
+      // Picking is the whole answer for a single-select: move on.
+      else if (!isLast) setStep(step + 1);
       return;
     }
-    const current = picked[question.field] ?? [];
+    const selected = picked[question.field] ?? [];
     setPicked({
       ...picked,
-      [question.field]: current.includes(value)
-        ? current.filter((v) => v !== value)
-        : [...current, value],
+      [question.field]: selected.includes(value)
+        ? selected.filter((v) => v !== value)
+        : [...selected, value],
     });
   };
 
   const answers = answersFor();
   const canSend = Object.keys(answers).length > 0;
+  const currentAnswered = answerText(current) !== "";
 
   return (
     <div className={`question ${answered ? "question--answered" : ""}`}>
       <div className="question__title">
         <QuestionIcon weight="bold" /> {message.text}
+        {!answered && questions.length > 1 && (
+          <span className="question__step">
+            {step + 1} of {questions.length}
+          </span>
+        )}
       </div>
 
-      {questions.map((question) => {
-        const selected = picked[question.field] ?? [];
-        return (
-          <div key={question.field} className="question__block">
-            {question.header && <div className="question__header">{question.header}</div>}
-            {/* With one question the title above already asked it. */}
-            {questions.length > 1 && (
-              <div className="question__text">{question.text}</div>
-            )}
-            <div className="question__options">
-              {question.options.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={`question__option ${
-                    selected.includes(option.value) ? "question__option--picked" : ""
-                  }`}
-                  disabled={answered}
-                  onClick={() => toggle(question, option.value)}
-                >
-                  <span className="question__option-label">{option.label}</span>
-                  {option.description && (
-                    <span className="question__option-description">
-                      {option.description}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-            {question.customField && !answered && (
-              <input
-                className="question__custom"
-                placeholder="…or type your own answer"
-                value={typed[question.customField] ?? ""}
-                onChange={(e) =>
-                  setTyped({
-                    ...typed,
-                    [question.customField as string]: e.target.value,
-                  })
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canSend) {
-                    e.preventDefault();
-                    onAnswer(state.requestId, answers);
-                  }
-                }}
-              />
-            )}
+      {/* Steps already answered, kept as rows: click to go back. */}
+      {!answered &&
+        questions.slice(0, step).map((question, index) => (
+          <button
+            type="button"
+            key={question.field}
+            className="question__done"
+            title="Change this answer"
+            onClick={() => setStep(index)}
+          >
+            <span className="question__done-question">
+              {question.header ?? question.text}
+            </span>
+            <span className="question__done-answer">{answerText(question) || "—"}</span>
+          </button>
+        ))}
+
+      {!answered && (
+        <div key={current.field} className="question__block">
+          {current.header && <div className="question__header">{current.header}</div>}
+          {/* With one question the title above already asked it. */}
+          {questions.length > 1 && <div className="question__text">{current.text}</div>}
+          <div className="question__options">
+            {current.options.map((option) => (
+              <button
+                type="button"
+                key={option.value}
+                className={`question__option ${
+                  (picked[current.field] ?? []).includes(option.value)
+                    ? "question__option--picked"
+                    : ""
+                }`}
+                onClick={() => toggle(current, option.value)}
+              >
+                <span className="question__option-label">{option.label}</span>
+                {option.description && (
+                  <span className="question__option-description">
+                    {option.description}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
-        );
-      })}
+          {current.customField && (
+            <input
+              className="question__custom"
+              placeholder="…or type your own answer"
+              value={typed[current.customField] ?? ""}
+              onChange={(e) =>
+                setTyped({
+                  ...typed,
+                  [current.customField as string]: e.target.value,
+                })
+              }
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                if (!isLast && currentAnswered) setStep(step + 1);
+                else if (isLast && canSend) onAnswer(state.requestId, answers);
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {!answered && (
         <div className="question__actions">
-          {!submitsOnClick && (
+          {!submitsOnClick && !isLast && (
+            <button
+              type="button"
+              className="question__send"
+              disabled={!currentAnswered}
+              onClick={() => setStep(step + 1)}
+            >
+              Next
+            </button>
+          )}
+          {!submitsOnClick && isLast && (
             <button
               type="button"
               className="question__send"
               disabled={!canSend}
               onClick={() => onAnswer(state.requestId, answers)}
             >
-              Send
+              Answer
             </button>
           )}
           {/* Skipping is a real answer: the agent continues without it

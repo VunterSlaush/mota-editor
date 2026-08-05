@@ -1668,14 +1668,51 @@ body {
   color: var(--text);
 }
 
+.question__step {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+/* An already-answered step, kept as a row: click to go back to it. */
+.question__done {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.question__done:hover {
+  border-color: var(--warning);
+}
+
+.question__done-question {
+  flex-shrink: 0;
+}
+
+.question__done-answer {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .question__options {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .question__option {
-  flex: 1 1 180px;
   min-width: 0;
   display: flex;
   flex-direction: column;
