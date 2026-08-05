@@ -307,8 +307,6 @@ export function ChatPanel({
             model={tab.project.model ?? ""}
             effort={tab.project.effort ?? ""}
             usage={tab.usage}
-            hasPlan={tab.plan.length > 0 || Boolean(tab.planMarkdown)}
-            onShowPlan={() => setPlanOpen(!planOpen)}
             onSend={onSend}
             onCancel={onCancel}
             onPickFiles={onPickFiles}

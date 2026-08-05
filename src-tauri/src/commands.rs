@@ -3,7 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use agent_core::{provider_for, AgentEvent, Mode, Permission, TurnRequest};
 use serde::Deserialize;
@@ -17,7 +18,17 @@ use crate::workspace_file;
 
 /// In-flight turns by tab id, so they can be cancelled.
 #[derive(Default)]
-pub struct RunningTurns(pub Mutex<HashMap<String, tokio::sync::mpsc::Sender<()>>>);
+pub struct RunningTurns(pub Mutex<HashMap<String, CancelHandle>>);
+
+/// One in-flight turn's cancellation levers. The flag is the source of
+/// truth for "the user asked to stop": it is set synchronously and
+/// checked before the prompt is ever sent to the agent, which covers the
+/// session-handshake window where there is no session and no child to
+/// signal yet. The channel interrupts the headless stream.
+pub struct CancelHandle {
+    tx: tokio::sync::mpsc::Sender<()>,
+    cancelled: Arc<AtomicBool>,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,11 +67,20 @@ pub async fn start_turn(
         return Err(format!("Project folder not found: {}", args.project_path));
     }
 
+    // Register the cancel handle before any slow work (agent spawn,
+    // handshake): the stop button is live from the moment the user hits
+    // send, and a stop must have something to land on from that moment.
+    let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let cancelled = Arc::new(AtomicBool::new(false));
     {
-        let running = turns.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut running = turns.0.lock().unwrap_or_else(PoisonError::into_inner);
         if running.contains_key(&args.tab_id) {
             return Err("A turn is already running in this tab.".to_owned());
         }
+        running.insert(
+            args.tab_id.clone(),
+            CancelHandle { tx: cancel_tx, cancelled: Arc::clone(&cancelled) },
+        );
     }
 
     let request = TurnRequest {
@@ -84,11 +104,15 @@ pub async fn start_turn(
         provider.id(),
         request.clone(),
         args.mcp_servers.clone(),
+        Arc::clone(&cancelled),
     )
     .await
     {
         Ok(()) => return Ok(()),
-        Err(AcpStartError::Failed(message)) => return Err(message),
+        Err(AcpStartError::Failed(message)) => {
+            remove_running_turn(&turns, &args.tab_id);
+            return Err(message);
+        }
         Err(AcpStartError::Unavailable(reason)) => {
             runner::emit(
                 &app,
@@ -103,12 +127,18 @@ pub async fn start_turn(
         }
     }
 
-    let command = provider.build_command(&request);
-    let child: Child =
-        runner::spawn(&command, &project_path).map_err(|e| spawn_error(provider.id(), &e))?;
+    // A stop that arrived while ACP was being probed must not fall
+    // through into a headless run of the very prompt the user killed.
+    if cancelled.load(Ordering::SeqCst) {
+        remove_running_turn(&turns, &args.tab_id);
+        return Ok(());
+    }
 
-    let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::channel::<()>(1);
-    turns.0.lock().unwrap_or_else(PoisonError::into_inner).insert(args.tab_id.clone(), cancel_tx);
+    let command = provider.build_command(&request);
+    let child: Child = runner::spawn(&command, &project_path).map_err(|e| {
+        remove_running_turn(&turns, &args.tab_id);
+        spawn_error(provider.id(), &e)
+    })?;
 
     let app_for_task = app.clone();
     let tab_id = args.tab_id.clone();
@@ -283,12 +313,21 @@ pub async fn cancel_turn(
     acp: State<'_, AcpSessions>,
     tab_id: String,
 ) -> Result<(), String> {
+    let handle = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
+    // Flag first: it is the only lever that works while the session is
+    // still handshaking and there is nothing to signal or kill yet.
+    if let Some(handle) = &handle {
+        handle.cancelled.store(true, Ordering::SeqCst);
+    }
     acp_session::cancel_turn(&acp, &tab_id).await;
-    let sender = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
-    if let Some(sender) = sender {
-        let _ = sender.send(()).await;
+    if let Some(handle) = handle {
+        let _ = handle.tx.send(()).await;
     }
     Ok(())
+}
+
+pub(crate) fn remove_running_turn(turns: &RunningTurns, tab_id: &str) {
+    turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id);
 }
 
 #[tauri::command]
@@ -320,9 +359,10 @@ pub async fn end_session(
     tab_id: String,
 ) -> Result<(), String> {
     acp.end_session(&tab_id);
-    let sender = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
-    if let Some(sender) = sender {
-        let _ = sender.send(()).await;
+    let handle = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
+    if let Some(handle) = handle {
+        handle.cancelled.store(true, Ordering::SeqCst);
+        let _ = handle.tx.send(()).await;
     }
     Ok(())
 }

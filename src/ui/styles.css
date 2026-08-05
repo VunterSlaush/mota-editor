@@ -601,10 +601,6 @@ body {
   border: 1px solid var(--error);
 }
 
-.icon-button--plan:disabled {
-  opacity: 0.25;
-}
-
 .plan-viewer__empty {
   padding: 16px;
   margin: 0;

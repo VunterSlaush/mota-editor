@@ -7,8 +7,7 @@ import { Markdown } from "./MarkdownLite";
 /**
  * UI — a slim clickable bar at the top of the chat showing the step the
  * agent is working on right now (structured plan), or the plan-mode
- * plan's title. Hidden while there is no plan of either kind (the plan
- * button in the composer toolbar also opens the plan section).
+ * plan's title. Hidden while there is no plan of either kind.
  */
 export function PlanBar({
   plan,

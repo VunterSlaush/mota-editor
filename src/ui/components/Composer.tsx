@@ -74,8 +74,6 @@ interface Props {
   model: string;
   effort: string;
   usage: { readonly used: number; readonly size: number } | undefined;
-  hasPlan: boolean;
-  onShowPlan: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
   onCancel: () => void;
   onPickFiles: () => Promise<string[]>;
@@ -107,8 +105,6 @@ export function Composer({
   model,
   effort,
   usage,
-  hasPlan,
-  onShowPlan,
   onSend,
   onCancel,
   onPickFiles,
@@ -299,20 +295,6 @@ export function Composer({
               onClick={() => void attach()}
             >
               <Plus />
-            </button>
-            <button
-              type="button"
-              className="icon-button icon-button--plan"
-              title={
-                hasPlan
-                  ? "View the current plan"
-                  : "No plan yet — the agent publishes one when it breaks a task into steps"
-              }
-              aria-label="View plan"
-              disabled={!hasPlan}
-              onClick={onShowPlan}
-            >
-              <ClipboardText />
             </button>
             <OptionPicker
               ariaLabel="Agent mode"

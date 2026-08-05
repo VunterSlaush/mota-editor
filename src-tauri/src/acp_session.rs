@@ -16,7 +16,7 @@ use std::time::Duration;
 use agent_core::acp;
 use agent_core::{AgentEvent, TurnRequest};
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::oneshot;
@@ -137,6 +137,11 @@ impl AcpSession {
 }
 
 /// Run one turn over ACP, creating or reusing the tab's session.
+///
+/// `cancelled` is the stop button's reach into the startup window: the
+/// session handshake below can take seconds, and a stop clicked during
+/// it must prevent the prompt from ever being sent — not just cancel a
+/// turn the agent already has.
 pub async fn start_turn(
     app: AppHandle,
     sessions: &AcpSessions,
@@ -144,6 +149,7 @@ pub async fn start_turn(
     provider_id: &str,
     request: TurnRequest,
     mcp_servers: Vec<acp::McpServer>,
+    cancelled: Arc<AtomicBool>,
 ) -> Result<(), AcpStartError> {
     let spec = SessionSpec {
         project_path: request.project_path.clone(),
@@ -152,6 +158,12 @@ pub async fn start_turn(
         mcp_servers,
     };
     let session = ensure_session(&app, sessions, tab_id, provider_id, &spec).await?;
+
+    if cancelled.load(Ordering::SeqCst) {
+        // The now-warm session stays registered for the next turn.
+        clear_running_turn(&app, tab_id);
+        return Ok(());
+    }
 
     if session.turn_active.swap(true, Ordering::SeqCst) {
         return Err(AcpStartError::Failed(
@@ -168,6 +180,15 @@ pub async fn start_turn(
 
     apply_mode(&session, provider_id, request.mode).await;
 
+    // Last look before the point of no return: once the prompt is
+    // written, stopping is the agent's cooperation (`session/cancel`);
+    // before it, stopping is simply not sending it.
+    if cancelled.load(Ordering::SeqCst) {
+        session.turn_active.store(false, Ordering::SeqCst);
+        clear_running_turn(&app, tab_id);
+        return Ok(());
+    }
+
     let id = session.request_id();
     let prompt = acp::prompt_request_for_provider(id, &session.sid(), provider_id, &request);
     *session.current_turn.lock().unwrap_or_else(PoisonError::into_inner) = Some(id);
@@ -183,10 +204,18 @@ pub async fn start_turn(
             *current = None;
         }
         drop(current);
+        clear_running_turn(&app_for_task, &tab);
         runner::emit(&app_for_task, &tab, &acp::completion_from_prompt_result(&result));
     });
 
     Ok(())
+}
+
+/// Drop the tab's cancel handle once its turn can no longer be started
+/// or is over. No-op when `cancel_turn` already claimed it.
+fn clear_running_turn(app: &AppHandle, tab_id: &str) {
+    let turns = app.state::<crate::commands::RunningTurns>();
+    crate::commands::remove_running_turn(&turns, tab_id);
 }
 
 /// Ask the agent to switch to the mode's native session mode, if any.

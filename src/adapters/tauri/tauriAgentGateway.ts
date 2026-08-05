@@ -110,6 +110,10 @@ export class TauriAgentGateway implements AgentGateway {
   }
 
   async cancelTurn(tabId: string): Promise<void> {
+    // Stopping means "stop": whatever the turn still emits while dying
+    // (deltas, tool use, its eventual `completed`) must not fold into
+    // the chat after the "Turn cancelled." notice.
+    this.handlers.delete(tabId);
     await invoke("cancel_turn", { tabId });
   }
 
