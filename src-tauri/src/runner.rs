@@ -201,6 +201,7 @@ pub async fn stream_turn(
                 result,
                 provider_session_id: None,
                 is_error: !ok,
+                stop_reason: None,
             },
         );
     }

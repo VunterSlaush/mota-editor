@@ -358,6 +358,11 @@ pub enum Incoming {
         plan_markdown: Option<String>,
         /// Where the agent saved the plan on disk, when it did.
         plan_file_path: Option<String>,
+        /// The tool call this request guards, when the agent named it.
+        tool_call_id: Option<String>,
+        /// ACP kind of the guarded tool call (`switch_mode` marks a plan
+        /// approval authoritatively).
+        tool_kind: Option<String>,
     },
     /// The agent asks the user a question (form elicitation).
     ElicitationRequest {
@@ -437,7 +442,23 @@ fn classify_permission_request(id: i64, value: &Value) -> Incoming {
         .pointer("/toolCall/rawInput/planFilePath")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    Incoming::PermissionRequest { id, title, options, plan_markdown, plan_file_path }
+    let tool_call_id = params
+        .pointer("/toolCall/toolCallId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let tool_kind = params
+        .pointer("/toolCall/kind")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Incoming::PermissionRequest {
+        id,
+        title,
+        options,
+        plan_markdown,
+        plan_file_path,
+        tool_call_id,
+        tool_kind,
+    }
 }
 
 /// Marker the agent puts on the free-text field that accompanies a
@@ -575,25 +596,34 @@ fn parse_option(value: &Value) -> Option<PermissionOptionInfo> {
 }
 
 /// The option to auto-select under bypass permissions: a one-time allow
-/// when offered, otherwise any allow, otherwise the first option.
+/// when offered, otherwise any allow. `None` when the agent offered no
+/// allow option at all — the request then goes to the user instead of
+/// silently picking a rejection on their behalf.
 pub fn bypass_choice(options: &[PermissionOptionInfo]) -> Option<&PermissionOptionInfo> {
     options
         .iter()
         .find(|o| o.kind == "allow_once")
         .or_else(|| options.iter().find(|o| o.kind.starts_with("allow")))
-        .or_else(|| options.first())
 }
 
 /// Whether a permission request is a PLAN APPROVAL — the agent presenting
 /// its plan and asking to proceed. These must ALWAYS reach the user, even
 /// under bypass permissions: approving a plan is the whole point of plan
-/// mode. Detected by the mode-switch option ids agents attach to
-/// exit-plan requests (Claude: auto/acceptEdits/default/plan/...) and by
-/// the request title as a fallback. The title check matches "plan" as a
-/// whole word only: tool titles quote the command being run, and a
-/// substring match turned any command mentioning `roofPlane` or
-/// `planner.ts` into a "plan approval" that bypass refused to answer.
-pub fn is_plan_approval(title: &str, options: &[PermissionOptionInfo]) -> bool {
+/// mode. The guarded tool call's ACP `kind` is authoritative when it says
+/// `switch_mode`; otherwise fall back to the mode-switch option ids agents
+/// attach to exit-plan requests (Claude: auto/acceptEdits/default/plan/...)
+/// and to the request title. The title check matches "plan" as a whole
+/// word only: tool titles quote the command being run, and a substring
+/// match turned any command mentioning `roofPlane` or `planner.ts` into a
+/// "plan approval" that bypass refused to answer.
+pub fn is_plan_approval(
+    title: &str,
+    options: &[PermissionOptionInfo],
+    tool_kind: Option<&str>,
+) -> bool {
+    if tool_kind == Some("switch_mode") {
+        return true;
+    }
     const MODE_SWITCH_IDS: [&str; 5] =
         ["plan", "acceptEdits", "default", "auto", "bypassPermissions"];
     let has_mode_switch_option = options
@@ -626,17 +656,63 @@ fn translate_update(params: &Value) -> Vec<AgentEvent> {
                 .map(|entries| entries.iter().filter_map(parse_plan_entry).collect())
                 .unwrap_or_default(),
         }],
-        Some("tool_call") => vec![AgentEvent::ToolUse {
-            name: update
-                .get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("tool")
-                .to_owned(),
-            detail: truncate(
-                update.get("title").and_then(Value::as_str).unwrap_or_default(),
-                200,
-            ),
-        }],
+        Some("tool_call") => match update.get("toolCallId").and_then(Value::as_str) {
+            Some(id) => vec![AgentEvent::ToolCall {
+                id: id.to_owned(),
+                kind: update
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("other")
+                    .to_owned(),
+                title: truncate(
+                    update.get("title").and_then(Value::as_str).unwrap_or_default(),
+                    200,
+                ),
+                status: update
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pending")
+                    .to_owned(),
+            }],
+            // No id means no way to correlate updates: degrade to the
+            // legacy flat row rather than dropping the activity.
+            None => vec![AgentEvent::ToolUse {
+                name: update
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool")
+                    .to_owned(),
+                detail: truncate(
+                    update.get("title").and_then(Value::as_str).unwrap_or_default(),
+                    200,
+                ),
+            }],
+        },
+        Some("tool_call_update") => update
+            .get("toolCallId")
+            .and_then(Value::as_str)
+            .map(|id| {
+                vec![AgentEvent::ToolCallUpdate {
+                    id: id.to_owned(),
+                    status: update
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    title: update
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|t| truncate(t, 200)),
+                    content: Vec::new(),
+                    locations: Vec::new(),
+                }]
+            })
+            .unwrap_or_default(),
+        Some("current_mode_update") => update
+            .get("currentModeId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(|id| vec![AgentEvent::ModeChanged { mode_id: id.to_owned() }])
+            .unwrap_or_default(),
         Some("usage_update") => {
             let used = update.get("used").and_then(Value::as_u64);
             let size = update.get("size").and_then(Value::as_u64);
@@ -654,7 +730,7 @@ fn translate_update(params: &Value) -> Vec<AgentEvent> {
                 .map(|commands| commands.iter().filter_map(parse_command).collect())
                 .unwrap_or_default(),
         }],
-        // Mode changes, usage, session info: tolerated per spec
+        // Session info and unknown update kinds: tolerated per spec
         // ("ignore unknown updates").
         _ => Vec::new(),
     }
@@ -699,7 +775,25 @@ fn text_of(update: &Value) -> Option<String> {
 }
 
 /// Map a `session/prompt` result to the turn-completion event.
-pub fn completion_from_prompt_result(result: &Result<Value, String>) -> AgentEvent {
+///
+/// Only `refusal` is an error. `max_tokens`/`max_turn_requests` complete
+/// the turn normally but keep their stop reason so the UI can warn that
+/// the reply was cut short instead of passing truncation off as success.
+/// `was_cancelled` marks a turn the user stopped (including the cancel
+/// watchdog forcing a wedged prompt down): not an error, reason
+/// "cancelled".
+pub fn completion_from_prompt_result(
+    result: &Result<Value, String>,
+    was_cancelled: bool,
+) -> AgentEvent {
+    if was_cancelled {
+        return AgentEvent::TurnCompleted {
+            result: None,
+            provider_session_id: None,
+            is_error: false,
+            stop_reason: Some("cancelled".to_owned()),
+        };
+    }
     match result {
         Ok(value) => {
             let stop_reason = value
@@ -711,12 +805,14 @@ pub fn completion_from_prompt_result(result: &Result<Value, String>) -> AgentEve
                     .then(|| "The agent declined to continue this request.".to_owned()),
                 provider_session_id: None,
                 is_error: stop_reason == "refusal",
+                stop_reason: Some(stop_reason.to_owned()),
             }
         }
         Err(message) => AgentEvent::TurnCompleted {
             result: Some(message.clone()),
             provider_session_id: None,
             is_error: true,
+            stop_reason: None,
         },
     }
 }
@@ -1052,9 +1148,25 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_updates_become_tool_use_events() {
+    fn tool_calls_become_tool_call_events() {
         let line = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
             "update":{"sessionUpdate":"tool_call","toolCallId":"c1","title":"Reading config","kind":"read"}}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&line),
+            Some(Incoming::Updates(vec![AgentEvent::ToolCall {
+                id: "c1".into(),
+                kind: "read".into(),
+                title: "Reading config".into(),
+                status: "pending".into(),
+            }]))
+        );
+    }
+
+    #[test]
+    fn tool_calls_without_an_id_degrade_to_legacy_tool_use() {
+        let line = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"tool_call","title":"Reading config","kind":"read"}}}"#
             .replace('\n', "");
         assert_eq!(
             parse_incoming(&line),
@@ -1063,6 +1175,58 @@ mod tests {
                 detail: "Reading config".into()
             }]))
         );
+    }
+
+    #[test]
+    fn tool_call_updates_become_tool_call_update_events() {
+        let line = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed"}}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&line),
+            Some(Incoming::Updates(vec![AgentEvent::ToolCallUpdate {
+                id: "c1".into(),
+                status: Some("completed".into()),
+                title: None,
+                content: Vec::new(),
+                locations: Vec::new(),
+            }]))
+        );
+        // Title-only updates keep status untouched; unknown status strings
+        // pass through verbatim (forward-compatible).
+        let retitled = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"tool_call_update","toolCallId":"c2","title":"New title","status":"weird"}}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&retitled),
+            Some(Incoming::Updates(vec![AgentEvent::ToolCallUpdate {
+                id: "c2".into(),
+                status: Some("weird".into()),
+                title: Some("New title".into()),
+                content: Vec::new(),
+                locations: Vec::new(),
+            }]))
+        );
+        // No toolCallId → nothing to correlate → dropped.
+        let anonymous = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"tool_call_update","status":"completed"}}}"#
+            .replace('\n', "");
+        assert_eq!(parse_incoming(&anonymous), Some(Incoming::Updates(vec![])));
+    }
+
+    #[test]
+    fn current_mode_updates_become_mode_changed_events() {
+        let line = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"current_mode_update","currentModeId":"plan"}}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&line),
+            Some(Incoming::Updates(vec![AgentEvent::ModeChanged { mode_id: "plan".into() }]))
+        );
+        let empty = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s",
+            "update":{"sessionUpdate":"current_mode_update"}}}"#
+            .replace('\n', "");
+        assert_eq!(parse_incoming(&empty), Some(Incoming::Updates(vec![])));
     }
 
     #[test]
@@ -1130,23 +1294,38 @@ mod tests {
             name: id.to_owned(),
             kind: kind.to_owned(),
         };
+        // The guarded tool call's kind is authoritative when present.
+        assert!(is_plan_approval(
+            "Anything at all",
+            &[opt("allow", "allow_once")],
+            Some("switch_mode")
+        ));
         // Claude's exit-plan request: options switch the session mode.
         assert!(is_plan_approval(
             "Ready to code?",
-            &[opt("acceptEdits", "allow_once"), opt("plan", "reject_once")]
+            &[opt("acceptEdits", "allow_once"), opt("plan", "reject_once")],
+            None
         ));
         // Title fallback.
-        assert!(is_plan_approval("Approve this plan", &[opt("allow", "allow_once")]));
+        assert!(is_plan_approval("Approve this plan", &[opt("allow", "allow_once")], None));
         // A normal tool request is not a plan approval.
         assert!(!is_plan_approval(
             "Run npm test",
-            &[opt("allow", "allow_once"), opt("reject", "reject_once")]
+            &[opt("allow", "allow_once"), opt("reject", "reject_once")],
+            None
+        ));
+        // An ordinary execute kind does not make it one either.
+        assert!(!is_plan_approval(
+            "Run npm test",
+            &[opt("allow", "allow_once"), opt("reject", "reject_once")],
+            Some("execute")
         ));
         // "plan" must match as a whole word: a command that merely
         // mentions roofPlane is an ordinary tool request.
         assert!(!is_plan_approval(
             "git commit -m \"align the roofPlane accent\"",
-            &[opt("allow", "allow_once"), opt("reject", "reject_once")]
+            &[opt("allow", "allow_once"), opt("reject", "reject_once")],
+            None
         ));
     }
 
@@ -1161,19 +1340,65 @@ mod tests {
     }
 
     #[test]
-    fn prompt_result_maps_to_completion() {
-        let done = completion_from_prompt_result(&Ok(json!({"stopReason":"end_turn"})));
-        assert!(matches!(done, AgentEvent::TurnCompleted { is_error: false, .. }));
+    fn bypass_never_auto_picks_a_rejection() {
+        // An agent offering only reject options must reach the user, not
+        // be silently declined on their behalf.
+        let reject_only = vec![PermissionOptionInfo {
+            option_id: "no".into(),
+            name: "Deny".into(),
+            kind: "reject_once".into(),
+        }];
+        assert_eq!(bypass_choice(&reject_only), None);
+        assert_eq!(bypass_choice(&[]), None);
+    }
 
-        let refused = completion_from_prompt_result(&Ok(json!({"stopReason":"refusal"})));
+    #[test]
+    fn prompt_result_maps_to_completion() {
+        let done = completion_from_prompt_result(&Ok(json!({"stopReason":"end_turn"})), false);
+        match &done {
+            AgentEvent::TurnCompleted { is_error: false, stop_reason: Some(reason), .. } => {
+                assert_eq!(reason, "end_turn");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        let refused = completion_from_prompt_result(&Ok(json!({"stopReason":"refusal"})), false);
         assert!(matches!(refused, AgentEvent::TurnCompleted { is_error: true, .. }));
 
-        let failed = completion_from_prompt_result(&Err("boom".to_owned()));
+        let failed = completion_from_prompt_result(&Err("boom".to_owned()), false);
         match failed {
             AgentEvent::TurnCompleted { result: Some(message), is_error: true, .. } => {
                 assert_eq!(message, "boom");
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn truncated_and_cancelled_turns_keep_their_stop_reason_without_erroring() {
+        // A reply cut short by limits is not a success to pass off
+        // silently, but not an error either — the reason travels.
+        let capped = completion_from_prompt_result(&Ok(json!({"stopReason":"max_tokens"})), false);
+        assert_eq!(
+            capped,
+            AgentEvent::TurnCompleted {
+                result: None,
+                provider_session_id: None,
+                is_error: false,
+                stop_reason: Some("max_tokens".into()),
+            }
+        );
+        // A user-stopped turn resolves as cancelled even when the wire
+        // call failed (the watchdog force-fails wedged prompts).
+        let stopped = completion_from_prompt_result(&Err("Cancelled.".to_owned()), true);
+        assert_eq!(
+            stopped,
+            AgentEvent::TurnCompleted {
+                result: None,
+                provider_session_id: None,
+                is_error: false,
+                stop_reason: Some("cancelled".into()),
+            }
+        );
     }
 }

@@ -78,6 +78,7 @@ fn parse_typed(kind: &str, value: &Value) -> Vec<AgentEvent> {
             result: None,
             provider_session_id: None,
             is_error: false,
+            stop_reason: None,
         }],
         "turn.failed" => {
             let message = value
@@ -86,11 +87,12 @@ fn parse_typed(kind: &str, value: &Value) -> Vec<AgentEvent> {
                 .unwrap_or("The turn failed.")
                 .to_owned();
             vec![
-                AgentEvent::ErrorOccurred { message },
+                AgentEvent::ErrorOccurred { message, context: None, stderr_tail: None },
                 AgentEvent::TurnCompleted {
                     result: None,
                     provider_session_id: None,
                     is_error: true,
+                    stop_reason: None,
                 },
             ]
         }
@@ -100,6 +102,8 @@ fn parse_typed(kind: &str, value: &Value) -> Vec<AgentEvent> {
                 .and_then(Value::as_str)
                 .unwrap_or("Unknown error.")
                 .to_owned(),
+            context: None,
+            stderr_tail: None,
         }],
         _ => Vec::new(),
     }
@@ -251,12 +255,20 @@ mod tests {
             vec![AgentEvent::TurnCompleted {
                 result: None,
                 provider_session_id: None,
-                is_error: false
+                is_error: false,
+                stop_reason: None
             }]
         );
         let failed = Codex.parse_line(r#"{"type":"turn.failed","error":{"message":"boom"}}"#);
         assert_eq!(failed.len(), 2);
-        assert_eq!(failed[0], AgentEvent::ErrorOccurred { message: "boom".into() });
+        assert_eq!(
+            failed[0],
+            AgentEvent::ErrorOccurred {
+                message: "boom".into(),
+                context: None,
+                stderr_tail: None
+            }
+        );
     }
 
     #[test]

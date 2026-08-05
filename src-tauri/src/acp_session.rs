@@ -219,7 +219,15 @@ pub async fn start_turn(
         }
         drop(current);
         clear_running_turn(&app_for_task, &tab);
-        runner::emit(&app_for_task, &tab, &acp::completion_from_prompt_result(&result));
+        // A stop clicked mid-turn resolves this call one way or another
+        // (agent acknowledges, or the watchdog fails it) — either way the
+        // completion is a cancellation, not an error or a success.
+        let was_cancelled = cancelled.load(Ordering::SeqCst);
+        runner::emit(
+            &app_for_task,
+            &tab,
+            &acp::completion_from_prompt_result(&result, was_cancelled),
+        );
     });
 
     Ok(())
@@ -626,6 +634,7 @@ fn spawn_reader(
                     result: Some("The agent process ended unexpectedly.".to_owned()),
                     provider_session_id: None,
                     is_error: true,
+                    stop_reason: None,
                 },
             );
         }
@@ -650,12 +659,16 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
             options,
             plan_markdown,
             plan_file_path,
+            tool_call_id,
+            tool_kind,
         }) => {
             // Bypass auto-approves ordinary tool requests — but NEVER a
-            // plan approval, and nothing at all while in plan mode.
+            // plan approval, and nothing at all while in plan mode. When
+            // the agent offers no allow option, bypass_choice is None and
+            // the request falls through to the user.
             let may_auto_approve = session.bypass.load(Ordering::SeqCst)
                 && !session.plan_mode.load(Ordering::SeqCst)
-                && !acp::is_plan_approval(&title, &options);
+                && !acp::is_plan_approval(&title, &options, tool_kind.as_deref());
             if may_auto_approve {
                 if let Some(choice) = acp::bypass_choice(&options) {
                     let response = acp::permission_selected_response(id, &choice.option_id);
@@ -673,6 +686,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                     options,
                     plan_markdown,
                     plan_file_path,
+                    tool_call_id,
                 },
             );
         }

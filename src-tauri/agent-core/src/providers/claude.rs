@@ -120,6 +120,7 @@ fn parse_result(value: &Value) -> Vec<AgentEvent> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         is_error: value.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+        stop_reason: None,
     }]
 }
 
@@ -216,6 +217,7 @@ mod tests {
                 result: Some("All green.".into()),
                 provider_session_id: Some("s1".into()),
                 is_error: false,
+                stop_reason: None,
             }]
         );
     }

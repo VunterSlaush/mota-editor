@@ -82,7 +82,11 @@ fn parse_json_payload(raw: &str) -> Option<Vec<AgentEvent>> {
         });
     }
     if let Some(message) = value.pointer("/error/message").and_then(Value::as_str) {
-        return Some(vec![AgentEvent::ErrorOccurred { message: message.to_owned() }]);
+        return Some(vec![AgentEvent::ErrorOccurred {
+            message: message.to_owned(),
+            context: None,
+            stderr_tail: None,
+        }]);
     }
     None
 }
@@ -143,7 +147,14 @@ mod tests {
     #[test]
     fn error_payload_maps_to_error_event() {
         let events = Gemini.parse_final(r#"{"error":{"message":"quota"}}"#, false);
-        assert_eq!(events, vec![AgentEvent::ErrorOccurred { message: "quota".into() }]);
+        assert_eq!(
+            events,
+            vec![AgentEvent::ErrorOccurred {
+                message: "quota".into(),
+                context: None,
+                stderr_tail: None
+            }]
+        );
     }
 
     #[test]
