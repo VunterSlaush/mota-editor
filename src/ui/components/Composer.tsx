@@ -134,10 +134,20 @@ export function Composer({
     { id: "", label: "Default effort", icon: <Gauge /> },
     ...effortOptions.map((level) => ({ id: level, label: level, icon: <Gauge /> })),
   ];
-  const paletteCommands = paletteVisible() ? filterCommands(commands, draft) : [];
+  // The "/..." word being typed at the end of the draft, if any. Typing
+  // "/" mid-message (after other text) opens the palette too — commands
+  // are not only ever the first thing in a prompt.
+  const commandToken = useMemo(() => {
+    const token = draft.split(/\s/).pop() ?? "";
+    return token.startsWith("/") ? token : null;
+  }, [draft]);
+
+  const paletteCommands = paletteVisible()
+    ? filterCommands(commands, commandToken ?? "")
+    : [];
 
   function paletteVisible(): boolean {
-    return !paletteDismissed && draft.startsWith("/") && !/\s/.test(draft);
+    return !paletteDismissed && commandToken !== null;
   }
 
   // Auto-grow: fit the content, capped at MAX_INPUT_LINES.
@@ -160,7 +170,9 @@ export function Composer({
   };
 
   const pickCommand = (command: CommandInfo) => {
-    onDraftChange(`${command.name} `, attachments);
+    // Replace only the "/..." word being typed; text before it stays.
+    const base = commandToken ? draft.slice(0, draft.length - commandToken.length) : "";
+    onDraftChange(`${base}${command.name} `, attachments);
     setSelectedIndex(0);
     inputRef.current?.focus();
   };

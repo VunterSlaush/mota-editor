@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type CommandInfo, commandNames, filterCommands, splitCommands } from "./command";
+import {
+  type CommandInfo,
+  commandNames,
+  dedupeCommands,
+  filterCommands,
+  splitCommands,
+} from "./command";
 
 const COMMANDS: readonly CommandInfo[] = [
   { name: "/review", description: "Review changes", source: "builtin" },
@@ -20,6 +26,19 @@ describe("filterCommands", () => {
     expect(filterCommands(COMMANDS, "/i").map((c) => c.name)).toEqual(["/init"]);
     expect(filterCommands(COMMANDS, "/REV").map((c) => c.name)).toEqual(["/review"]);
     expect(filterCommands(COMMANDS, "/nope")).toEqual([]);
+  });
+});
+
+describe("dedupeCommands", () => {
+  it("keeps one entry per name, first occurrence winning", () => {
+    const listed = dedupeCommands([
+      { name: "/prepare-pr", description: "from command file", source: "custom" },
+      { name: "/prepare-pr", description: "from skill", source: "custom" },
+      { name: "/review", description: "Review changes", source: "builtin" },
+      { name: "/prepare-pr", description: "from plugin", source: "custom" },
+    ]);
+    expect(listed.map((c) => c.name)).toEqual(["/prepare-pr", "/review"]);
+    expect(listed[0].description).toBe("from command file");
   });
 });
 

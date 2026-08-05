@@ -43,6 +43,20 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
   gemini: [],
 };
 
+/**
+ * One entry per name, first occurrence wins. An agent may advertise the
+ * same name from several sources (a command file, a same-named skill, a
+ * plugin) — the palette must not show it once per source.
+ */
+export function dedupeCommands(commands: readonly CommandInfo[]): CommandInfo[] {
+  const seen = new Set<string>();
+  return commands.filter((c) => {
+    if (seen.has(c.name)) return false;
+    seen.add(c.name);
+    return true;
+  });
+}
+
 /** Commands whose names start with the typed prefix (case-insensitive). */
 export function filterCommands(
   commands: readonly CommandInfo[],

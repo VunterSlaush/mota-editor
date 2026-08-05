@@ -1,3 +1,4 @@
+import { dedupeCommands } from "../entities/command";
 import { serversForProvider } from "../entities/mcpServer";
 import {
   approvalMessage,
@@ -214,7 +215,9 @@ export class SendPrompt {
         this.store.dispatch({
           type: "tab/commandsUpdated",
           tabId,
-          commands: event.commands.map((c) => ({ ...c, source: "builtin" as const })),
+          commands: dedupeCommands(
+            event.commands.map((c) => ({ ...c, source: "builtin" as const })),
+          ),
         });
         break;
 
