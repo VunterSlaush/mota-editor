@@ -116,13 +116,18 @@ export interface AgentGateway {
     mcpServers?: readonly McpServerSpec[],
   ): Promise<void>;
 
-  /** The agent's OWN saved sessions for this project (native history). */
+  /**
+   * The agent's OWN saved sessions for this project (native history).
+   * `mcpServers` must match what the warm session was created with, or
+   * the listing needlessly kills and respawns the agent.
+   */
   listNativeSessions(
     tabId: string,
     provider: ProviderId,
     projectPath: string,
     model?: string,
     effort?: string,
+    mcpServers?: readonly McpServerSpec[],
   ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[]>;
 
   /**
@@ -138,6 +143,7 @@ export interface AgentGateway {
       model?: string;
       effort?: string;
       sessionId: string;
+      mcpServers?: readonly McpServerSpec[];
     },
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<void>;

@@ -163,6 +163,7 @@ export class TauriAgentGateway implements AgentGateway {
     projectPath: string,
     model?: string,
     effort?: string,
+    mcpServers?: readonly McpServerSpec[],
   ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[]> {
     return invoke("list_agent_sessions", {
       args: {
@@ -171,6 +172,7 @@ export class TauriAgentGateway implements AgentGateway {
         projectPath,
         model: model ?? null,
         effort: effort ?? null,
+        mcpServers: toWireServers(mcpServers),
       },
     });
   }
@@ -183,6 +185,7 @@ export class TauriAgentGateway implements AgentGateway {
       model?: string;
       effort?: string;
       sessionId: string;
+      mcpServers?: readonly McpServerSpec[];
     },
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<void> {
@@ -203,6 +206,7 @@ export class TauriAgentGateway implements AgentGateway {
           model: request.model ?? null,
           effort: request.effort ?? null,
           sessionId: request.sessionId,
+          mcpServers: toWireServers(request.mcpServers),
         },
       });
     } finally {

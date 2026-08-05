@@ -111,6 +111,7 @@ export function ChatPanel({
   const [changes, setChanges] = useState<GitChanges | null>(null);
   const [changesRefreshKey, setChangesRefreshKey] = useState(0);
   const [history, setHistory] = useState<HistoryListing>({ native: false, sessions: [] });
+  const [historyLoading, setHistoryLoading] = useState(false);
   const sidebar = useDragWidth(270, 180, 520);
   const planPanel = useDragWidth(420, 280, 760, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
@@ -177,8 +178,11 @@ export function ChatPanel({
   useEffect(() => {
     if (sidebarView !== "history" || tab.busy) return;
     let cancelled = false;
+    setHistoryLoading(true);
     loadHistory().then((loaded) => {
-      if (!cancelled) setHistory(loaded);
+      if (cancelled) return;
+      setHistory(loaded);
+      setHistoryLoading(false);
     });
     return () => {
       cancelled = true;
@@ -256,6 +260,8 @@ export function ChatPanel({
                 <HistoryPanel
                   sessions={history.sessions}
                   native={history.native}
+                  loading={historyLoading}
+                  error={history.error}
                   activeSessionId={tab.historySessionId}
                   busy={tab.busy}
                   onOpen={(id) => void onOpenSession(id, history.native)}

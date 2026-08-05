@@ -1,3 +1,4 @@
+import { serversForProvider } from "../entities/mcpServer";
 import { type ChatMessage, infoMessage, toolMessage } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
@@ -10,6 +11,12 @@ export interface HistoryListing {
   /** True when the entries are the AGENT's own sessions (true resume). */
   readonly native: boolean;
   readonly sessions: readonly TranscriptMeta[];
+  /**
+   * Why the native listing failed, when it did and there was nothing
+   * local to show instead. An empty panel that could mean "no sessions"
+   * or "the agent broke" is undebuggable — say which.
+   */
+  readonly error?: string;
 }
 
 /**
@@ -73,7 +80,8 @@ export class SessionHistory {
   ) {}
 
   async list(tabId: string): Promise<HistoryListing> {
-    const tab = tabById(this.store.getState(), tabId);
+    const state = this.store.getState();
+    const tab = tabById(state, tabId);
     if (!tab) return { native: false, sessions: [] };
     const { provider, path, model, effort } = tab.project;
 
@@ -84,20 +92,38 @@ export class SessionHistory {
         path,
         model,
         effort,
+        // Must match the warm session's spec, or listing kills and
+        // respawns the agent just to ask it a question.
+        serversForProvider(state.settings.mcpServers, provider),
       );
-      return {
-        native: true,
-        sessions: native.map((s) => ({
-          id: s.sessionId,
-          title: s.title?.trim() || s.sessionId.slice(0, 8),
-          savedAt: s.updatedAt ? Date.parse(s.updatedAt) : 0,
-          provider,
-          messageCount: 0,
-        })),
-      };
-    } catch {
+      const sessions = native
+        // One malformed entry must not throw the whole list away.
+        .filter((s) => typeof s.sessionId === "string" && s.sessionId !== "")
+        .map((s) => {
+          const savedAt = s.updatedAt ? Date.parse(s.updatedAt) : Number.NaN;
+          return {
+            id: s.sessionId,
+            title: s.title?.trim() || s.sessionId.slice(0, 8),
+            savedAt: Number.isNaN(savedAt) ? 0 : savedAt,
+            provider,
+            messageCount: 0,
+          };
+        })
+        .sort((a, b) => b.savedAt - a.savedAt);
+      if (sessions.length > 0) return { native: true, sessions };
+      // An agent that lists nothing may still have local transcripts we
+      // saved ourselves — an empty panel helps nobody.
       const local = await this.transcriptStore.list(path).catch(() => []);
-      return { native: false, sessions: local };
+      return local.length > 0
+        ? { native: false, sessions: local }
+        : { native: true, sessions };
+    } catch (e) {
+      const local = await this.transcriptStore.list(path).catch(() => []);
+      return {
+        native: false,
+        sessions: local,
+        error: local.length > 0 ? undefined : e instanceof Error ? e.message : String(e),
+      };
     }
   }
 
@@ -113,8 +139,10 @@ export class SessionHistory {
 
   /** True resume: the agent replays and REMEMBERS the conversation. */
   private async openNative(tabId: string, sessionId: string): Promise<void> {
-    const tab = tabById(this.store.getState(), tabId)!;
+    const state = this.store.getState();
+    const tab = tabById(state, tabId)!;
     const { provider, path, model, effort } = tab.project;
+    const mcpServers = serversForProvider(state.settings.mcpServers, provider);
 
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: Date.now() });
@@ -123,7 +151,7 @@ export class SessionHistory {
     let resumed = true;
     try {
       await this.agentGateway.loadNativeSession(
-        { tabId, provider, projectPath: path, model, effort, sessionId },
+        { tabId, provider, projectPath: path, model, effort, sessionId, mcpServers },
         (event) => replay.fold(event),
       );
       replay.note("Resumed — the agent remembers this conversation.");

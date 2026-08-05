@@ -4,6 +4,10 @@ interface Props {
   sessions: readonly TranscriptMeta[];
   /** True when these are the agent's own sessions (opening = true resume). */
   native: boolean;
+  /** True while the list is being fetched from the agent. */
+  loading: boolean;
+  /** Why the list is empty when it's a failure, not an absence. */
+  error?: string;
   activeSessionId?: string;
   busy: boolean;
   onOpen: (sessionId: string) => void;
@@ -15,6 +19,8 @@ interface Props {
 export function HistoryPanel({
   sessions,
   native,
+  loading,
+  error,
   activeSessionId,
   busy,
   onOpen,
@@ -36,7 +42,15 @@ export function HistoryPanel({
           From the agent's own history — opening resumes with full memory.
         </p>
       )}
-      {sessions.length === 0 && (
+      {loading && sessions.length === 0 && (
+        <p className="changes__empty history__loading">Loading sessions…</p>
+      )}
+      {!loading && error && (
+        <p className="changes__notice changes__notice--error">
+          Could not load the agent's sessions: {error}
+        </p>
+      )}
+      {!loading && !error && sessions.length === 0 && (
         <p className="changes__empty">No saved sessions for this project yet.</p>
       )}
       <ul className="history__list">

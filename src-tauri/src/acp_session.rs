@@ -66,6 +66,10 @@ pub struct AcpSession {
     /// fully disabled then: approving the plan is the user's call.
     plan_mode: AtomicBool,
     turn_active: AtomicBool,
+    /// Set once the agent process is gone (crashed, killed, shut down).
+    /// A dead session must never be handed out again — writes to it can
+    /// only fail or hang.
+    dead: AtomicBool,
 }
 
 impl AcpSessions {
@@ -76,6 +80,15 @@ impl AcpSessions {
     pub fn end_session(&self, tab_id: &str) {
         if let Some(session) = self.0.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id) {
             session.shutdown();
+        }
+    }
+
+    /// Evict a session only if the map still holds THIS one — a respawn
+    /// may already have replaced it under the same tab id.
+    fn evict(&self, tab_id: &str, session: &Arc<AcpSession>) {
+        let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if map.get(tab_id).is_some_and(|s| Arc::ptr_eq(s, session)) {
+            map.remove(tab_id);
         }
     }
 }
@@ -127,6 +140,7 @@ impl AcpSession {
     }
 
     fn shutdown(&self) {
+        self.dead.store(true, Ordering::SeqCst);
         for (_, tx) in self.pending.lock().unwrap_or_else(PoisonError::into_inner).drain() {
             let _ = tx.send(Err("Session closed.".to_owned()));
         }
@@ -361,11 +375,13 @@ async fn ensure_session(
     let (model, effort) = (model.clone(), effort.clone());
 
     if let Some(existing) = sessions.get(tab_id) {
-        if existing.provider_id == provider_id
+        let matches = existing.provider_id == provider_id
             && existing.model == model
             && existing.effort == effort
-            && existing.mcp_servers == *mcp_servers
-        {
+            && existing.mcp_servers == *mcp_servers;
+        // A dead session (agent crashed or was killed) must be respawned
+        // even when the spec matches — reusing it can only fail or hang.
+        if matches && !existing.dead.load(Ordering::SeqCst) {
             return Ok(existing);
         }
         // Provider, model, effort or tools switched: start over. Servers
@@ -374,40 +390,7 @@ async fn ensure_session(
         sessions.end_session(tab_id);
     }
 
-    let (child, install_hint) =
-        spawn_agent(provider_id, project_path, model.as_deref(), effort.as_deref())?;
-    let mut child = child;
-    let stdin = child.stdin.take().expect("stdin piped");
-    let stdout = child.stdout.take().expect("stdout piped");
-
-    let session = Arc::new(AcpSession {
-        provider_id: provider_id.to_owned(),
-        model,
-        effort,
-        mcp_servers: mcp_servers.clone(),
-        session_id: Mutex::new(String::new()),
-        child: Mutex::new(Some(child)),
-        stdin: tokio::sync::Mutex::new(stdin),
-        next_id: AtomicI64::new(0),
-        pending: Mutex::new(HashMap::new()),
-        pending_permissions: Mutex::new(Vec::new()),
-        pending_questions: Mutex::new(Vec::new()),
-        current_turn: Mutex::new(None),
-        bypass: AtomicBool::new(false),
-        plan_mode: AtomicBool::new(false),
-        turn_active: AtomicBool::new(false),
-    });
-
-    spawn_reader(app.clone(), tab_id.to_owned(), Arc::clone(&session), stdout);
-
-    let init_id = session.request_id();
-    session
-        .call_with_timeout(acp::initialize_request(init_id), init_id, HANDSHAKE_TIMEOUT)
-        .await
-        .map_err(|e| {
-            session.shutdown();
-            AcpStartError::Unavailable(format!("{e} (install with: {install_hint})"))
-        })?;
+    let session = boot_agent(app, tab_id, provider_id, spec).await?;
 
     let new_id = session.request_id();
     let new_result = session
@@ -443,10 +426,67 @@ async fn ensure_session(
     Ok(session)
 }
 
+/// Spawn the provider's ACP adapter and complete `initialize` — the
+/// session-agnostic half of a session. `session/new` is deliberately
+/// not part of this: it boots the provider's full CLI (measured at
+/// ~50s with MCP servers configured), which session-agnostic requests
+/// like `session/list` never need.
+async fn boot_agent(
+    app: &AppHandle,
+    tab_id: &str,
+    provider_id: &str,
+    spec: &SessionSpec,
+) -> Result<Arc<AcpSession>, AcpStartError> {
+    let SessionSpec { project_path, model, effort, mcp_servers } = spec;
+    let (child, install_hint) =
+        spawn_agent(provider_id, project_path, model.as_deref(), effort.as_deref())?;
+    let mut child = child;
+    let stdin = child.stdin.take().expect("stdin piped");
+    let stdout = child.stdout.take().expect("stdout piped");
+
+    let session = Arc::new(AcpSession {
+        provider_id: provider_id.to_owned(),
+        model: model.clone(),
+        effort: effort.clone(),
+        mcp_servers: mcp_servers.clone(),
+        session_id: Mutex::new(String::new()),
+        child: Mutex::new(Some(child)),
+        stdin: tokio::sync::Mutex::new(stdin),
+        next_id: AtomicI64::new(0),
+        pending: Mutex::new(HashMap::new()),
+        pending_permissions: Mutex::new(Vec::new()),
+        pending_questions: Mutex::new(Vec::new()),
+        current_turn: Mutex::new(None),
+        bypass: AtomicBool::new(false),
+        plan_mode: AtomicBool::new(false),
+        turn_active: AtomicBool::new(false),
+        dead: AtomicBool::new(false),
+    });
+
+    spawn_reader(app.clone(), tab_id.to_owned(), Arc::clone(&session), stdout);
+
+    let init_id = session.request_id();
+    session
+        .call_with_timeout(acp::initialize_request(init_id), init_id, HANDSHAKE_TIMEOUT)
+        .await
+        .map_err(|e| {
+            session.shutdown();
+            AcpStartError::Unavailable(format!("{e} (install with: {install_hint})"))
+        })?;
+    Ok(session)
+}
+
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180); // replays the whole conversation
 
 /// The agent's own saved sessions for this project (native history).
+///
+/// Deliberately does NOT create a session: `session/list` needs only
+/// `initialize`, while `session/new` boots the provider's full CLI —
+/// tens of seconds of blank History panel. A live session is reused
+/// whatever its spec (killing a warm session just to ask it a question
+/// was this panel's "sometimes empty" bug); otherwise a throwaway
+/// adapter answers and is shut down again.
 pub async fn list_native_sessions(
     app: AppHandle,
     sessions: &AcpSessions,
@@ -454,18 +494,26 @@ pub async fn list_native_sessions(
     provider_id: &str,
     spec: &SessionSpec,
 ) -> Result<Value, String> {
-    let session = ensure_session(&app, sessions, tab_id, provider_id, spec)
-        .await
-        .map_err(|e| match e {
-            AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
-        })?;
+    if let Some(existing) = sessions.get(tab_id) {
+        if existing.provider_id == provider_id && !existing.dead.load(Ordering::SeqCst) {
+            return list_sessions_via(&existing, &spec.project_path).await;
+        }
+    }
+    let probe = boot_agent(&app, tab_id, provider_id, spec).await.map_err(|e| match e {
+        AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
+    })?;
+    let result = list_sessions_via(&probe, &spec.project_path).await;
+    probe.shutdown();
+    result
+}
+
+async fn list_sessions_via(
+    session: &Arc<AcpSession>,
+    project_path: &str,
+) -> Result<Value, String> {
     let id = session.request_id();
     let result = session
-        .call_with_timeout(
-            acp::session_list_request(id, &spec.project_path),
-            id,
-            LIST_TIMEOUT,
-        )
+        .call_with_timeout(acp::session_list_request(id, project_path), id, LIST_TIMEOUT)
         .await?;
     Ok(result.get("sessions").cloned().unwrap_or(Value::Array(vec![])))
 }
@@ -582,6 +630,10 @@ fn spawn_reader(
             );
         }
         session.shutdown();
+        // Evict too: a shut-down session left in the map would be handed
+        // to the next caller (history list, next turn) and can only fail
+        // or hang them into a timeout.
+        app.state::<AcpSessions>().evict(&tab_id, &session);
     });
 }
 

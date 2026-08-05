@@ -97,6 +97,37 @@ describe("SessionHistory", () => {
     expect(listing.sessions[0].title).toBe("Plan the feature");
   });
 
+  it("lists newest first and drops entries without a session id", async () => {
+    const { gateway, history } = setup();
+    gateway.nativeSessions = [
+      { sessionId: "old", updatedAt: "2026-08-01T10:00:00Z" },
+      // A malformed entry must not throw the whole list away.
+      { sessionId: "", title: "broken" },
+      { sessionId: "new", updatedAt: "2026-08-05T10:00:00Z" },
+    ];
+
+    const listing = await history.list("t1");
+
+    expect(listing.sessions.map((s) => s.id)).toEqual(["new", "old"]);
+  });
+
+  it("falls back to the local store when the agent lists nothing", async () => {
+    const { gateway, transcripts, history } = setup();
+    gateway.nativeSessions = [];
+    transcripts.transcripts.set("s1", {
+      id: "s1",
+      title: "old chat",
+      savedAt: 1,
+      provider: "claude",
+      messages: [],
+    });
+
+    const listing = await history.list("t1");
+
+    expect(listing.native).toBe(false);
+    expect(listing.sessions[0].id).toBe("s1");
+  });
+
   it("falls back to the local store when native history is unavailable", async () => {
     const { transcripts, history } = setup();
     transcripts.transcripts.set("s1", {

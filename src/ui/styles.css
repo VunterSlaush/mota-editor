@@ -1469,6 +1469,10 @@ body {
   }
 }
 
+.history__loading {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
 .changes__action:hover:not(:disabled) {
   border-color: var(--accent);
 }
