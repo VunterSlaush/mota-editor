@@ -15,6 +15,19 @@ export class TauriGitStatus implements GitPort {
     return invoke<GitBranch[]>("git_branches", { projectPath });
   }
 
+  async remoteUrl(projectPath: string): Promise<string> {
+    return invoke<string>("git_remote_url", { projectPath });
+  }
+
+  async diff(
+    projectPath: string,
+    path: string,
+    staged: boolean,
+    untracked: boolean,
+  ): Promise<string> {
+    return invoke<string>("git_diff", { projectPath, path, staged, untracked });
+  }
+
   async commit(projectPath: string, message: string): Promise<string> {
     return invoke<string>("git_commit", { projectPath, message });
   }
@@ -37,5 +50,9 @@ export class TauriGitStatus implements GitPort {
 
   async pull(projectPath: string): Promise<string> {
     return invoke<string>("git_pull", { projectPath });
+  }
+
+  async fetch(projectPath: string): Promise<string> {
+    return invoke<string>("git_fetch", { projectPath });
   }
 }

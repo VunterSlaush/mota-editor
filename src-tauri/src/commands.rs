@@ -301,6 +301,18 @@ pub async fn respond_permission(
     acp_session::respond_permission(&acp, &tab_id, &request_id, &option_id).await
 }
 
+/// The user's answers to an agent question, keyed by form field. An
+/// empty map is a deliberate skip, not a missing value.
+#[tauri::command]
+pub async fn respond_question(
+    acp: State<'_, AcpSessions>,
+    tab_id: String,
+    request_id: String,
+    answers: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    acp_session::respond_question(&acp, &tab_id, &request_id, answers).await
+}
+
 #[tauri::command]
 pub async fn end_session(
     turns: State<'_, RunningTurns>,
@@ -345,12 +357,50 @@ pub fn open_external(url: String) -> Result<(), String> {
     if !allowed.iter().any(|scheme| lower.starts_with(scheme)) {
         return Err("Only http(s) and mailto links can be opened.".to_owned());
     }
-    open_in_browser(&trimmed).map_err(|e| format!("Could not open the link: {e}"))
+    open_with_default_app(&trimmed).map_err(|e| format!("Could not open the link: {e}"))
 }
 
-/// The URL travels as plain argv — no shell ever parses it.
+/// Open one of the project's files in whatever app the OS associates
+/// with it. Deliberately separate from `open_external`, whose scheme
+/// allowlist exists precisely to keep local paths out.
+///
+/// `path` is repo-controlled (it comes from `git status`), so it is
+/// resolved and checked to still be inside the project folder: a symlink
+/// or a `..` in a hostile repo must not turn "open this changed file"
+/// into "open anything on the disk".
+#[tauri::command]
+pub fn open_path(project_path: String, path: String) -> Result<(), String> {
+    let root = std::path::Path::new(&project_path)
+        .canonicalize()
+        .map_err(|e| format!("Could not resolve the project folder: {e}"))?;
+    let target = root
+        .join(&path)
+        .canonicalize()
+        .map_err(|_| format!("{path} is not on disk any more."))?;
+
+    if !target.starts_with(&root) {
+        return Err(format!("Refusing to open {path}: it leaves the project folder."));
+    }
+    if !target.is_file() {
+        return Err(format!("{path} is not a file."));
+    }
+
+    let as_str = target
+        .to_str()
+        .ok_or_else(|| format!("{path} has a name this platform cannot pass on."))?;
+    open_with_default_app(shell_path(as_str)).map_err(|e| format!("Could not open {path}: {e}"))
+}
+
+/// `canonicalize` hands back a `\\?\`-prefixed path on Windows, which the
+/// shell APIs behind the opener do not understand. Elsewhere it is a
+/// no-op.
+fn shell_path(path: &str) -> &str {
+    path.strip_prefix(r"\\?\").unwrap_or(path)
+}
+
+/// The URL or path travels as plain argv — no shell ever parses it.
 #[cfg(windows)]
-fn open_in_browser(url: &str) -> std::io::Result<()> {
+fn open_with_default_app(url: &str) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     std::process::Command::new("rundll32")
@@ -362,12 +412,12 @@ fn open_in_browser(url: &str) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn open_in_browser(url: &str) -> std::io::Result<()> {
+fn open_with_default_app(url: &str) -> std::io::Result<()> {
     std::process::Command::new("open").arg(url).spawn().map(|_| ())
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn open_in_browser(url: &str) -> std::io::Result<()> {
+fn open_with_default_app(url: &str) -> std::io::Result<()> {
     std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 

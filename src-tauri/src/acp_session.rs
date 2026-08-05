@@ -53,6 +53,10 @@ pub struct AcpSession {
     next_id: AtomicI64,
     pending: Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>,
     pending_permissions: Mutex<Vec<i64>>,
+    /// In-flight `elicitation/create` ids — questions awaiting an answer.
+    /// Separate from permissions: the two are cancelled with different
+    /// response shapes.
+    pending_questions: Mutex<Vec<i64>>,
     /// Request id of the in-flight `session/prompt`, for the cancel
     /// watchdog: a cancelled turn whose response never arrives must not
     /// leave the tab stuck busy forever.
@@ -210,6 +214,12 @@ pub async fn cancel_turn(sessions: &AcpSessions, tab_id: &str) {
     for id in pending {
         let _ = session.write_message(&acp::permission_cancelled_response(id)).await;
     }
+    // Unanswered questions must be released too, or the agent's tool call
+    // waits forever on a card the user can no longer answer.
+    let questions: Vec<i64> = session.pending_questions.lock().unwrap_or_else(PoisonError::into_inner).drain(..).collect();
+    for id in questions {
+        let _ = session.write_message(&acp::elicitation_cancelled_response(id)).await;
+    }
     let _ = session
         .write_message(&acp::cancel_notification(&session.sid()))
         .await;
@@ -247,6 +257,40 @@ pub async fn respond_permission(
     session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).retain(|p| *p != id);
     session
         .write_message(&acp::permission_selected_response(id, option_id))
+        .await
+}
+
+/// Deliver the user's answers to a pending question. An empty map means
+/// "skip": the agent is told the user declined rather than the turn being
+/// aborted, which is what the built-in tool's Skip does.
+pub async fn respond_question(
+    sessions: &AcpSessions,
+    tab_id: &str,
+    request_id: &str,
+    answers: HashMap<String, String>,
+) -> Result<(), String> {
+    let session = sessions
+        .get(tab_id)
+        .ok_or_else(|| "No active agent session for this tab.".to_owned())?;
+    let id: i64 = request_id
+        .parse()
+        .map_err(|_| format!("Invalid question request id: {request_id}"))?;
+    session
+        .pending_questions
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|p| *p != id);
+
+    if answers.is_empty() {
+        return session
+            .write_message(&acp::elicitation_declined_response(id))
+            .await;
+    }
+    // Sorted so the payload is deterministic (question_0 before _1).
+    let mut pairs: Vec<(String, String)> = answers.into_iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    session
+        .write_message(&acp::elicitation_accept_response(id, &pairs))
         .await
 }
 
@@ -318,6 +362,7 @@ async fn ensure_session(
         next_id: AtomicI64::new(0),
         pending: Mutex::new(HashMap::new()),
         pending_permissions: Mutex::new(Vec::new()),
+        pending_questions: Mutex::new(Vec::new()),
         current_turn: Mutex::new(None),
         bypass: AtomicBool::new(false),
         plan_mode: AtomicBool::new(false),
@@ -549,6 +594,33 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                     plan_file_path,
                 },
             );
+        }
+        Some(acp::Incoming::ElicitationRequest { id, message, questions }) => {
+            // Deliberately NOT auto-answered under bypass permissions.
+            // Bypass means "don't ask me to approve your actions"; it does
+            // not mean "decide for me". Picking an option on the user's
+            // behalf would send the agent off on a choice nobody made.
+            session
+                .pending_questions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(id);
+            runner::emit(
+                app,
+                tab_id,
+                &AgentEvent::QuestionAsked {
+                    request_id: id.to_string(),
+                    message,
+                    questions,
+                },
+            );
+        }
+        Some(acp::Incoming::UnsupportedElicitation { id }) => {
+            // Declining (not erroring) lets the agent carry on without the
+            // answer instead of failing the whole turn.
+            let _ = session
+                .write_message(&acp::elicitation_declined_response(id))
+                .await;
         }
         Some(acp::Incoming::Updates(events)) => {
             for event in events {

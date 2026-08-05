@@ -8,7 +8,8 @@ export type MessageRole =
   | "tool"
   | "error"
   | "info"
-  | "approval";
+  | "approval"
+  | "question";
 
 /** An option the user can choose on an approval message. */
 export interface ApprovalOption {
@@ -29,6 +30,42 @@ export interface ApprovalState {
   readonly cancelled?: boolean;
 }
 
+/** One answer the user can pick for an agent question. */
+export interface QuestionOption {
+  /** Sent back verbatim; the label is only what we show. */
+  readonly value: string;
+  readonly label: string;
+  readonly description?: string;
+}
+
+/** One question in an agent's question card. */
+export interface Question {
+  /** Form field this answer belongs to, echoed back to the agent. */
+  readonly field: string;
+  readonly header?: string;
+  readonly text: string;
+  readonly options: readonly QuestionOption[];
+  readonly multiSelect: boolean;
+  /** Field for a typed answer, when the agent offered an "Other" box. */
+  readonly customField?: string;
+}
+
+/**
+ * The agent asking the user something it cannot decide alone. Distinct
+ * from an approval: nothing is being consented to, so there is no
+ * allow/deny and no bypass — it always reaches the user.
+ */
+export interface QuestionState {
+  readonly requestId: string;
+  readonly questions: readonly Question[];
+  /** Answers by field, set once the user submitted. */
+  readonly answers?: Readonly<Record<string, string>>;
+  /** True when the user chose to skip rather than answer. */
+  readonly skipped?: boolean;
+  /** True when the turn ended before the user answered. */
+  readonly cancelled?: boolean;
+}
+
 export interface ChatMessage {
   readonly id: string;
   readonly role: MessageRole;
@@ -39,6 +76,8 @@ export interface ChatMessage {
   readonly attachments?: readonly string[];
   /** For approval messages: the request and its options. */
   readonly approval?: ApprovalState;
+  /** For question messages: what the agent asked. */
+  readonly question?: QuestionState;
 }
 
 let counter = 0;
@@ -75,6 +114,19 @@ export function errorMessage(text: string): ChatMessage {
 
 export function infoMessage(text: string): ChatMessage {
   return { id: nextMessageId(), role: "info", text };
+}
+
+export function questionMessage(
+  message: string,
+  requestId: string,
+  questions: readonly Question[],
+): ChatMessage {
+  return {
+    id: nextMessageId(),
+    role: "question",
+    text: message,
+    question: { requestId, questions },
+  };
 }
 
 export function approvalMessage(

@@ -35,6 +35,8 @@ class FakeAgentGateway implements AgentGateway {
 
   async cancelTurn(): Promise<void> {}
 
+  async respondQuestion(): Promise<void> {}
+
   async respondPermission(
     _tabId: string,
     requestId: string,

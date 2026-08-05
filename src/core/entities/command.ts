@@ -51,3 +51,49 @@ export function filterCommands(
   const prefix = typed.toLowerCase();
   return commands.filter((c) => c.name.toLowerCase().startsWith(prefix));
 }
+
+/** A run of prompt text, flagged when it names a command. */
+export interface TextSegment {
+  readonly text: string;
+  readonly command: boolean;
+}
+
+/** The command names, lowercased, ready for `splitCommands`. */
+export function commandNames(commands: readonly CommandInfo[]): ReadonlySet<string> {
+  return new Set(commands.map((c) => c.name.toLowerCase()));
+}
+
+/**
+ * Split prompt text so every token that names a real command becomes its
+ * own segment, ready to be highlighted.
+ *
+ * Matching is against the known command list rather than "anything
+ * starting with a slash": a prompt is full of paths and URLs, and
+ * lighting up `/usr/bin/env` or the `/blob/main` inside a link would be
+ * noise. Whitespace is the only delimiter, so a trailing comma keeps the
+ * token from matching — which is right, since the agent wouldn't treat
+ * `/review,` as a command either.
+ */
+export function splitCommands(
+  text: string,
+  names: ReadonlySet<string>,
+): readonly TextSegment[] {
+  if (text === "" || names.size === 0) return [{ text, command: false }];
+
+  const segments: TextSegment[] = [];
+  let plain = "";
+  // Keep the separators: the segments must rebuild the text exactly.
+  for (const token of text.split(/(\s+)/)) {
+    if (token !== "" && names.has(token.toLowerCase())) {
+      if (plain !== "") {
+        segments.push({ text: plain, command: false });
+        plain = "";
+      }
+      segments.push({ text: token, command: true });
+    } else {
+      plain += token;
+    }
+  }
+  if (plain !== "") segments.push({ text: plain, command: false });
+  return segments;
+}

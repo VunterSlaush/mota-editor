@@ -4,6 +4,7 @@ import {
   assistantMessage,
   errorMessage,
   infoMessage,
+  questionMessage,
   thoughtMessage,
   toolMessage,
   userMessage,
@@ -92,7 +93,13 @@ export class SendPrompt {
       tabId,
       message: userMessage(trimmed, attachments),
     });
-    this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true });
+    // The clock comes from here, not the reducer, which stays pure.
+    this.store.dispatch({
+      type: "chat/busyChanged",
+      tabId,
+      busy: true,
+      at: Date.now(),
+    });
 
     try {
       await this.agentGateway.startTurn(
@@ -190,6 +197,17 @@ export class SendPrompt {
             event.planMarkdown,
           ),
         });
+        break;
+
+      case "question":
+        this.store.dispatch({
+          type: "chat/messageAppended",
+          tabId,
+          message: questionMessage(event.message, event.requestId, event.questions),
+        });
+        // The agent is now blocked on a person, so get their eyes on it
+        // even if they have wandered to another tab.
+        this.requestAttention(tabId);
         break;
 
       case "commands":

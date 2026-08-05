@@ -35,6 +35,15 @@ pub enum AgentEvent {
         /// Where the agent saved the plan on disk (Claude plan mode).
         plan_file_path: Option<String>,
     },
+    /// The agent asks the user a question (ACP form elicitation — Claude's
+    /// `AskUserQuestion`). Unlike a permission request this is not about
+    /// consent: the agent is stuck on a decision only the user can make.
+    QuestionAsked {
+        request_id: String,
+        /// Shown above the questions; for a single question it IS the question.
+        message: String,
+        questions: Vec<QuestionInfo>,
+    },
     /// The agent advertised its currently available slash commands (ACP).
     CommandsUpdated { commands: Vec<AvailableCommand> },
     /// A recoverable error surfaced mid-turn.
@@ -63,6 +72,33 @@ pub struct PlanEntry {
 pub struct AvailableCommand {
     pub name: String,
     pub description: String,
+}
+
+/// One question in an elicitation form.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionInfo {
+    /// The form field this answer belongs to (`question_0`), echoed back.
+    pub field: String,
+    /// Short heading the agent gave the question, when it gave one.
+    pub header: Option<String>,
+    /// The question itself.
+    pub text: String,
+    pub options: Vec<QuestionOptionInfo>,
+    /// True when the user may pick several options.
+    pub multi_select: bool,
+    /// Field for a typed-in answer, when the form offers one.
+    pub custom_field: Option<String>,
+}
+
+/// One answer the user can pick for a question.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionOptionInfo {
+    /// The value written back into the form field.
+    pub value: String,
+    pub label: String,
+    pub description: Option<String>,
 }
 
 /// One choice the user can pick when an agent requests permission.

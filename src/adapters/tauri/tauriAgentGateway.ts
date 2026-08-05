@@ -37,6 +37,19 @@ interface WireEvent {
         planMarkdown: string | null;
         planFilePath: string | null;
       }
+    | {
+        type: "questionAsked";
+        requestId: string;
+        message: string;
+        questions: {
+          field: string;
+          header: string | null;
+          text: string;
+          options: { value: string; label: string; description: string | null }[];
+          multiSelect: boolean;
+          customField: string | null;
+        }[];
+      }
     | { type: "errorOccurred"; message: string }
     | {
         type: "turnCompleted";
@@ -106,6 +119,14 @@ export class TauriAgentGateway implements AgentGateway {
     optionId: string,
   ): Promise<void> {
     await invoke("respond_permission", { tabId, requestId, optionId });
+  }
+
+  async respondQuestion(
+    tabId: string,
+    requestId: string,
+    answers: Readonly<Record<string, string>>,
+  ): Promise<void> {
+    await invoke("respond_question", { tabId, requestId, answers });
   }
 
   async endSession(tabId: string): Promise<void> {
@@ -223,6 +244,26 @@ function toDomainEvent(wire: WireEvent["event"]): AgentTurnEvent {
         options: wire.options,
         planMarkdown: wire.planMarkdown ?? undefined,
         planFilePath: wire.planFilePath ?? undefined,
+      };
+    case "questionAsked":
+      // Rust serializes absent values as null; the core models them as
+      // optional, so they are dropped rather than carried through.
+      return {
+        kind: "question",
+        requestId: wire.requestId,
+        message: wire.message,
+        questions: wire.questions.map((q) => ({
+          field: q.field,
+          header: q.header ?? undefined,
+          text: q.text,
+          multiSelect: q.multiSelect,
+          customField: q.customField ?? undefined,
+          options: q.options.map((o) => ({
+            value: o.value,
+            label: o.label,
+            description: o.description ?? undefined,
+          })),
+        })),
       };
     case "toolUse":
       return { kind: "tool", name: wire.name, detail: wire.detail };

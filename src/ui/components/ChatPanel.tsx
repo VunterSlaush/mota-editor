@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
-import type { CommandInfo } from "../../core/entities/command";
+import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
 import { countFileChangingTools } from "../../core/entities/tool";
@@ -13,6 +13,7 @@ import { ActivityBar, type SidebarView } from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
 import { Composer } from "./Composer";
+import { DiffModal } from "./DiffModal";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
 import { PlanBar, PlanSidePanel } from "./PlanPanel";
@@ -20,6 +21,16 @@ import { ProviderPicker } from "./ProviderPicker";
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
 const GIT_RELOAD_DEBOUNCE_MS = 400;
+
+/** Stable identity for the common "no attachments" case. */
+const EMPTY_ATTACHMENTS: readonly string[] = [];
+
+/** The file whose diff the modal is showing, and which side of it. */
+interface DiffTarget {
+  readonly path: string;
+  readonly staged: boolean;
+  readonly untracked: boolean;
+}
 
 interface Props {
   tab: TabState;
@@ -31,6 +42,7 @@ interface Props {
   onDeleteSession: (sessionId: string) => Promise<void>;
   onNewChat: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
+  onDraftChange: (draft: string, attachments: readonly string[]) => void;
   onRemoveQueued: (index: number) => void;
   onCancel: () => void;
   onSelectProvider: (provider: ProviderId) => void;
@@ -40,6 +52,7 @@ interface Props {
   onSelectEffort: (effort: string) => void;
   onToggleVerbose: (verbose: boolean) => void;
   onRespondPermission: (requestId: string, optionId: string) => void;
+  onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
   loadCommands: () => Promise<CommandInfo[]>;
   loadGitChanges: () => Promise<GitChanges | null>;
   onGitStage: (path: string) => Promise<GitActionResult>;
@@ -48,6 +61,13 @@ interface Props {
   onGitCheckout: (branch: string) => Promise<GitActionResult>;
   onGitPush: () => Promise<GitActionResult>;
   onGitPull: () => Promise<GitActionResult>;
+  onGitFetch: () => Promise<GitActionResult>;
+  onGitDiff: (
+    path: string,
+    staged: boolean,
+    untracked: boolean,
+  ) => Promise<GitActionResult>;
+  onOpenFile: (path: string) => Promise<string | null>;
   onPickFiles: () => Promise<string[]>;
 }
 
@@ -62,6 +82,7 @@ export function ChatPanel({
   onDeleteSession,
   onNewChat,
   onSend,
+  onDraftChange,
   onRemoveQueued,
   onCancel,
   onSelectProvider,
@@ -71,6 +92,7 @@ export function ChatPanel({
   onSelectEffort,
   onToggleVerbose,
   onRespondPermission,
+  onAnswerQuestion,
   loadCommands,
   loadGitChanges,
   onGitStage,
@@ -79,6 +101,9 @@ export function ChatPanel({
   onGitCheckout,
   onGitPush,
   onGitPull,
+  onGitFetch,
+  onGitDiff,
+  onOpenFile,
   onPickFiles,
 }: Props) {
   const providerName = providerById(tab.project.provider).displayName;
@@ -90,6 +115,7 @@ export function ChatPanel({
   const planPanel = useDragWidth(420, 280, 760, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
 
@@ -110,6 +136,10 @@ export function ChatPanel({
   // The running agent's own command list is the source of truth; the
   // static + discovered set covers the time before a session starts.
   const commands = tab.agentCommands.length > 0 ? tab.agentCommands : fallbackCommands;
+
+  // Stable identity: this reaches memoized transcript rows, so a fresh
+  // Set every render would defeat their memo.
+  const commandNameSet = useMemo(() => commandNames(commands), [commands]);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,7 +240,16 @@ export function ChatPanel({
                   onOpenBranchPicker={() => setBranchPickerOpen(true)}
                   onPush={onGitPush}
                   onPull={onGitPull}
+                  onFetch={onGitFetch}
                   onRefresh={() => setChangesRefreshKey((k) => k + 1)}
+                  onOpenFile={onOpenFile}
+                  onShowDiff={(file, staged) =>
+                    setDiffTarget({
+                      path: file.path,
+                      staged,
+                      untracked: file.label === "untracked",
+                    })
+                  }
                 />
               )}
               {sidebarView === "history" && (
@@ -246,12 +285,18 @@ export function ChatPanel({
           <MessageList
             messages={tab.messages}
             busy={tab.busy}
+            turnStartedAt={tab.turnStartedAt}
+            commands={commandNameSet}
             verbose={tab.project.verbose}
             onRespondPermission={onRespondPermission}
+            onAnswerQuestion={onAnswerQuestion}
             onShowPlan={showPlan}
           />
           <Composer
             busy={tab.busy}
+            draft={tab.draft ?? ""}
+            attachments={tab.draftAttachments ?? EMPTY_ATTACHMENTS}
+            onDraftChange={onDraftChange}
             queued={tab.queued}
             onRemoveQueued={onRemoveQueued}
             placeholder={`Ask ${providerName} about ${tab.project.name}… (type / for commands)`}
@@ -291,6 +336,15 @@ export function ChatPanel({
           </>
         )}
       </div>
+      {diffTarget && (
+        <DiffModal
+          key={`${diffTarget.path}:${diffTarget.staged}`}
+          path={diffTarget.path}
+          staged={diffTarget.staged}
+          load={() => onGitDiff(diffTarget.path, diffTarget.staged, diffTarget.untracked)}
+          onClose={() => setDiffTarget(null)}
+        />
+      )}
       {branchPickerOpen && changes && (
         <BranchPicker
           branches={changes.branches}

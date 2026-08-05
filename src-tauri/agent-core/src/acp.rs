@@ -8,7 +8,10 @@
 
 use serde_json::{json, Value};
 
-use crate::event::{AgentEvent, AvailableCommand, PermissionOptionInfo, PlanEntry};
+use crate::event::{
+    AgentEvent, AvailableCommand, PermissionOptionInfo, PlanEntry, QuestionInfo,
+    QuestionOptionInfo,
+};
 use crate::provider::truncate;
 use crate::turn::{mode_preamble, Mode, TurnRequest};
 
@@ -136,7 +139,18 @@ pub fn initialize_request(id: i64) -> Value {
         "method": "initialize",
         "params": {
             "protocolVersion": PROTOCOL_VERSION,
-            "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false },
+            "clientCapabilities": {
+                "fs": { "readTextFile": false, "writeTextFile": false },
+                "terminal": false,
+                // Declaring form elicitation is what lets the agent ASK the
+                // user things. Claude's adapter puts `AskUserQuestion` in
+                // `disallowedTools` unless this is present, so without it
+                // the model is told the tool does not exist and has to
+                // guess instead. `{}` is the spec's "supported" value.
+                // URL elicitation is deliberately not advertised: it would
+                // send the user out to a browser mid-turn.
+                "elicitation": { "form": {} }
+            },
             "clientInfo": { "name": "mota-editor", "title": "Mota Editor", "version": "0.1.0" }
         }
     })
@@ -251,6 +265,33 @@ pub fn permission_cancelled_response(id: i64) -> Value {
     })
 }
 
+/// The user answered the agent's questions. `answers` maps form field to
+/// the chosen (or typed) text; fields the user skipped are simply absent,
+/// which the agent reads as "no answer for that one".
+pub fn elicitation_accept_response(id: i64, answers: &[(String, String)]) -> Value {
+    let content: serde_json::Map<String, Value> = answers
+        .iter()
+        .map(|(field, value)| (field.clone(), Value::String(value.clone())))
+        .collect();
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": { "action": "accept", "content": Value::Object(content) }
+    })
+}
+
+/// The user chose not to answer. The agent carries on without the answers
+/// rather than aborting the turn.
+pub fn elicitation_declined_response(id: i64) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": { "action": "decline" } })
+}
+
+/// The turn was cancelled out from under the question; the agent aborts
+/// the tool call.
+pub fn elicitation_cancelled_response(id: i64) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": { "action": "cancel" } })
+}
+
 pub fn method_not_found_response(id: i64, method: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -318,6 +359,15 @@ pub enum Incoming {
         /// Where the agent saved the plan on disk, when it did.
         plan_file_path: Option<String>,
     },
+    /// The agent asks the user a question (form elicitation).
+    ElicitationRequest {
+        id: i64,
+        message: String,
+        questions: Vec<QuestionInfo>,
+    },
+    /// An elicitation we advertised no support for (url mode). Declined
+    /// rather than errored: the agent should carry on, not fail the turn.
+    UnsupportedElicitation { id: i64 },
     /// `session/update` notification, already translated to domain events.
     Updates(Vec<AgentEvent>),
     /// Any other request from the agent (fs/terminal/...) — must be
@@ -337,6 +387,7 @@ pub fn parse_incoming(line: &str) -> Option<Incoming> {
         (Some("session/request_permission"), Some(id)) => {
             Some(classify_permission_request(id, &value))
         }
+        (Some("elicitation/create"), Some(id)) => Some(classify_elicitation(id, &value)),
         (Some("session/update"), None) => Some(Incoming::Updates(
             value.get("params").map(translate_update).unwrap_or_default(),
         )),
@@ -387,6 +438,124 @@ fn classify_permission_request(id: i64, value: &Value) -> Incoming {
         .and_then(Value::as_str)
         .map(str::to_owned);
     Incoming::PermissionRequest { id, title, options, plan_markdown, plan_file_path }
+}
+
+/// Marker the agent puts on the free-text field that accompanies a
+/// select question. Deliberately un-namespaced in the protocol so every
+/// AskUserQuestion bridge (Claude, Codex, ...) can be recognised alike.
+const CUSTOM_ANSWER_META: &str = "_askUserQuestionCustomAnswer";
+
+/// Classify an `elicitation/create` request. Only form mode is supported
+/// (it is the only mode we advertise); anything else is declined.
+fn classify_elicitation(id: i64, value: &Value) -> Incoming {
+    let params = value.get("params").cloned().unwrap_or(Value::Null);
+    if params.get("mode").and_then(Value::as_str) != Some("form") {
+        return Incoming::UnsupportedElicitation { id };
+    }
+    let message = params
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("The agent has a question")
+        .to_owned();
+    let questions = parse_elicitation_questions(&params, &message);
+    if questions.is_empty() {
+        // A form we cannot render is worse than no form: declining lets
+        // the agent proceed instead of waiting on a card that never came.
+        return Incoming::UnsupportedElicitation { id };
+    }
+    Incoming::ElicitationRequest { id, message, questions }
+}
+
+/// Read the questions out of an elicitation's `requestedSchema`.
+///
+/// The shape is a JSON Schema object whose properties are the form
+/// fields. Select fields carry their choices in `oneOf` (single) or
+/// `items.anyOf` (multi); each choice's `const` is the value to send
+/// back and its `title` is what to show. Alongside each select sits an
+/// optional free-text field marked with `CUSTOM_ANSWER_META`, which is
+/// folded into its question rather than listed as a question of its own.
+fn parse_elicitation_questions(params: &Value, message: &str) -> Vec<QuestionInfo> {
+    let Some(properties) = params
+        .pointer("/requestedSchema/properties")
+        .and_then(Value::as_object)
+    else {
+        return Vec::new();
+    };
+
+    // Custom-answer fields, indexed by the question they belong to.
+    let mut custom_for: std::collections::BTreeMap<String, String> = Default::default();
+    for (field, schema) in properties {
+        if let Some(owner) = custom_answer_owner(schema) {
+            custom_for.insert(owner, field.clone());
+        }
+    }
+
+    let mut questions: Vec<QuestionInfo> = Vec::new();
+    for (field, schema) in properties {
+        if custom_answer_owner(schema).is_some() {
+            continue; // folded into its question below
+        }
+        let options = parse_question_options(schema);
+        if options.is_empty() {
+            continue; // a free-text-only field is not a choice we can render
+        }
+        questions.push(QuestionInfo {
+            // With one question the text lives in `message` and the field
+            // description is omitted; with several, each carries its own.
+            text: schema
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or(message)
+                .to_owned(),
+            header: schema
+                .get("title")
+                .and_then(Value::as_str)
+                .filter(|t| !t.trim().is_empty())
+                .map(str::to_owned),
+            multi_select: schema.get("type").and_then(Value::as_str) == Some("array"),
+            custom_field: custom_for.get(field).cloned(),
+            field: field.clone(),
+            options,
+        });
+    }
+    questions
+}
+
+/// The question field a free-text "Other" box belongs to, if it is one.
+fn custom_answer_owner(schema: &Value) -> Option<String> {
+    let meta = schema.pointer("/_meta")?.get(CUSTOM_ANSWER_META)?;
+    meta.get("questionId")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+/// The choices of a select field: `oneOf` for single, `items.anyOf` for
+/// multi-select.
+fn parse_question_options(schema: &Value) -> Vec<QuestionOptionInfo> {
+    let list = schema
+        .get("oneOf")
+        .or_else(|| schema.pointer("/items/anyOf"))
+        .and_then(Value::as_array);
+    list.map(|options| options.iter().filter_map(parse_question_option).collect())
+        .unwrap_or_default()
+}
+
+fn parse_question_option(value: &Value) -> Option<QuestionOptionInfo> {
+    // `const` is what the agent reads back; without it we'd be guessing.
+    let constant = value.get("const")?.as_str()?.to_owned();
+    Some(QuestionOptionInfo {
+        label: value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or(&constant)
+            .to_owned(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .filter(|d| !d.trim().is_empty())
+            .map(str::to_owned),
+        value: constant,
+    })
 }
 
 fn parse_option(value: &Value) -> Option<PermissionOptionInfo> {
@@ -611,6 +780,130 @@ mod tests {
         let msg = initialize_request(0);
         assert_eq!(msg["params"]["protocolVersion"], 1);
         assert_eq!(msg["params"]["clientCapabilities"]["fs"]["readTextFile"], false);
+    }
+
+    #[test]
+    fn initialize_advertises_form_elicitation_but_not_url() {
+        // Claude's adapter disallows the AskUserQuestion tool outright
+        // unless form elicitation is advertised, so this is the whole
+        // reason the agent can ask anything at all.
+        let caps = &initialize_request(0)["params"]["clientCapabilities"];
+        assert_eq!(caps["elicitation"]["form"], json!({}));
+        assert!(caps["elicitation"].get("url").is_none());
+    }
+
+    /// The exact wire shape `claude-agent-acp` sends for AskUserQuestion.
+    fn ask_line(params: &str) -> String {
+        format!(r#"{{"jsonrpc":"2.0","id":11,"method":"elicitation/create","params":{params}}}"#)
+    }
+
+    #[test]
+    fn a_single_question_takes_its_text_from_the_message() {
+        let line = ask_line(
+            r#"{"mode":"form","sessionId":"s","toolCallId":"t1",
+                "message":"Which database should I use?",
+                "requestedSchema":{"type":"object","properties":{
+                  "question_0":{"type":"string","title":"Database",
+                    "oneOf":[
+                      {"const":"Postgres","title":"Postgres","description":"Relational"},
+                      {"const":"SQLite","title":"SQLite"}]},
+                  "question_0_custom":{"type":"string","title":"Other",
+                    "_meta":{"_askUserQuestionCustomAnswer":{"questionId":"question_0","isCustomAnswer":true}}}
+                }}}"#,
+        );
+        match parse_incoming(&line.replace('\n', "")) {
+            Some(Incoming::ElicitationRequest { id, message, questions }) => {
+                assert_eq!(id, 11);
+                assert_eq!(message, "Which database should I use?");
+                assert_eq!(questions.len(), 1, "the Other box is not its own question");
+
+                let q = &questions[0];
+                assert_eq!(q.field, "question_0");
+                assert_eq!(q.header.as_deref(), Some("Database"));
+                // No per-field description for a single question: the
+                // message carries the text.
+                assert_eq!(q.text, "Which database should I use?");
+                assert!(!q.multi_select);
+                assert_eq!(q.custom_field.as_deref(), Some("question_0_custom"));
+                assert_eq!(q.options.len(), 2);
+                assert_eq!(q.options[0].value, "Postgres");
+                assert_eq!(q.options[0].description.as_deref(), Some("Relational"));
+                // Missing title falls back to the value.
+                assert_eq!(q.options[1].label, "SQLite");
+                assert_eq!(q.options[1].description, None);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn several_questions_each_carry_their_own_text_and_multi_select() {
+        let line = ask_line(
+            r#"{"mode":"form","sessionId":"s",
+                "message":"Please answer the following questions.",
+                "requestedSchema":{"type":"object","properties":{
+                  "question_0":{"type":"string","description":"Which runtime?",
+                    "oneOf":[{"const":"node","title":"Node"}]},
+                  "question_1":{"type":"array","description":"Which extras?",
+                    "items":{"anyOf":[
+                      {"const":"lint","title":"Lint"},
+                      {"const":"test","title":"Tests"}]}}
+                }}}"#,
+        );
+        match parse_incoming(&line.replace('\n', "")) {
+            Some(Incoming::ElicitationRequest { questions, .. }) => {
+                assert_eq!(questions.len(), 2);
+                assert_eq!(questions[0].text, "Which runtime?");
+                assert!(!questions[0].multi_select);
+                assert_eq!(questions[0].custom_field, None);
+
+                assert_eq!(questions[1].text, "Which extras?");
+                assert!(questions[1].multi_select, "array fields are multi-select");
+                assert_eq!(questions[1].options.len(), 2);
+                assert_eq!(questions[1].options[1].value, "test");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn url_and_unrenderable_elicitations_are_declined_not_errored() {
+        // We never advertise url mode, but a server MCP could still try.
+        let url = ask_line(r#"{"mode":"url","sessionId":"s","url":"https://x","message":"Sign in"}"#);
+        assert_eq!(
+            parse_incoming(&url),
+            Some(Incoming::UnsupportedElicitation { id: 11 })
+        );
+
+        // A form with no choices is not something this UI can render.
+        let empty = ask_line(
+            r#"{"mode":"form","sessionId":"s","message":"Type something",
+                "requestedSchema":{"type":"object","properties":{
+                  "freeform":{"type":"string","title":"Notes"}}}}"#,
+        );
+        assert_eq!(
+            parse_incoming(&empty.replace('\n', "")),
+            Some(Incoming::UnsupportedElicitation { id: 11 })
+        );
+    }
+
+    #[test]
+    fn elicitation_responses_use_the_action_shapes_the_agent_expects() {
+        let answers = vec![("question_0".to_owned(), "Postgres".to_owned())];
+        let accept = elicitation_accept_response(11, &answers);
+        assert_eq!(accept["result"]["action"], "accept");
+        assert_eq!(accept["result"]["content"]["question_0"], "Postgres");
+
+        assert_eq!(elicitation_declined_response(11)["result"]["action"], "decline");
+        assert_eq!(elicitation_cancelled_response(11)["result"]["action"], "cancel");
+    }
+
+    #[test]
+    fn an_accept_with_no_answers_still_sends_an_object() {
+        // Skipping every question must not serialize `content` as null:
+        // the agent validates the shape before reading it.
+        let accept = elicitation_accept_response(11, &[]);
+        assert_eq!(accept["result"]["content"], json!({}));
     }
 
     #[test]

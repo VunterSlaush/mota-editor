@@ -7,6 +7,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { EmptyState } from "./components/EmptyState";
 import { SettingsModal } from "./components/SettingsModal";
 import { TabBar } from "./components/TabBar";
+import { openFileExternally } from "./openFile";
 import { useAppState } from "./useAppState";
 
 /**
@@ -37,6 +38,11 @@ export function App({ context }: { context: AppContext }) {
   const respondPermission = useCallback(
     (requestId: string, optionId: string) =>
       void context.respondPermission.execute(activeProjectId, requestId, optionId),
+    [context, activeProjectId],
+  );
+  const answerQuestion = useCallback(
+    (requestId: string, answers: Record<string, string>) =>
+      void context.respondQuestion.execute(activeProjectId, requestId, answers),
     [context, activeProjectId],
   );
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
@@ -75,6 +81,9 @@ export function App({ context }: { context: AppContext }) {
           onSend={(prompt, attachments) =>
             void context.sendPrompt.execute(tab.project.id, prompt, attachments)
           }
+          onDraftChange={(draft, attachments) =>
+            context.editDraft.execute(tab.project.id, draft, attachments)
+          }
           onRemoveQueued={(index) =>
             context.sendPrompt.removeQueued(tab.project.id, index)
           }
@@ -104,7 +113,13 @@ export function App({ context }: { context: AppContext }) {
           onGitCheckout={(branch) => context.gitActions.checkout(tab.project.id, branch)}
           onGitPush={() => context.gitActions.push(tab.project.id)}
           onGitPull={() => context.gitActions.pull(tab.project.id)}
+          onGitFetch={() => context.gitActions.fetch(tab.project.id)}
+          onGitDiff={(path, staged, untracked) =>
+            context.gitActions.diff(tab.project.id, path, staged, untracked)
+          }
+          onOpenFile={(path) => openFileExternally(tab.project.path, path)}
           onRespondPermission={respondPermission}
+          onAnswerQuestion={answerQuestion}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
           onPickFiles={() => context.filePicker.pickFiles()}
         />

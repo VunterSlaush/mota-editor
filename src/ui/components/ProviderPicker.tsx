@@ -22,6 +22,7 @@ export function ProviderPicker({ value, disabled, onChange }: Props) {
       value={value}
       disabled={disabled}
       placement="bottom"
+      align="end"
       onChange={onChange}
     />
   );

@@ -117,7 +117,7 @@ export class SessionHistory {
     const { provider, path, model, effort } = tab.project;
 
     this.store.dispatch({ type: "chat/cleared", tabId });
-    this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true });
+    this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: Date.now() });
 
     const replay = new ReplayedSession();
     let resumed = true;

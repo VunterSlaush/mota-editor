@@ -108,6 +108,43 @@ describe("appState reducer", () => {
     expect(state.tabs[0].project.effort).toBeUndefined();
   });
 
+  it("keeps each tab's draft prompt across a tab switch", () => {
+    let state = open(initialState, "t1", "/a");
+    state = open(state, "t2", "/b");
+    state = reduce(state, {
+      type: "chat/draftChanged",
+      tabId: "t1",
+      draft: "half a thought",
+      attachments: ["/a/notes.md"],
+    });
+
+    // Leaving and coming back is what used to bin the text.
+    state = reduce(state, { type: "tab/activated", tabId: "t2" });
+    state = reduce(state, { type: "tab/activated", tabId: "t1" });
+
+    expect(state.tabs[0].draft).toBe("half a thought");
+    expect(state.tabs[0].draftAttachments).toEqual(["/a/notes.md"]);
+    expect(state.tabs[1].draft).toBeUndefined();
+  });
+
+  it("stamps the turn's start time while busy and clears it after", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "chat/busyChanged",
+      tabId: "t1",
+      busy: true,
+      at: 1_000,
+    });
+    expect(state.tabs[0].turnStartedAt).toBe(1_000);
+
+    // A later busy=true without a clock must not restart the counter.
+    state = reduce(state, { type: "chat/busyChanged", tabId: "t1", busy: true });
+    expect(state.tabs[0].turnStartedAt).toBe(1_000);
+
+    state = reduce(state, { type: "chat/busyChanged", tabId: "t1", busy: false });
+    expect(state.tabs[0].turnStartedAt).toBeUndefined();
+  });
+
   it("stores agent-advertised commands per tab", () => {
     let state = open(initialState, "t1", "/a");
     state = reduce(state, {

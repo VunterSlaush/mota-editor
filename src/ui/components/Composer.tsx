@@ -11,15 +11,20 @@ import {
   Stop,
   X,
 } from "@phosphor-icons/react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
-import { type CommandInfo, filterCommands } from "../../core/entities/command";
+import {
+  type CommandInfo,
+  commandNames,
+  filterCommands,
+} from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
 import { AUTO_COMPACT_THRESHOLD } from "../../core/usecases/sendPrompt";
 import { fileName } from "../fileName";
 import { CommandPalette } from "./CommandPalette";
+import { CommandText } from "./CommandText";
 import { ContextGauge } from "./ContextGauge";
 import { ModelPicker } from "./ModelPicker";
 import { OptionPicker, type PickerOption } from "./OptionPicker";
@@ -54,6 +59,11 @@ const PERMISSION_OPTIONS: readonly PickerOption<PermissionPolicy>[] = PERMISSION
 
 interface Props {
   busy: boolean;
+  /** The half-written prompt. Owned by the tab, not by this component:
+   *  switching tabs remounts the chat, and a remount must not eat it. */
+  draft: string;
+  attachments: readonly string[];
+  onDraftChange: (draft: string, attachments: readonly string[]) => void;
   queued: readonly { prompt: string; attachments: readonly string[] }[];
   onRemoveQueued: (index: number) => void;
   placeholder: string;
@@ -84,6 +94,9 @@ interface Props {
  */
 export function Composer({
   busy,
+  draft,
+  attachments,
+  onDraftChange,
   queued,
   onRemoveQueued,
   placeholder,
@@ -104,11 +117,20 @@ export function Composer({
   onSelectModel,
   onSelectEffort,
 }: Props) {
-  const [draft, setDraft] = useState("");
-  const [attachments, setAttachments] = useState<readonly string[]>([]);
   const [paletteDismissed, setPaletteDismissed] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
+
+  const commandNameSet = useMemo(() => commandNames(commands), [commands]);
+
+  // The highlight layer is taller than its box once the input scrolls;
+  // keep it in step with the textarea or the colours drift off the text.
+  const syncHighlightScroll = () => {
+    const input = inputRef.current;
+    const highlight = highlightRef.current;
+    if (input && highlight) highlight.scrollTop = input.scrollTop;
+  };
 
   const effortOptions = EFFORT_OPTIONS[provider];
   // The empty id is the provider's own default — the way back from a choice.
@@ -138,12 +160,11 @@ export function Composer({
   const send = () => {
     if (draft.trim() === "" && attachments.length === 0) return;
     onSend(draft, attachments);
-    setDraft("");
-    setAttachments([]);
+    onDraftChange("", []);
   };
 
   const pickCommand = (command: CommandInfo) => {
-    setDraft(`${command.name} `);
+    onDraftChange(`${command.name} `, attachments);
     setSelectedIndex(0);
     inputRef.current?.focus();
   };
@@ -151,9 +172,9 @@ export function Composer({
   const attach = async () => {
     const picked = await onPickFiles();
     if (picked.length === 0) return;
-    setAttachments((current) => [
-      ...current,
-      ...picked.filter((p) => !current.includes(p)),
+    onDraftChange(draft, [
+      ...attachments,
+      ...picked.filter((p) => !attachments.includes(p)),
     ]);
   };
 
@@ -206,7 +227,9 @@ export function Composer({
               title={q.prompt}
             >
               <span className="queued-item__badge">queued</span>
-              <span className="queued-item__text">{q.prompt}</span>
+              <span className="queued-item__text">
+                <CommandText text={q.prompt} commands={commandNameSet} />
+              </span>
               <button
                 type="button"
                 className="queued-item__remove"
@@ -228,7 +251,12 @@ export function Composer({
                 type="button"
                 className="attachment-chip__remove"
                 aria-label={`Remove ${fileName(path)}`}
-                onClick={() => setAttachments(attachments.filter((p) => p !== path))}
+                onClick={() =>
+                  onDraftChange(
+                    draft,
+                    attachments.filter((p) => p !== path),
+                  )
+                }
               >
                 <X size={13} />
               </button>
@@ -237,19 +265,30 @@ export function Composer({
         </div>
       )}
       <div className="composer-card">
-        <textarea
-          ref={inputRef}
-          className="composer-card__input"
-          value={draft}
-          placeholder={busy ? "Queue another message… (Esc to stop)" : placeholder}
-          rows={1}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setPaletteDismissed(false);
-            setSelectedIndex(0);
-          }}
-          onKeyDown={onKeyDown}
-        />
+        <div className="composer-card__input-wrap">
+          {/* A textarea cannot colour part of its own value, so the text
+              is drawn again underneath and the textarea made
+              transparent. The two layers share every metric that affects
+              wrapping (see styles.css) and scroll together. */}
+          <div className="composer-card__highlight" ref={highlightRef} aria-hidden="true">
+            <CommandText text={draft} commands={commandNameSet} />
+            {"\n"}
+          </div>
+          <textarea
+            ref={inputRef}
+            className="composer-card__input"
+            value={draft}
+            placeholder={busy ? "Queue another message… (Esc to stop)" : placeholder}
+            rows={1}
+            onChange={(e) => {
+              onDraftChange(e.target.value, attachments);
+              setPaletteDismissed(false);
+              setSelectedIndex(0);
+            }}
+            onScroll={syncHighlightScroll}
+            onKeyDown={onKeyDown}
+          />
+        </div>
         <div className="composer-card__toolbar">
           <div className="composer-card__group">
             <button
@@ -305,6 +344,7 @@ export function Composer({
                 value={effort}
                 disabled={busy}
                 placeholder="effort"
+                align="end"
                 className="picker__trigger--dim"
                 onChange={onSelectEffort}
               />

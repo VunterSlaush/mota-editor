@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalMessage } from "../entities/message";
+import { approvalMessage, questionMessage } from "../entities/message";
 import { newProject } from "../entities/project";
 import type {
   AgentGateway,
@@ -8,7 +8,7 @@ import type {
 } from "../ports/agentGateway";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
-import { RespondPermission } from "./respondPermission";
+import { RespondPermission, RespondQuestion } from "./respondPermission";
 
 class RecordingGateway implements AgentGateway {
   responses: Array<{ tabId: string; requestId: string; optionId: string }> = [];
@@ -26,6 +26,15 @@ class RecordingGateway implements AgentGateway {
   async loadNativeSession(): Promise<void> {}
   async respondPermission(tabId: string, requestId: string, optionId: string) {
     this.responses.push({ tabId, requestId, optionId });
+  }
+
+  answers: Array<{ requestId: string; answers: Record<string, string> }> = [];
+  async respondQuestion(
+    _tabId: string,
+    requestId: string,
+    answers: Readonly<Record<string, string>>,
+  ) {
+    this.answers.push({ requestId, answers: { ...answers } });
   }
 }
 
@@ -74,5 +83,72 @@ describe("RespondPermission", () => {
     await useCase.execute("t1", "9", "allow");
 
     expect(gateway.responses).toHaveLength(0);
+  });
+});
+
+function questionSetup() {
+  const store = new Store();
+  store.dispatch({ type: "tab/opened", project: newProject("t1", "/a", DEFAULTS) });
+  store.dispatch({
+    type: "chat/messageAppended",
+    tabId: "t1",
+    message: questionMessage("Which database?", "12", [
+      {
+        field: "question_0",
+        text: "Which database?",
+        multiSelect: false,
+        options: [
+          { value: "Postgres", label: "Postgres" },
+          { value: "SQLite", label: "SQLite" },
+        ],
+      },
+    ]),
+  });
+  const gateway = new RecordingGateway();
+  return { store, gateway, useCase: new RespondQuestion(store, gateway) };
+}
+
+const question = (store: Store) => store.getState().tabs[0].messages[0].question;
+
+describe("RespondQuestion", () => {
+  it("delivers the answers and marks the card answered", async () => {
+    const { store, gateway, useCase } = questionSetup();
+
+    await useCase.execute("t1", "12", { question_0: "Postgres" });
+
+    expect(gateway.answers).toEqual([
+      { requestId: "12", answers: { question_0: "Postgres" } },
+    ]);
+    expect(question(store)?.answers).toEqual({ question_0: "Postgres" });
+    expect(question(store)?.skipped).toBe(false);
+  });
+
+  it("an empty answer is a deliberate skip, still sent to the agent", async () => {
+    const { store, gateway, useCase } = questionSetup();
+
+    await useCase.execute("t1", "12", {});
+
+    // The agent must hear about it — silence would hang its tool call.
+    expect(gateway.answers).toHaveLength(1);
+    expect(question(store)?.skipped).toBe(true);
+  });
+
+  it("ignores a second answer to the same question", async () => {
+    const { gateway, useCase } = questionSetup();
+
+    await useCase.execute("t1", "12", { question_0: "Postgres" });
+    await useCase.execute("t1", "12", { question_0: "SQLite" });
+
+    expect(gateway.answers).toHaveLength(1);
+  });
+
+  it("ignores answers once the turn stranded the question", async () => {
+    const { store, gateway, useCase } = questionSetup();
+    store.dispatch({ type: "chat/approvalsCancelled", tabId: "t1" });
+    expect(question(store)?.cancelled).toBe(true);
+
+    await useCase.execute("t1", "12", { question_0: "Postgres" });
+
+    expect(gateway.answers).toHaveLength(0);
   });
 });

@@ -2,7 +2,7 @@ import type { GitBranch, GitChange, GitCommit, GitPort } from "../ports/gitPort"
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 
-const COMMIT_LOG_LIMIT = 10;
+const COMMIT_LOG_LIMIT = 15;
 
 /** Everything the Changes panel shows. */
 export interface GitChanges {
@@ -10,6 +10,8 @@ export interface GitChanges {
   readonly unstaged: readonly GitChange[];
   readonly commits: readonly GitCommit[];
   readonly branches: readonly GitBranch[];
+  /** The `origin` URL, "" when there is none — commits link off it. */
+  readonly remote: string;
 }
 
 /**
@@ -29,16 +31,18 @@ export class LoadGitChanges {
 
     try {
       const path = tab.project.path;
-      const [changes, commits, branches] = await Promise.all([
+      const [changes, commits, branches, remote] = await Promise.all([
         this.git.changes(path),
         this.git.log(path, COMMIT_LOG_LIMIT).catch(() => []),
         this.git.branches(path).catch(() => []),
+        this.git.remoteUrl(path).catch(() => ""),
       ]);
       return {
         staged: changes.filter((c) => c.staged),
         unstaged: changes.filter((c) => c.unstaged),
         commits,
         branches,
+        remote,
       };
     } catch {
       return null;

@@ -3,16 +3,22 @@ import {
   ArrowClockwise,
   ArrowLineDown,
   ArrowLineUp,
+  ArrowSquareOut,
+  ArrowsClockwise,
   CaretDown,
+  CaretRight,
   Check,
   GitBranch,
+  GitDiff,
   Minus,
   Plus,
 } from "@phosphor-icons/react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+import { commitUrl } from "../../core/entities/gitRemote";
 import type { GitChange } from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
+import { openExternalLink } from "../externalLink";
 import { fileName } from "../fileName";
 
 interface Props {
@@ -24,12 +30,22 @@ interface Props {
   onOpenBranchPicker: () => void;
   onPush: () => Promise<GitActionResult>;
   onPull: () => Promise<GitActionResult>;
+  onFetch: () => Promise<GitActionResult>;
   onRefresh: () => void;
+  /** Open a changed file in the OS's editor for that type. */
+  onOpenFile: (path: string) => Promise<string | null>;
+  /** Show the file's diff in a modal. */
+  onShowDiff: (file: GitChange, staged: boolean) => void;
 }
 
+/** Which sections start open — all of them; collapsing is the exception. */
+const ALL_OPEN = { staged: true, unstaged: true, commits: true };
+
 /**
- * UI — the project's source control, VS-style: pull/push, staged and
- * not-staged files with one-click (un)stage, and the last commits.
+ * UI — the project's source control, VS-style: fetch/pull/push, staged
+ * and not-staged files with one-click (un)stage, and the recent commits.
+ * Every section collapses, because a repo mid-refactor can list more
+ * files than the sidebar is tall.
  */
 export function ChangesPanel({
   changes,
@@ -40,11 +56,18 @@ export function ChangesPanel({
   onOpenBranchPicker,
   onPush,
   onPull,
+  onFetch,
   onRefresh,
+  onOpenFile,
+  onShowDiff,
 }: Props) {
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState<GitActionResult | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
+  const [open, setOpen] = useState(ALL_OPEN);
+
+  const toggle = (section: keyof typeof ALL_OPEN) =>
+    setOpen((current) => ({ ...current, [section]: !current[section] }));
 
   const run = async (
     action: () => Promise<GitActionResult>,
@@ -56,6 +79,13 @@ export function ChangesPanel({
     setWorking(false);
     onRefresh();
     return result;
+  };
+
+  // Opening a file changes nothing in the repo, so it neither disables
+  // the panel nor triggers a refresh — but a failure must still be said.
+  const openFile = async (path: string) => {
+    const error = await onOpenFile(path);
+    setNotice(error ? { ok: false, message: error } : null);
   };
 
   // Reading git is safe while the agent works; moving the index under it
@@ -88,6 +118,17 @@ export function ChangesPanel({
         </button>
       )}
       <div className="changes__actions">
+        <button
+          type="button"
+          className="changes__action"
+          // Fetch moves no files, so it is safe even mid-turn — the only
+          // remote verb the running agent can't be disturbed by.
+          disabled={working}
+          title="Fetch and prune remote-tracking branches"
+          onClick={() => void run(onFetch)}
+        >
+          <ArrowsClockwise /> Fetch
+        </button>
         <button
           type="button"
           className="changes__action"
@@ -153,53 +194,113 @@ export function ChangesPanel({
           {changes.staged.length === 0 && changes.unstaged.length === 0 && (
             <p className="changes__empty">Working tree clean.</p>
           )}
-          <ChangeGroup
-            title={`Staged (${changes.staged.length})`}
-            files={changes.staged}
-            ActionIcon={Minus}
-            actionTitle="Unstage"
-            disabled={mutationsDisabled}
-            onAction={(path) => void run(() => onUnstage(path))}
-          />
-          <ChangeGroup
-            title={`Not staged (${changes.unstaged.length})`}
-            files={changes.unstaged}
-            ActionIcon={Plus}
-            actionTitle="Stage"
-            disabled={mutationsDisabled}
-            onAction={(path) => void run(() => onStage(path))}
-          />
-          {changes.commits.length > 0 && (
-            <div className="changes__group">
-              <h3 className="changes__title">Last commits</h3>
-              <ul className="changes__list">
-                {changes.commits.map((commit) => (
-                  <li
-                    key={commit.hash}
-                    className="commit"
-                    title={`${commit.author} — ${commit.when}`}
-                  >
-                    <span className="commit__hash">{commit.hash}</span>
-                    <span className="commit__subject">{commit.subject}</span>
-                    <span className="commit__when">{commit.when}</span>
+          <Section
+            title="Staged"
+            count={changes.staged.length}
+            open={open.staged}
+            onToggle={() => toggle("staged")}
+          >
+            <ChangeList
+              files={changes.staged}
+              ActionIcon={Minus}
+              actionTitle="Unstage"
+              disabled={mutationsDisabled}
+              onAction={(path) => void run(() => onUnstage(path))}
+              onOpenFile={(path) => void openFile(path)}
+              onShowDiff={(file) => onShowDiff(file, true)}
+            />
+          </Section>
+          <Section
+            title="Not staged"
+            count={changes.unstaged.length}
+            open={open.unstaged}
+            onToggle={() => toggle("unstaged")}
+          >
+            <ChangeList
+              files={changes.unstaged}
+              ActionIcon={Plus}
+              actionTitle="Stage"
+              disabled={mutationsDisabled}
+              onAction={(path) => void run(() => onStage(path))}
+              onOpenFile={(path) => void openFile(path)}
+              onShowDiff={(file) => onShowDiff(file, false)}
+            />
+          </Section>
+          <Section
+            title="Recent commits"
+            count={changes.commits.length}
+            open={open.commits}
+            onToggle={() => toggle("commits")}
+          >
+            <ul className="changes__list">
+              {changes.commits.map((commit) => {
+                const url = commitUrl(changes.remote, commit.hash);
+                const label = `${commit.author} — ${commit.when}`;
+                return (
+                  <li key={commit.hash}>
+                    <button
+                      type="button"
+                      className={`commit ${url ? "commit--link" : ""}`}
+                      disabled={!url}
+                      title={url ? `${label}\nOpen on the remote` : label}
+                      onClick={() => url && openExternalLink(url)}
+                    >
+                      <span className="commit__hash">{commit.hash}</span>
+                      <span className="commit__subject">{commit.subject}</span>
+                      <span className="commit__when">{commit.when}</span>
+                    </button>
                   </li>
-                ))}
-              </ul>
-            </div>
-          )}
+                );
+              })}
+            </ul>
+          </Section>
         </>
       )}
     </aside>
   );
 }
 
-interface GroupProps {
+/** A titled, collapsible group with its item count in the header. */
+function Section({
+  title,
+  count,
+  open,
+  onToggle,
+  children,
+}: {
   title: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="changes__group">
+      <h3 className="changes__title">
+        <button
+          type="button"
+          className="changes__title-toggle"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          {open ? <CaretDown size={12} /> : <CaretRight size={12} />}
+          {title}
+          <span className="changes__count">{count}</span>
+        </button>
+      </h3>
+      {open && count > 0 && children}
+    </div>
+  );
+}
+
+interface ListProps {
   files: readonly GitChange[];
   ActionIcon: Icon;
   actionTitle: string;
   disabled: boolean;
   onAction: (path: string) => void;
+  onOpenFile: (path: string) => void;
+  onShowDiff: (file: GitChange) => void;
 }
 
 /** The path without its file name — the gray VS-style suffix. */
@@ -208,30 +309,55 @@ function parentDir(path: string): string {
   return cut > 0 ? path.slice(0, cut) : "";
 }
 
-function ChangeGroup({
-  title,
+function ChangeList({
   files,
   ActionIcon,
   actionTitle,
   disabled,
   onAction,
-}: GroupProps) {
-  if (files.length === 0) return null;
+  onOpenFile,
+  onShowDiff,
+}: ListProps) {
   return (
-    <div className="changes__group">
-      <h3 className="changes__title">{title}</h3>
-      <ul className="changes__list">
-        {files.map((file) => (
+    <ul className="changes__list">
+      {files.map((file) => {
+        // A file git no longer has can be neither opened nor diffed
+        // against the working tree.
+        const onDisk = file.label !== "deleted";
+        return (
           <li key={file.path} className="changes__item" title={file.path}>
             <span className={`changes__badge changes__badge--${file.label}`}>
               {file.label[0].toUpperCase()}
             </span>
-            <span className="changes__file">
+            <button
+              type="button"
+              className="changes__file"
+              title={`Show the diff for ${file.path}`}
+              onClick={() => onShowDiff(file)}
+            >
               <span className="changes__filename">{fileName(file.path)}</span>
               {parentDir(file.path) && (
                 <span className="changes__dir">{parentDir(file.path)}</span>
               )}
-            </span>
+            </button>
+            <button
+              type="button"
+              className="changes__file-action"
+              title={`Show the diff for ${file.path}`}
+              onClick={() => onShowDiff(file)}
+            >
+              <GitDiff size={14} />
+            </button>
+            {onDisk && (
+              <button
+                type="button"
+                className="changes__file-action"
+                title={`Open ${file.path} in your editor`}
+                onClick={() => onOpenFile(file.path)}
+              >
+                <ArrowSquareOut size={14} />
+              </button>
+            )}
             <button
               type="button"
               className="changes__file-action"
@@ -242,8 +368,8 @@ function ChangeGroup({
               <ActionIcon size={14} />
             </button>
           </li>
-        ))}
-      </ul>
-    </div>
+        );
+      })}
+    </ul>
   );
 }

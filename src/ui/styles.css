@@ -7,6 +7,8 @@
   --text-dim: #8b929e;
   --accent: #4f8cff;
   --error: #ff6b6b;
+  --warning: #f0b429;
+  --success: #7ee2a8;
   --tool: #b58cff;
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   font-size: 14px;
@@ -22,6 +24,14 @@ body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+/* A fixed desktop shell: every scrollable region manages its own overflow.
+   Without this a popover anchored past the right edge (the composer's
+   pickers) makes the whole document scroll sideways. */
+html,
+body {
+  overflow: hidden;
 }
 
 body {
@@ -92,29 +102,52 @@ body {
   background: var(--border);
 }
 
-.tab__spinner {
+/* One dot per tab, coloured by what the tab wants from you:
+   amber = waiting on you, red = it failed, blue = working,
+   green = finished while you were elsewhere. */
+.tab__dot {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
+}
+
+.tab__dot--busy {
   background: var(--accent);
   animation: pulse 1s ease-in-out infinite;
 }
 
-.tab--attention {
+/* The one state that needs a person. It pulses fastest and glows most,
+   so it reads as a question, not a status. */
+.tab__dot--needsInput {
+  background: var(--warning);
+  box-shadow: 0 0 6px rgba(240, 180, 41, 0.9);
+  animation: pulse 0.9s ease-in-out infinite;
+}
+
+/* Steady, not pulsing: a failure is not asking for attention every
+   second, it is simply true until something changes it. */
+.tab__dot--error {
+  background: var(--error);
+  box-shadow: 0 0 6px rgba(255, 107, 107, 0.7);
+}
+
+.tab__dot--done {
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(126, 226, 168, 0.8);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.tab--needsInput,
+.tab--error,
+.tab--done {
   color: var(--text);
 }
 
-.tab--attention .tab__name {
+.tab--needsInput .tab__name,
+.tab--error .tab__name,
+.tab--done .tab__name {
   font-weight: 600;
-}
-
-.tab__attention-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #7ee2a8;
-  box-shadow: 0 0 6px rgba(126, 226, 168, 0.8);
-  animation: pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes pulse {
@@ -171,22 +204,12 @@ body {
 }
 
 .provider-picker,
-.option-picker,
-.model-picker {
+.option-picker {
   background: var(--bg-input);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 8px;
-}
-
-.model-picker {
-  width: 130px;
-  font-size: 13px;
-}
-
-.model-picker::placeholder {
-  color: var(--text-dim);
 }
 
 /* ---- Messages ---- */
@@ -260,7 +283,7 @@ body {
   }
 }
 
-/* "Working…" shimmer shown before the reply starts streaming. */
+/* "Working…" shimmer and clock, shown for the whole turn. */
 .working {
   display: flex;
   align-items: center;
@@ -268,6 +291,15 @@ body {
   color: var(--text-dim);
   font-size: 13px;
   padding: 2px 0;
+}
+
+.working__elapsed {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.working__elapsed::before {
+  content: "· ";
 }
 
 .working__dot {
@@ -430,22 +462,6 @@ body {
 }
 
 /* ---- Header toggles ---- */
-.changes-toggle {
-  background: var(--bg-input);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.changes-toggle--open,
-.changes-toggle:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
-
 .verbose-toggle {
   display: inline-flex;
   align-items: center;
@@ -1417,6 +1433,11 @@ body {
 
 .changes__action {
   flex: 1;
+  /* Fetch/Pull/Push plus the refresh icon in a sidebar that drags down
+     to 180px: let the labels clip rather than overflow the panel. */
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1433,6 +1454,11 @@ body {
 .changes__action--icon {
   flex: none;
   width: 32px;
+}
+
+/* The icon must never be the thing that gets clipped. */
+.changes__action svg {
+  flex: none;
 }
 
 /* Turns slowly while the agent works, to say "this view is live". */
@@ -1499,13 +1525,359 @@ body {
   cursor: default;
 }
 
+/* ---- Agent questions ----
+   Amber, matching the tab dot: this is the one card that exists purely
+   because the agent needs a person. Approvals are blue-grey; a question
+   should not look like one. */
+.question {
+  align-self: stretch;
+  max-width: 100%;
+  border: 1px solid rgba(240, 180, 41, 0.5);
+  border-radius: 10px;
+  background: rgba(240, 180, 41, 0.06);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.question--answered {
+  border-color: var(--border);
+  background: transparent;
+}
+
+.question__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.question--answered .question__title {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.question__block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.question__header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.question__text {
+  color: var(--text);
+}
+
+.question__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.question__option {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.question__option:hover:not(:disabled) {
+  border-color: var(--warning);
+}
+
+.question__option--picked {
+  border-color: var(--warning);
+  background: rgba(240, 180, 41, 0.16);
+}
+
+.question__option:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.question__option-label {
+  font-size: 13px;
+}
+
+.question__option-description {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.question__custom {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.question__custom:focus {
+  outline: none;
+  border-color: var(--warning);
+}
+
+.question__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.question__send {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--warning);
+  color: #1a1400;
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.question__send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.question__skip {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.question__skip:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.question__status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* ---- Diff modal ---- */
+.diff-modal {
+  width: 1100px;
+  max-width: 94vw;
+  max-height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.diff-modal__header {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-modal__name {
+  font-weight: 600;
+}
+
+.diff-modal__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.diff-modal__badge {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.diff-modal__stat {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-modal__stat--add {
+  color: #7ee2a8;
+}
+
+.diff-modal__stat--remove {
+  color: var(--error);
+}
+
+.diff-modal__close {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.diff-modal__close:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.diff-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Monospace belongs to the diff itself, not to the notes around it. */
+.diff-hunk {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.diff-modal__note {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--text-dim);
+}
+
+.diff-modal__note--error {
+  color: var(--error);
+  white-space: pre-wrap;
+}
+
+.diff-hunk__header {
+  padding: 4px 10px;
+  color: var(--tool);
+  background: rgba(181, 140, 255, 0.08);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.diff-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 8px 0 4px;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.diff-cell--empty {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.diff-cell--add {
+  background: rgba(80, 200, 120, 0.14);
+}
+
+.diff-cell--remove {
+  background: rgba(255, 107, 107, 0.14);
+}
+
+.diff-cell__no {
+  flex: none;
+  width: 44px;
+  text-align: right;
+  color: var(--text-dim);
+  opacity: 0.6;
+  user-select: none;
+}
+
+.diff-cell__sign {
+  flex: none;
+  width: 1ch;
+  user-select: none;
+}
+
+.diff-cell--add .diff-cell__sign {
+  color: #7ee2a8;
+}
+
+.diff-cell--remove .diff-cell__sign {
+  color: var(--error);
+}
+
+.diff-cell__text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ---- Commits ---- */
 .commit {
+  width: 100%;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 3px 0;
+  padding: 3px 4px;
   font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: inherit;
+  font-family: inherit;
+  cursor: default;
+}
+
+/* Only clickable when the remote is a forge we can build a URL for. */
+.commit--link {
+  cursor: pointer;
+}
+
+.commit--link:hover {
+  background: var(--bg-raised);
+}
+
+.commit:disabled {
+  opacity: 1; /* not "unavailable", just not a link */
 }
 
 .commit__hash {
@@ -1539,6 +1911,31 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-dim);
+}
+
+.changes__title-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.changes__title-toggle:hover {
+  color: var(--text);
+}
+
+.changes__count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: normal;
 }
 
 .changes__list {
@@ -1586,6 +1983,8 @@ body {
   color: var(--accent);
 }
 
+/* A button, so clicking the name opens the diff — styled to stay the
+   plain VS-style row it looks like. */
 .changes__file {
   flex: 1;
   min-width: 0;
@@ -1593,11 +1992,21 @@ body {
   align-items: baseline;
   gap: 6px;
   overflow: hidden;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .changes__filename {
   flex: none;
   color: var(--text);
+}
+
+.changes__file:hover .changes__filename {
+  text-decoration: underline;
 }
 
 .changes__dir {
@@ -1877,15 +2286,41 @@ body {
   border-color: var(--accent);
 }
 
-.composer-card__input {
-  resize: none;
-  background: transparent;
-  color: var(--text);
-  border: none;
+/* The textarea and the highlight layer behind it must lay text out
+   identically, so every metric that affects wrapping is shared here and
+   neither rule may set one alone. */
+.composer-card__input,
+.composer-card__highlight {
   padding: 12px 14px 4px;
   font-family: inherit;
   font-size: inherit;
   line-height: 22px;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 4;
+}
+
+.composer-card__input-wrap {
+  position: relative;
+  display: flex;
+}
+
+.composer-card__input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  background: transparent;
+  border: none;
+  /* The text is drawn by the highlight layer underneath; only the caret
+     and the selection come from the textarea itself. */
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.composer-card__input::selection {
+  background: rgba(79, 140, 255, 0.35);
 }
 
 .composer-card__input:focus {
@@ -1894,6 +2329,29 @@ body {
 
 .composer-card__input::placeholder {
   color: var(--text-dim);
+}
+
+.composer-card__highlight {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+}
+
+.cmd-token {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The user's own bubble is already accent-coloured, so the same accent
+   would be invisible there. */
+.msg--user .cmd-token,
+.pinned-prompt .cmd-token {
+  color: inherit;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  padding: 0 3px;
 }
 
 .composer-card__toolbar {
@@ -1998,11 +2456,22 @@ body {
 /* Opens upward for the composer, which sits at the bottom of the window. */
 .picker__panel--top {
   bottom: calc(100% + 6px);
-  left: 0;
 }
 
 .picker__panel--bottom {
   top: calc(100% + 6px);
+}
+
+/* Horizontal anchoring is independent of the vertical placement: a
+   trigger near the right edge must grow leftward, or the panel (240px
+   minimum) runs off the window. */
+.picker__panel--start {
+  left: 0;
+  right: auto;
+}
+
+.picker__panel--end {
+  left: auto;
   right: 0;
 }
 
@@ -2055,23 +2524,6 @@ body {
   flex: none;
   margin-top: 2px;
   color: var(--accent);
-}
-
-.composer-card .model-picker {
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  text-align: right;
-  width: 110px;
-  padding: 5px 4px;
-}
-
-.composer-card .model-picker:hover:not(:disabled),
-.composer-card .model-picker:focus {
-  background: var(--border);
-  border-radius: 8px;
-  outline: none;
 }
 
 .send-button {

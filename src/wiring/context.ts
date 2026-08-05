@@ -25,12 +25,13 @@ import { Store } from "../core/state/store";
 import { ApplyCommandConfig } from "../core/usecases/applyCommandConfig";
 import { CancelTurn } from "../core/usecases/cancelTurn";
 import { CloseProject } from "../core/usecases/closeProject";
+import { EditDraft } from "../core/usecases/editDraft";
 import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
 import { ListCommands } from "../core/usecases/listCommands";
 import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { OpenProject } from "../core/usecases/openProject";
-import { RespondPermission } from "../core/usecases/respondPermission";
+import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
 import { SendPrompt } from "../core/usecases/sendPrompt";
 import {
@@ -66,8 +67,10 @@ export interface AppContext {
   readonly sessionHistory: SessionHistory;
   readonly updateSettings: UpdateSettings;
   readonly sendPrompt: SendPrompt;
+  readonly editDraft: EditDraft;
   readonly cancelTurn: CancelTurn;
   readonly respondPermission: RespondPermission;
+  readonly respondQuestion: RespondQuestion;
   readonly listCommands: ListCommands;
   readonly providerProbe: ProviderProbe;
   readonly filePicker: FilePicker;
@@ -127,8 +130,10 @@ export function createAppContext(): AppContext {
       new ApplyCommandConfig(store, selectMode, selectPermission, selectEffort),
       newId,
     ),
+    editDraft: new EditDraft(store),
     cancelTurn: new CancelTurn(store, agentGateway),
     respondPermission: new RespondPermission(store, agentGateway),
+    respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),
     updateSettings: new UpdateSettings(store, workspaceStore),

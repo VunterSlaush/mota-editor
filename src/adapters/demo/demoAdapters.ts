@@ -34,6 +34,8 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class DemoAgentGateway implements AgentGateway {
   private cancelled = new Set<string>();
   private pendingPermissions = new Map<string, (optionId: string) => void>();
+  private pendingQuestions = new Map<string, (answers: Record<string, string>) => void>();
+  private questionSeq = 1;
 
   async startTurn(
     request: AgentTurnRequest,
@@ -55,8 +57,23 @@ export class DemoAgentGateway implements AgentGateway {
     await delay(150);
     emit({ kind: "usage", used: 32_000, size: 200_000 });
 
+    // "fail" simulates a transient provider outage, so the error state
+    // (and the red tab dot) can be seen in the browser preview without
+    // having to break a real agent.
+    if (/\bfail\b/i.test(request.prompt)) {
+      await delay(200);
+      emit({
+        kind: "error",
+        message:
+          "API Error: 522 connection timed out — the provider could not be reached. This is usually temporary.",
+      });
+      emit({ kind: "completed", isError: true });
+      return;
+    }
+
     const wantsPlan = /\bplan\b/i.test(request.prompt) || request.mode === "plan";
     const wantsPermission = /\b(run|delete|install|deploy)\b/i.test(request.prompt);
+    const wantsQuestion = /\b(ask|choose|which|prefer)\b/i.test(request.prompt);
 
     for (const text of ["Let me look at ", "the project first."]) {
       await delay(120);
@@ -79,6 +96,39 @@ export class DemoAgentGateway implements AgentGateway {
           { content: "Run the tests", priority: "medium", status: "pending" },
         ],
       });
+    }
+
+    if (wantsQuestion) {
+      await delay(200);
+      const requestId = `demo-q-${this.questionSeq++}`;
+      emit({
+        kind: "question",
+        requestId,
+        message: "Which database should I use?",
+        questions: [
+          {
+            field: "question_0",
+            header: "Database",
+            text: "Which database should I use?",
+            multiSelect: false,
+            customField: "question_0_custom",
+            options: [
+              {
+                value: "Postgres",
+                label: "Postgres",
+                description: "Relational, best for joins",
+              },
+              { value: "SQLite", label: "SQLite", description: "Zero-config, embedded" },
+              { value: "Mongo", label: "Mongo" },
+            ],
+          },
+        ],
+      });
+      const answers = await new Promise<Record<string, string>>((resolve) => {
+        this.pendingQuestions.set(requestId, resolve);
+      });
+      const chosen = Object.values(answers)[0] ?? "nothing (skipped)";
+      emit({ kind: "tool", name: "note", detail: `You chose ${chosen}` });
     }
 
     if (wantsPermission && request.permission !== "bypass") {
@@ -124,6 +174,15 @@ export class DemoAgentGateway implements AgentGateway {
   async respondPermission(_tabId: string, requestId: string, optionId: string) {
     this.pendingPermissions.get(requestId)?.(optionId);
     this.pendingPermissions.delete(requestId);
+  }
+
+  async respondQuestion(
+    _tabId: string,
+    requestId: string,
+    answers: Readonly<Record<string, string>>,
+  ) {
+    this.pendingQuestions.get(requestId)?.({ ...answers });
+    this.pendingQuestions.delete(requestId);
   }
 
   async endSession(): Promise<void> {}
@@ -206,6 +265,22 @@ export class DemoGit implements GitPort {
       { name: "feature/polish", current: false },
     ];
   }
+  async remoteUrl(): Promise<string> {
+    return "git@github.com:mota/mota-editor.git";
+  }
+  async diff(_p: string, path: string): Promise<string> {
+    return [
+      `diff --git a/${path} b/${path}`,
+      "index 1111111..2222222 100644",
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      "@@ -1,4 +1,4 @@",
+      " const before = true;",
+      "-const changed = 1;",
+      "+const changed = 2;",
+      " const after = true;",
+    ].join("\n");
+  }
   async stage(_p: string, path: string) {
     this.unstaged.delete(path);
     this.staged.add(path);
@@ -226,6 +301,9 @@ export class DemoGit implements GitPort {
   }
   async pull(): Promise<string> {
     return "Already up to date.";
+  }
+  async fetch(): Promise<string> {
+    return "Fetched origin.";
   }
 }
 

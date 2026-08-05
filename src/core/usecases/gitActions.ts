@@ -39,6 +39,18 @@ export class GitActions {
     });
   }
 
+  /** The unified diff for one changed file, for the diff viewer. */
+  async diff(
+    tabId: string,
+    path: string,
+    staged: boolean,
+    untracked: boolean,
+  ): Promise<GitActionResult> {
+    return this.run(tabId, (projectPath) =>
+      this.git.diff(projectPath, path, staged, untracked),
+    );
+  }
+
   async checkout(tabId: string, branch: string): Promise<GitActionResult> {
     return this.run(tabId, (projectPath) => this.git.checkout(projectPath, branch));
   }
@@ -49,6 +61,11 @@ export class GitActions {
 
   async pull(tabId: string): Promise<GitActionResult> {
     return this.run(tabId, (projectPath) => this.git.pull(projectPath));
+  }
+
+  /** Safe to run mid-turn: it moves no files, only remote-tracking refs. */
+  async fetch(tabId: string): Promise<GitActionResult> {
+    return this.run(tabId, (projectPath) => this.git.fetch(projectPath));
   }
 
   private async run(

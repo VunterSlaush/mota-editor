@@ -12,10 +12,25 @@ class FakeGit implements GitPort {
   commits: GitCommit[] = [];
   failPushWith: string | null = null;
   notARepo = false;
+  remote = "git@github.com:mota/repo.git";
+  failRemoteWith: string | null = null;
 
   async changes(): Promise<GitChange[]> {
     if (this.notARepo) throw new Error("not a repo");
     return this.files;
+  }
+  async remoteUrl(): Promise<string> {
+    if (this.failRemoteWith) throw new Error(this.failRemoteWith);
+    return this.remote;
+  }
+  async diff(
+    _p: string,
+    path: string,
+    staged: boolean,
+    untracked: boolean,
+  ): Promise<string> {
+    this.calls.push(`diff:${path}:${staged}:${untracked}`);
+    return `@@ -1 +1 @@\n-old\n+new`;
   }
   async log(): Promise<GitCommit[]> {
     return this.commits;
@@ -48,6 +63,10 @@ class FakeGit implements GitPort {
   }
   async pull(): Promise<string> {
     return "Already up to date.";
+  }
+  async fetch(): Promise<string> {
+    this.calls.push("fetch");
+    return "Fetched origin.";
   }
 }
 
@@ -145,5 +164,34 @@ describe("git use cases", () => {
     const result = await loader.execute("t1");
     expect(result?.branches.map((b) => b.name)).toEqual(["main", "dev"]);
     expect(result?.branches[0].current).toBe(true);
+  });
+
+  it("loader includes the remote, and survives a repo without one", async () => {
+    const { git, loader } = setup();
+    expect((await loader.execute("t1"))?.remote).toBe("git@github.com:mota/repo.git");
+
+    git.failRemoteWith = "no such key";
+    const result = await loader.execute("t1");
+    expect(result).not.toBeNull(); // a missing remote is not a broken panel
+    expect(result?.remote).toBe("");
+  });
+
+  it("fetch reports its summary without touching the tree", async () => {
+    const { git, actions } = setup();
+    const result = await actions.fetch("t1");
+    expect(result.ok).toBe(true);
+    expect(result.message).toBe("Fetched origin.");
+    expect(git.calls).toEqual(["fetch"]);
+  });
+
+  it("diff asks the port for the right side of the change", async () => {
+    const { git, actions } = setup();
+
+    const staged = await actions.diff("t1", "a.rs", true, false);
+    await actions.diff("t1", "new.rs", false, true);
+
+    expect(staged.ok).toBe(true);
+    expect(staged.message).toContain("+new");
+    expect(git.calls).toEqual(["diff:a.rs:true:false", "diff:new.rs:false:true"]);
   });
 });

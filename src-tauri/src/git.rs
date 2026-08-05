@@ -27,6 +27,28 @@ async fn run_git(project_path: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Like `run_git`, but a diff that found differences (exit code 1) is a
+/// success, not a failure. Only `git diff --no-index` reports that way.
+async fn run_git_diff(project_path: &str, args: &[&str]) -> Result<String, String> {
+    let mut full_args = vec!["-C".to_owned(), project_path.to_owned()];
+    full_args.extend(args.iter().map(|a| (*a).to_owned()));
+
+    let output = runner::os_command("git", &full_args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .await
+        .map_err(|e| format!("Could not run git: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    match output.status.code() {
+        Some(0) | Some(1) => Ok(stdout),
+        _ => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(tail(stderr.trim(), 4))
+        }
+    }
+}
+
 /// The last lines of git's error output — the part users act on.
 fn tail(text: &str, lines: usize) -> String {
     if text.is_empty() {
@@ -52,6 +74,58 @@ pub async fn git_log(project_path: String, limit: u32) -> Result<Vec<Commit>, St
     .await
     .unwrap_or_default(); // empty repo: no commits is not an error
     Ok(vcs::parse_log(&out))
+}
+
+/// The push/pull remote's URL, for linking a commit to its forge. An
+/// empty string when the repo has no `origin` — a normal state, not an
+/// error, so the UI can simply not offer the link.
+#[tauri::command]
+pub async fn git_remote_url(project_path: String) -> Result<String, String> {
+    let out = run_git(&project_path, &["config", "--get", "remote.origin.url"])
+        .await
+        .unwrap_or_default(); // exits 1 when the key is unset
+    Ok(out.trim().to_owned())
+}
+
+/// A unified diff for one file. Untracked files have nothing to diff
+/// against, so they are compared with the null device instead, which
+/// renders the whole file as added.
+#[tauri::command]
+pub async fn git_diff(
+    project_path: String,
+    path: String,
+    staged: bool,
+    untracked: bool,
+) -> Result<String, String> {
+    let out = if untracked {
+        run_git_diff(
+            &project_path,
+            &["diff", "--no-index", "--no-color", "--", NULL_DEVICE, &path],
+        )
+        .await?
+    } else if staged {
+        run_git(&project_path, &["diff", "--cached", "--no-color", "--", &path]).await?
+    } else {
+        run_git(&project_path, &["diff", "--no-color", "--", &path]).await?
+    };
+    Ok(head(&out, MAX_DIFF_LINES))
+}
+
+/// A generated file can be millions of lines; the modal renders every
+/// one of them as a DOM row. Past this the diff is truncated with a note.
+const MAX_DIFF_LINES: usize = 20_000;
+
+/// Not a real path even on unix — git's `--no-index` special-cases this
+/// exact string in `get_mode()`, on every platform including Windows.
+const NULL_DEVICE: &str = "/dev/null";
+
+/// The first `lines` lines, with a marker when anything was dropped.
+fn head(text: &str, lines: usize) -> String {
+    let mut kept: Vec<&str> = text.lines().take(lines).collect();
+    if text.lines().nth(lines).is_some() {
+        kept.push("… diff truncated — too large to display in full.");
+    }
+    kept.join("\n")
 }
 
 #[tauri::command]
@@ -105,6 +179,17 @@ pub async fn git_push(project_path: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn git_pull(project_path: String) -> Result<String, String> {
     run_git(&project_path, &["pull", "--ff-only"]).await.map(summary)
+}
+
+/// Update the remote-tracking branches without touching the working
+/// tree — the safe "what's new upstream?" that pull isn't. `--prune`
+/// drops refs for branches deleted on the remote, so the branch picker
+/// doesn't accumulate ghosts.
+#[tauri::command]
+pub async fn git_fetch(project_path: String) -> Result<String, String> {
+    // git writes fetch progress to stderr and leaves stdout empty, so a
+    // successful no-op summarises as "Done." rather than staying blank.
+    run_git(&project_path, &["fetch", "--prune"]).await.map(summary)
 }
 
 fn summary(output: String) -> String {

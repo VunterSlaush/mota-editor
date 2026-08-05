@@ -7,18 +7,27 @@ import {
 } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { permissionOptionHint } from "../../core/entities/approval";
+import { formatElapsed } from "../../core/entities/duration";
 import type { ChatMessage } from "../../core/entities/message";
 import { fileName } from "../fileName";
+import { CommandText } from "./CommandText";
 import { Markdown } from "./MarkdownLite";
+import { QuestionCard } from "./QuestionCard";
 
 interface Props {
   messages: readonly ChatMessage[];
   /** True while a turn runs — drives the streaming caret. */
   busy: boolean;
+  /** When the running turn started, for the elapsed counter. */
+  turnStartedAt?: number;
+  /** Lowercased slash-command names, for highlighting in user messages.
+   *  Must be a stable identity — it reaches memoized rows. */
+  commands: ReadonlySet<string>;
   /** When false, only the conversation itself shows: user + assistant
    *  messages, approvals, and errors — no tools, thoughts, or status. */
   verbose: boolean;
   onRespondPermission: (requestId: string, optionId: string) => void;
+  onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
   onShowPlan: () => void;
 }
 
@@ -35,8 +44,11 @@ const FOLLOW_THRESHOLD = 48;
 export function MessageList({
   messages,
   busy,
+  turnStartedAt,
+  commands,
   verbose,
   onRespondPermission,
+  onAnswerQuestion,
   onShowPlan,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -91,11 +103,17 @@ export function MessageList({
   return (
     <div className="message-list-wrap">
       {askedMessage && promptScrolledAway && (
-        <PinnedPrompt message={askedMessage} onJump={scrollToPrompt} />
+        <PinnedPrompt
+          message={askedMessage}
+          commands={commands}
+          onJump={scrollToPrompt}
+        />
       )}
       <div className="message-list" ref={scrollerRef} onScroll={onScroll}>
         {visible.map((m) =>
-          m.role === "approval" ? (
+          m.role === "question" ? (
+            <QuestionCard key={m.id} message={m} onAnswer={onAnswerQuestion} />
+          ) : m.role === "approval" ? (
             <ApprovalCard
               key={m.id}
               message={m}
@@ -106,12 +124,13 @@ export function MessageList({
             <MessageBubble
               key={m.id}
               message={m}
+              commands={commands}
               streaming={m.id === streamingId}
               innerRef={m.id === askedMessage?.id ? promptRef : undefined}
             />
           ),
         )}
-        {busy && last?.role !== "assistant" && <WorkingIndicator />}
+        {busy && <WorkingIndicator startedAt={turnStartedAt} />}
       </div>
       {!following && (
         <button
@@ -140,7 +159,15 @@ function lastUserMessage(messages: readonly ChatMessage[]): ChatMessage | undefi
  * scrolled away, so a long answer never leaves them wondering what they
  * asked. Click it to jump back to the message itself.
  */
-function PinnedPrompt({ message, onJump }: { message: ChatMessage; onJump: () => void }) {
+function PinnedPrompt({
+  message,
+  commands,
+  onJump,
+}: {
+  message: ChatMessage;
+  commands: ReadonlySet<string>;
+  onJump: () => void;
+}) {
   return (
     <button
       type="button"
@@ -150,18 +177,38 @@ function PinnedPrompt({ message, onJump }: { message: ChatMessage; onJump: () =>
       onClick={onJump}
     >
       <span className="pinned-prompt__label">You asked</span>
-      <span className="pinned-prompt__text">{message.text}</span>
+      <span className="pinned-prompt__text">
+        <CommandText text={message.text} commands={commands} />
+      </span>
       <ArrowUp size={13} className="pinned-prompt__jump" />
     </button>
   );
 }
 
-/** Claude-Code-style "thinking" shimmer before the reply starts. */
-function WorkingIndicator() {
+/**
+ * Claude-Code-style shimmer and elapsed clock, shown for the whole turn
+ * — including while the reply streams — and gone the moment the agent
+ * stops. A long silence should read as "still working", not "stuck".
+ * The start time comes from the tab, not from this component's mount, so
+ * switching away and back doesn't restart the count.
+ */
+function WorkingIndicator({ startedAt }: { startedAt?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (startedAt === undefined) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+
   return (
     <div className="working" aria-live="polite">
       <span className="working__dot" />
       Working…
+      {startedAt !== undefined && (
+        <span className="working__elapsed">{formatElapsed(now - startedAt)}</span>
+      )}
     </div>
   );
 }
@@ -225,10 +272,12 @@ const ApprovalCard = memo(function ApprovalCard({
  *  of re-parsing the whole transcript's markdown. */
 const MessageBubble = memo(function MessageBubble({
   message,
+  commands,
   streaming,
   innerRef,
 }: {
   message: ChatMessage;
+  commands: ReadonlySet<string>;
   streaming: boolean;
   /** Set on the message the PinnedPrompt tracks, so it can be measured. */
   innerRef?: React.Ref<HTMLDivElement>;
@@ -251,7 +300,9 @@ const MessageBubble = memo(function MessageBubble({
   }
   return (
     <div className={`msg msg--${message.role}`} ref={innerRef}>
-      <div className="msg__text">{message.text}</div>
+      <div className="msg__text">
+        <CommandText text={message.text} commands={commands} />
+      </div>
       {message.attachments && message.attachments.length > 0 && (
         <div className="msg__attachments">
           {message.attachments.map((path) => (

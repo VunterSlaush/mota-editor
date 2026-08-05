@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { Cpu } from "@phosphor-icons/react";
 import { MODEL_SUGGESTIONS, type ProviderId } from "../../core/entities/provider";
+import { OptionPicker, type PickerOption } from "./OptionPicker";
 
 interface Props {
   provider: ProviderId;
@@ -9,45 +10,31 @@ interface Props {
 }
 
 /**
- * UI — model override for the tab's agent: a combo box (free text +
- * per-provider suggestions). Empty means the provider's default model.
- * Committed on blur or Enter, not per keystroke.
+ * UI — model override for the tab's agent. A picker, not a text box: the
+ * choice is a short closed list, and a search field for five options
+ * invites typing where only picking makes sense. Empty means the
+ * provider's default model. A model set elsewhere (settings, a restored
+ * workspace) that isn't a suggestion is kept as its own option, so
+ * opening the list can never silently drop it.
  */
 export function ModelPicker({ provider, value, disabled, onChange }: Props) {
-  const [draft, setDraft] = useState(value);
+  const suggestions = MODEL_SUGGESTIONS[provider];
+  const custom = value !== "" && !suggestions.includes(value) ? [value] : [];
+  const options: readonly PickerOption<string>[] = [
+    { id: "", label: "Default model", icon: <Cpu /> },
+    ...custom.map((model) => ({ id: model, label: model, icon: <Cpu /> })),
+    ...suggestions.map((model) => ({ id: model, label: model, icon: <Cpu /> })),
+  ];
 
-  useEffect(() => setDraft(value), [value, provider]);
-
-  const commit = () => {
-    if (draft.trim() !== value) onChange(draft);
-  };
-
-  const listId = `models-${provider}`;
   return (
-    <>
-      <input
-        className="model-picker"
-        list={listId}
-        value={draft}
-        placeholder="model: default"
-        disabled={disabled}
-        aria-label="Model"
-        title="Model for this tab's agent — pick a suggestion or type any model id. Empty = provider default. Applies on the next message."
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit();
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
-      />
-      <datalist id={listId}>
-        {MODEL_SUGGESTIONS[provider].map((m) => (
-          <option key={m} value={m} />
-        ))}
-      </datalist>
-    </>
+    <OptionPicker
+      ariaLabel="Model"
+      options={options}
+      value={value}
+      disabled={disabled}
+      align="end"
+      className="picker__trigger--dim"
+      onChange={onChange}
+    />
   );
 }

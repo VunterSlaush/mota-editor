@@ -25,6 +25,12 @@ export interface TabState {
   readonly project: Project;
   readonly messages: readonly ChatMessage[];
   readonly busy: boolean;
+  /** When the running turn started, for the elapsed counter. */
+  readonly turnStartedAt?: number;
+  /** The half-written prompt. Lives here, not in the composer, because
+   *  switching tabs remounts the view and would otherwise bin it. */
+  readonly draft?: string;
+  readonly draftAttachments?: readonly string[];
   /** Prompts sent while busy — delivered in order as turns complete. */
   readonly queued: readonly QueuedPrompt[];
   /** Commands the running agent advertised (source of truth when set). */
@@ -125,7 +131,21 @@ export type Action =
   | { type: "chat/cleared"; tabId: string }
   | { type: "chat/approvalResolved"; tabId: string; requestId: string; optionId: string }
   | { type: "chat/approvalsCancelled"; tabId: string }
-  | { type: "chat/busyChanged"; tabId: string; busy: boolean }
+  | {
+      type: "chat/questionAnswered";
+      tabId: string;
+      requestId: string;
+      /** Empty means the user skipped rather than answered. */
+      answers: Readonly<Record<string, string>>;
+    }
+  /** `at` is the caller's clock — the reducer stays pure. */
+  | { type: "chat/busyChanged"; tabId: string; busy: boolean; at?: number }
+  | {
+      type: "chat/draftChanged";
+      tabId: string;
+      draft: string;
+      attachments: readonly string[];
+    }
   | {
       type: "chat/promptQueued";
       tabId: string;
@@ -305,18 +325,52 @@ export function reduce(state: AppState, action: Action): AppState {
         ),
       }));
 
-    case "chat/approvalsCancelled":
+    case "chat/questionAnswered":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         messages: tab.messages.map((m) =>
-          m.approval && !m.approval.resolvedOptionId && !m.approval.cancelled
-            ? { ...m, approval: { ...m.approval, cancelled: true } }
+          m.question?.requestId === action.requestId
+            ? {
+                ...m,
+                question: {
+                  ...m.question,
+                  answers: action.answers,
+                  skipped: Object.keys(action.answers).length === 0,
+                },
+              }
             : m,
         ),
       }));
 
+    case "chat/approvalsCancelled":
+      // Questions are released by the same event: the turn ending strands
+      // both, and both must stop looking answerable.
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        messages: tab.messages.map((m) => {
+          if (m.approval && !m.approval.resolvedOptionId && !m.approval.cancelled) {
+            return { ...m, approval: { ...m.approval, cancelled: true } };
+          }
+          if (m.question && !m.question.answers && !m.question.cancelled) {
+            return { ...m, question: { ...m.question, cancelled: true } };
+          }
+          return m;
+        }),
+      }));
+
     case "chat/busyChanged":
-      return mapTab(state, action.tabId, (tab) => ({ ...tab, busy: action.busy }));
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        busy: action.busy,
+        turnStartedAt: action.busy ? (action.at ?? tab.turnStartedAt) : undefined,
+      }));
+
+    case "chat/draftChanged":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        draft: action.draft,
+        draftAttachments: action.attachments,
+      }));
 
     case "chat/promptQueued":
       return mapTab(state, action.tabId, (tab) => ({

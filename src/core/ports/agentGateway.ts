@@ -1,5 +1,6 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { McpServerSpec } from "../entities/mcpServer";
+import type { Question } from "../entities/message";
 import type { ProviderId } from "../entities/provider";
 
 /**
@@ -41,6 +42,13 @@ export type AgentTurnEvent =
       /** Where the agent saved the plan on disk, when it did. */
       planFilePath?: string;
     }
+  | {
+      kind: "question";
+      requestId: string;
+      /** Shown above the questions; for a single question it IS the question. */
+      message: string;
+      questions: readonly Question[];
+    }
   | { kind: "error"; message: string }
   | {
       kind: "completed";
@@ -80,6 +88,16 @@ export interface AgentGateway {
 
   /** Answer a pending permission request with the chosen option. */
   respondPermission(tabId: string, requestId: string, optionId: string): Promise<void>;
+
+  /**
+   * Answer a pending agent question. Answers are keyed by form field; an
+   * empty object means the user skipped.
+   */
+  respondQuestion(
+    tabId: string,
+    requestId: string,
+    answers: Readonly<Record<string, string>>,
+  ): Promise<void>;
 
   /** Tear down the tab's agent session entirely (tab closed). */
   endSession(tabId: string): Promise<void>;

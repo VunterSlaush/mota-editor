@@ -20,6 +20,9 @@ interface Props<T extends string> {
   placeholder?: string;
   /** Which way the panel opens. The composer sits at the bottom. */
   placement?: "top" | "bottom";
+  /** Which edge the panel lines up with. Triggers near the window's
+   *  right edge need "end", or the panel overflows the window. */
+  align?: "start" | "end";
   /** Extra class on the trigger, for per-site sizing. */
   className?: string;
 }
@@ -38,6 +41,7 @@ export function OptionPicker<T extends string>({
   onChange,
   placeholder = "",
   placement = "top",
+  align = "start",
   className = "",
 }: Props<T>) {
   const [open, setOpen] = useState(false);
@@ -118,7 +122,7 @@ export function OptionPicker<T extends string>({
       </button>
       {open && (
         <div
-          className={`picker__panel picker__panel--${placement}`}
+          className={`picker__panel picker__panel--${placement} picker__panel--${align}`}
           role="listbox"
           aria-label={ariaLabel}
           tabIndex={-1}

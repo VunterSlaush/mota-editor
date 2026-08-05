@@ -1,3 +1,4 @@
+import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
 
 interface Props {
@@ -15,18 +16,21 @@ export function TabBar({ tabs, activeTabId, onSelect, onClose, onOpenProject }: 
       {tabs.map((tab) => {
         const id = tab.project.id;
         const isActive = id === activeTabId;
+        const status = tabStatus(tab);
+        const label = TAB_STATUS_LABELS[status];
         return (
           <div
             key={id}
-            className={`tab ${isActive ? "tab--active" : ""} ${
-              tab.attention ? "tab--attention" : ""
-            }`}
-            title={tab.project.path}
+            className={`tab ${isActive ? "tab--active" : ""} tab--${status}`}
+            title={label ? `${tab.project.path} — ${label}` : tab.project.path}
             onClick={() => onSelect(id)}
           >
-            {tab.busy && <span className="tab__spinner" aria-label="working" />}
-            {!tab.busy && tab.attention && (
-              <span className="tab__attention-dot" aria-label="finished — needs review" />
+            {status !== "idle" && (
+              <span
+                className={`tab__dot tab__dot--${status}`}
+                role="img"
+                aria-label={label}
+              />
             )}
             <span className="tab__name">{tab.project.name}</span>
             <button
