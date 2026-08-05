@@ -9,6 +9,7 @@ mod git;
 mod history_file;
 mod provider_probe;
 mod runner;
+mod terminal;
 mod workspace_file;
 
 use acp_session::AcpSessions;
@@ -53,6 +54,7 @@ pub fn run() {
             commands::respond_permission,
             commands::respond_question,
             commands::end_session,
+            commands::get_terminal_output,
             commands::list_custom_commands,
             commands::open_external,
             commands::open_path,

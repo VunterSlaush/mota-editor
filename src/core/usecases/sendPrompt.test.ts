@@ -35,6 +35,10 @@ class FakeAgentGateway implements AgentGateway {
 
   subscribeSessionEvents(): void {}
 
+  async readTerminalOutput(): Promise<null> {
+    return null;
+  }
+
   async cancelTurn(): Promise<void> {}
 
   async respondQuestion(): Promise<void> {}

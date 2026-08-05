@@ -139,6 +139,16 @@ export interface AgentGateway {
   endSession(tabId: string): Promise<void>;
 
   /**
+   * Captured output of a client-owned terminal (`terminal/create`d by
+   * the agent). Null when the terminal (or session) no longer exists.
+   * Polled by the UI while the command runs.
+   */
+  readTerminalOutput(
+    tabId: string,
+    terminalId: string,
+  ): Promise<{ output: string; truncated: boolean; exited: boolean } | null>;
+
+  /**
    * Pre-start the tab's agent session in the background so the first
    * message doesn't pay the handshake cost. Best-effort: failures are
    * silent (the real turn will surface them properly).

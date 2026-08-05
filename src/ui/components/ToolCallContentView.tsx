@@ -1,4 +1,5 @@
 import { FileText, Terminal as TerminalIcon } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import { countChanges } from "../../core/entities/diff";
 import type { ToolCallState } from "../../core/entities/message";
 import { diffTexts } from "../../core/entities/textDiff";
@@ -10,10 +11,77 @@ export interface AgentDiff {
   readonly newText: string;
 }
 
+/** Reads a client-owned terminal's captured output (null = gone). */
+export type ReadTerminal = (
+  terminalId: string,
+) => Promise<{ output: string; truncated: boolean; exited: boolean } | null>;
+
 interface Props {
   toolCall: ToolCallState;
   onOpenFile: (path: string) => void;
   onShowDiff: (diff: AgentDiff) => void;
+  onReadTerminal: ReadTerminal;
+}
+
+/** Live output keeps arriving while the command runs; poll at this pace. */
+const TERMINAL_POLL_MS = 1000;
+
+/**
+ * Output of one agent-run terminal, polled while the command is alive.
+ * The backend keeps the buffer even after the command exits, so a
+ * settled card still shows what happened.
+ */
+function TerminalView({
+  terminalId,
+  onReadTerminal,
+}: {
+  terminalId: string;
+  onReadTerminal: ReadTerminal;
+}) {
+  const [state, setState] = useState<{
+    output: string;
+    truncated: boolean;
+    exited: boolean;
+  } | null>(null);
+  const [gone, setGone] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const read = await onReadTerminal(terminalId).catch(() => null);
+      if (cancelled) return;
+      if (!read) {
+        setGone(true);
+        return;
+      }
+      setState(read);
+      if (!read.exited) timer = setTimeout(poll, TERMINAL_POLL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [terminalId, onReadTerminal]);
+
+  if (gone && !state) {
+    return (
+      <span className="tool-content__terminal">
+        <TerminalIcon size={13} /> terminal output no longer available
+      </span>
+    );
+  }
+  return (
+    <div className="tool-content__terminal-view">
+      <span className="tool-content__terminal">
+        <TerminalIcon size={13} />
+        {state?.exited ? "command finished" : "running…"}
+        {state?.truncated ? " · output truncated to the tail" : ""}
+      </span>
+      <pre className="tool-content__text">{state?.output || "(no output yet)"}</pre>
+    </div>
+  );
 }
 
 /**
@@ -22,7 +90,12 @@ interface Props {
  * the files it touched. Shared between expanded tool rows and approval
  * cards, so "what is this tool doing" always looks the same.
  */
-export function ToolCallContentView({ toolCall, onOpenFile, onShowDiff }: Props) {
+export function ToolCallContentView({
+  toolCall,
+  onOpenFile,
+  onShowDiff,
+  onReadTerminal,
+}: Props) {
   return (
     <div className="tool-content">
       {toolCall.content.map((item, index) => {
@@ -61,10 +134,11 @@ export function ToolCallContentView({ toolCall, onOpenFile, onShowDiff }: Props)
           );
         }
         return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: content blocks are a positional list
-          <span key={index} className="tool-content__terminal">
-            <TerminalIcon size={13} /> terminal output (not yet mirrored here)
-          </span>
+          <TerminalView
+            key={item.terminalId}
+            terminalId={item.terminalId}
+            onReadTerminal={onReadTerminal}
+          />
         );
       })}
       {toolCall.locations.length > 0 && (

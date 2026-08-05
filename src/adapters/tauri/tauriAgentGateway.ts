@@ -182,6 +182,13 @@ export class TauriAgentGateway implements AgentGateway {
     await invoke("end_session", { tabId });
   }
 
+  async readTerminalOutput(
+    tabId: string,
+    terminalId: string,
+  ): Promise<{ output: string; truncated: boolean; exited: boolean } | null> {
+    return invoke("get_terminal_output", { tabId, terminalId });
+  }
+
   async warmSession(
     tabId: string,
     provider: string,

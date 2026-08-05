@@ -78,6 +78,10 @@ interface Props {
   ) => Promise<GitActionResult>;
   onOpenFile: (path: string) => Promise<string | null>;
   onPickFiles: () => Promise<string[]>;
+  /** Read an agent-owned terminal's live output. Stable identity. */
+  onReadTerminal: (
+    terminalId: string,
+  ) => Promise<{ output: string; truncated: boolean; exited: boolean } | null>;
 }
 
 /** UI — the chat for one project: header, transcript, plan, composer. */
@@ -115,6 +119,7 @@ export function ChatPanel({
   onGitDiff,
   onOpenFile,
   onPickFiles,
+  onReadTerminal,
 }: Props) {
   const providerName = providerById(tab.project.provider).displayName;
   const [fallbackCommands, setFallbackCommands] = useState<readonly CommandInfo[]>([]);
@@ -326,6 +331,7 @@ export function ChatPanel({
             onRetry={onRetry}
             onOpenFile={openTouchedFile}
             onShowAgentDiff={showAgentDiff}
+            onReadTerminal={onReadTerminal}
             commands={commandNameSet}
             verbose={tab.project.verbose}
             onRespondPermission={onRespondPermission}

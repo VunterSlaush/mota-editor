@@ -367,6 +367,26 @@ pub async fn end_session(
     Ok(())
 }
 
+/// A terminal's captured output, for the tool-call card that mirrors it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutput {
+    pub output: String,
+    pub truncated: bool,
+    pub exited: bool,
+}
+
+#[tauri::command]
+pub async fn get_terminal_output(
+    acp: State<'_, AcpSessions>,
+    tab_id: String,
+    terminal_id: String,
+) -> Result<Option<TerminalOutput>, String> {
+    Ok(acp_session::read_terminal_output(&acp, &tab_id, &terminal_id).map(
+        |(output, truncated, exited)| TerminalOutput { output, truncated, exited },
+    ))
+}
+
 #[tauri::command]
 pub async fn list_custom_commands(
     app: AppHandle,

@@ -143,7 +143,9 @@ pub fn initialize_request(id: i64) -> Value {
                 // Real client-side fs: reads/writes are served by the
                 // shell, confined to the project folder.
                 "fs": { "readTextFile": true, "writeTextFile": true },
-                "terminal": false,
+                // Client-owned terminals: the shell runs the command and
+                // the UI can mirror its live output.
+                "terminal": true,
                 // Declaring form elicitation is what lets the agent ASK the
                 // user things. Claude's adapter puts `AskUserQuestion` in
                 // `disallowedTools` unless this is present, so without it
@@ -404,13 +406,65 @@ pub fn fs_write_response(id: i64) -> Value {
 }
 
 /// A request this client understood but could not serve (I/O failure,
-/// path outside the project, non-UTF-8 file).
+/// path outside the project, non-UTF-8 file, unknown terminal id).
 pub fn internal_error_response(id: i64, message: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "error": { "code": -32603, "message": message }
     })
+}
+
+/// Successful `terminal/create` answer.
+pub fn terminal_create_response(id: i64, terminal_id: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": { "terminalId": terminal_id } })
+}
+
+/// `terminal/output` answer: everything captured so far, whether it was
+/// truncated to the byte limit, and the exit status once the command is
+/// done.
+pub fn terminal_output_response(
+    id: i64,
+    output: &str,
+    truncated: bool,
+    exit: Option<(Option<i64>, Option<&str>)>,
+) -> Value {
+    let mut result = json!({ "output": output, "truncated": truncated });
+    if let Some((code, signal)) = exit {
+        result["exitStatus"] = json!({ "exitCode": code, "signal": signal });
+    }
+    json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+/// `terminal/wait_for_exit` answer.
+pub fn terminal_exit_response(id: i64, code: Option<i64>, signal: Option<&str>) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": { "exitStatus": { "exitCode": code, "signal": signal } }
+    })
+}
+
+/// `terminal/kill` / `terminal/release` answer (empty result).
+pub fn empty_result_response(id: i64) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": {} })
+}
+
+/// Cap a terminal's retained output at `limit` bytes by dropping from
+/// the FRONT (the tail is what the agent and user care about), never
+/// splitting a UTF-8 sequence. Returns true when anything was dropped.
+pub fn drop_to_byte_limit(buffer: &mut Vec<u8>, limit: usize) -> bool {
+    if buffer.len() <= limit {
+        return false;
+    }
+    let mut start = buffer.len() - limit;
+    // A continuation byte (0b10xxxxxx) means the cut landed inside a
+    // character; move forward to the next boundary.
+    while start < buffer.len() && (buffer[start] & 0b1100_0000) == 0b1000_0000 {
+        start += 1;
+    }
+    buffer.drain(..start);
+    true
 }
 
 /// Slice a file's text per `fs/read_text_file`: `line` is 1-based and
@@ -515,11 +569,81 @@ pub enum Incoming {
     },
     /// The agent wants to write a file through the client (`fs/write_text_file`).
     FsWriteRequest { id: i64, path: String, content: String },
-    /// Any other request from the agent (terminal/...) — must be
-    /// answered with an error since we advertise no such capabilities.
+    /// The agent wants a terminal (`terminal/*`).
+    Terminal(TerminalRequest),
+    /// Any other request from the agent — must be answered with an error
+    /// since we advertise no such capability.
     UnsupportedRequest { id: i64, method: String },
     /// Notification or noise we deliberately ignore.
     Ignored,
+}
+
+/// One `terminal/*` request from the agent, already shaped.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TerminalRequest {
+    Create {
+        id: i64,
+        command: String,
+        args: Vec<String>,
+        /// Environment as name/value pairs, ACP's wire shape.
+        env: Vec<(String, String)>,
+        cwd: Option<String>,
+        output_byte_limit: Option<u64>,
+    },
+    Output { id: i64, terminal_id: String },
+    WaitForExit { id: i64, terminal_id: String },
+    Kill { id: i64, terminal_id: String },
+    Release { id: i64, terminal_id: String },
+}
+
+/// Parse one `terminal/*` method, or None when the shape is wrong (the
+/// caller answers UnsupportedRequest so the agent is never left hanging).
+fn classify_terminal(method: &str, id: i64, params: &Value) -> Option<TerminalRequest> {
+    let terminal_id = || {
+        params
+            .get("terminalId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    match method {
+        "terminal/create" => Some(TerminalRequest::Create {
+            id,
+            command: params.get("command").and_then(Value::as_str)?.to_owned(),
+            args: params
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|args| {
+                    args.iter().filter_map(Value::as_str).map(str::to_owned).collect()
+                })
+                .unwrap_or_default(),
+            env: params
+                .get("env")
+                .and_then(Value::as_array)
+                .map(|pairs| {
+                    pairs
+                        .iter()
+                        .filter_map(|pair| {
+                            Some((
+                                pair.get("name")?.as_str()?.to_owned(),
+                                pair.get("value")?.as_str()?.to_owned(),
+                            ))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            cwd: params.get("cwd").and_then(Value::as_str).map(str::to_owned),
+            output_byte_limit: params.get("outputByteLimit").and_then(Value::as_u64),
+        }),
+        "terminal/output" => Some(TerminalRequest::Output { id, terminal_id: terminal_id()? }),
+        "terminal/wait_for_exit" => {
+            Some(TerminalRequest::WaitForExit { id, terminal_id: terminal_id()? })
+        }
+        "terminal/kill" => Some(TerminalRequest::Kill { id, terminal_id: terminal_id()? }),
+        "terminal/release" => {
+            Some(TerminalRequest::Release { id, terminal_id: terminal_id()? })
+        }
+        _ => None,
+    }
 }
 
 pub fn parse_incoming(line: &str) -> Option<Incoming> {
@@ -571,6 +695,16 @@ pub fn parse_incoming(line: &str) -> Option<Incoming> {
         (Some("session/update"), None) => Some(Incoming::Updates(
             value.get("params").map(translate_update).unwrap_or_default(),
         )),
+        (Some(method), Some(id)) if method.starts_with("terminal/") => {
+            let params = value.get("params").cloned().unwrap_or(Value::Null);
+            Some(match classify_terminal(method, id, &params) {
+                Some(request) => Incoming::Terminal(request),
+                None => Incoming::UnsupportedRequest {
+                    id,
+                    method: format!("{method} (malformed params)"),
+                },
+            })
+        }
         (Some(method), Some(id)) => Some(Incoming::UnsupportedRequest {
             id,
             method: method.to_owned(),
@@ -1159,7 +1293,7 @@ mod tests {
         assert_eq!(msg["params"]["protocolVersion"], 1);
         assert_eq!(msg["params"]["clientCapabilities"]["fs"]["readTextFile"], true);
         assert_eq!(msg["params"]["clientCapabilities"]["fs"]["writeTextFile"], true);
-        assert_eq!(msg["params"]["clientCapabilities"]["terminal"], false);
+        assert_eq!(msg["params"]["clientCapabilities"]["terminal"], true);
     }
 
     #[test]
@@ -1192,6 +1326,74 @@ mod tests {
         assert_eq!(fs_read_response(21, "text")["result"]["content"], "text");
         assert_eq!(fs_write_response(22)["result"], json!({}));
         assert_eq!(internal_error_response(23, "nope")["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn terminal_requests_parse_into_shaped_variants() {
+        let create = r#"{"jsonrpc":"2.0","id":31,"method":"terminal/create","params":{
+            "sessionId":"s","command":"npm","args":["test"],
+            "env":[{"name":"CI","value":"1"}],"cwd":"/w","outputByteLimit":1048576}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&create),
+            Some(Incoming::Terminal(TerminalRequest::Create {
+                id: 31,
+                command: "npm".into(),
+                args: vec!["test".into()],
+                env: vec![("CI".into(), "1".into())],
+                cwd: Some("/w".into()),
+                output_byte_limit: Some(1_048_576),
+            }))
+        );
+        let output = r#"{"jsonrpc":"2.0","id":32,"method":"terminal/output","params":{"sessionId":"s","terminalId":"term-1"}}"#;
+        assert_eq!(
+            parse_incoming(output),
+            Some(Incoming::Terminal(TerminalRequest::Output {
+                id: 32,
+                terminal_id: "term-1".into()
+            }))
+        );
+        for (method, expect_kill) in
+            [("terminal/kill", true), ("terminal/release", false), ("terminal/wait_for_exit", false)]
+        {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","id":33,"method":"{method}","params":{{"terminalId":"t"}}}}"#
+            );
+            let parsed = parse_incoming(&line);
+            assert!(matches!(parsed, Some(Incoming::Terminal(_))), "{method}: {parsed:?}");
+            let _ = expect_kill; // variant shape asserted by the match above
+        }
+        // Malformed: no command → answered, not ignored.
+        let broken = r#"{"jsonrpc":"2.0","id":34,"method":"terminal/create","params":{}}"#;
+        assert!(matches!(
+            parse_incoming(broken),
+            Some(Incoming::UnsupportedRequest { id: 34, .. })
+        ));
+    }
+
+    #[test]
+    fn terminal_responses_have_the_spec_shapes() {
+        assert_eq!(terminal_create_response(1, "t-1")["result"]["terminalId"], "t-1");
+        let running = terminal_output_response(2, "partial", false, None);
+        assert_eq!(running["result"]["output"], "partial");
+        assert!(running["result"].get("exitStatus").is_none());
+        let done = terminal_output_response(2, "all", true, Some((Some(0), None)));
+        assert_eq!(done["result"]["truncated"], true);
+        assert_eq!(done["result"]["exitStatus"]["exitCode"], 0);
+        assert_eq!(terminal_exit_response(3, Some(1), None)["result"]["exitStatus"]["exitCode"], 1);
+        assert_eq!(empty_result_response(4)["result"], json!({}));
+    }
+
+    #[test]
+    fn output_buffers_drop_from_the_front_at_utf8_boundaries() {
+        let mut buffer = "hello world".as_bytes().to_vec();
+        assert!(!drop_to_byte_limit(&mut buffer, 100));
+        assert!(drop_to_byte_limit(&mut buffer, 5));
+        assert_eq!(String::from_utf8(buffer.clone()).unwrap(), "world");
+        // Multi-byte: é is two bytes; a cut through it moves forward.
+        let mut accented = "aé".as_bytes().to_vec(); // [a, 0xC3, 0xA9]
+        assert!(drop_to_byte_limit(&mut accented, 1));
+        assert!(String::from_utf8(accented).is_ok());
     }
 
     #[test]
@@ -1725,12 +1927,15 @@ mod tests {
 
     #[test]
     fn other_agent_requests_are_flagged_unsupported() {
-        let line = r#"{"jsonrpc":"2.0","id":4,"method":"terminal/create","params":{}}"#;
+        let line = r#"{"jsonrpc":"2.0","id":4,"method":"elicitation/url_dance","params":{}}"#;
         assert_eq!(
             parse_incoming(line),
-            Some(Incoming::UnsupportedRequest { id: 4, method: "terminal/create".into() })
+            Some(Incoming::UnsupportedRequest {
+                id: 4,
+                method: "elicitation/url_dance".into()
+            })
         );
-        let response = method_not_found_response(4, "terminal/create");
+        let response = method_not_found_response(4, "elicitation/url_dance");
         assert_eq!(response["error"]["code"], -32601);
     }
 

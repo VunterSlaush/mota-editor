@@ -49,6 +49,10 @@ export function App({ context }: { context: AppContext }) {
     () => void context.sendPrompt.retryLast(activeProjectId),
     [context, activeProjectId],
   );
+  const readTerminal = useCallback(
+    (terminalId: string) => context.readTerminalOutput(activeProjectId, terminalId),
+    [context, activeProjectId],
+  );
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   return (
@@ -125,6 +129,7 @@ export function App({ context }: { context: AppContext }) {
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}
           onRetry={retryLast}
+          onReadTerminal={readTerminal}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
           onPickFiles={() => context.filePicker.pickFiles()}
         />

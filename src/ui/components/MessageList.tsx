@@ -18,7 +18,11 @@ import { fileName } from "../fileName";
 import { CommandText } from "./CommandText";
 import { Markdown } from "./MarkdownLite";
 import { QuestionCard } from "./QuestionCard";
-import { type AgentDiff, ToolCallContentView } from "./ToolCallContentView";
+import {
+  type AgentDiff,
+  type ReadTerminal,
+  ToolCallContentView,
+} from "./ToolCallContentView";
 
 interface Props {
   messages: readonly ChatMessage[];
@@ -35,6 +39,8 @@ interface Props {
   onOpenFile: (path: string) => void;
   /** Show an agent-reported diff in the diff modal. Stable identity. */
   onShowAgentDiff: (diff: AgentDiff) => void;
+  /** Read an agent-owned terminal's output. Stable identity. */
+  onReadTerminal: ReadTerminal;
   /** Lowercased slash-command names, for highlighting in user messages.
    *  Must be a stable identity — it reaches memoized rows. */
   commands: ReadonlySet<string>;
@@ -66,6 +72,7 @@ export function MessageList({
   onRetry,
   onOpenFile,
   onShowAgentDiff,
+  onReadTerminal,
   commands,
   verbose,
   onRespondPermission,
@@ -144,6 +151,7 @@ export function MessageList({
               onShowPlan={onShowPlan}
               onOpenFile={onOpenFile}
               onShowAgentDiff={onShowAgentDiff}
+              onReadTerminal={onReadTerminal}
             />
           ) : (
             <MessageBubble
@@ -159,6 +167,7 @@ export function MessageList({
               }
               onOpenFile={onOpenFile}
               onShowAgentDiff={onShowAgentDiff}
+              onReadTerminal={onReadTerminal}
               innerRef={m.id === askedMessage?.id ? promptRef : undefined}
             />
           ),
@@ -365,6 +374,7 @@ const ApprovalCard = memo(function ApprovalCard({
   onShowPlan,
   onOpenFile,
   onShowAgentDiff,
+  onReadTerminal,
 }: {
   message: ChatMessage;
   /** The tool call this request guards, when the agent named it — shown
@@ -374,6 +384,7 @@ const ApprovalCard = memo(function ApprovalCard({
   onShowPlan: () => void;
   onOpenFile: (path: string) => void;
   onShowAgentDiff: (diff: AgentDiff) => void;
+  onReadTerminal: ReadTerminal;
 }) {
   const approval = message.approval;
   if (!approval) return null;
@@ -400,6 +411,7 @@ const ApprovalCard = memo(function ApprovalCard({
           toolCall={guardedToolCall}
           onOpenFile={onOpenFile}
           onShowDiff={onShowAgentDiff}
+          onReadTerminal={onReadTerminal}
         />
       )}
       <div className="approval__options">
@@ -457,6 +469,7 @@ const MessageBubble = memo(function MessageBubble({
   onRetry,
   onOpenFile,
   onShowAgentDiff,
+  onReadTerminal,
   innerRef,
 }: {
   message: ChatMessage;
@@ -474,6 +487,8 @@ const MessageBubble = memo(function MessageBubble({
   onOpenFile?: (path: string) => void;
   /** Show an agent-reported diff (tool rows). */
   onShowAgentDiff?: (diff: AgentDiff) => void;
+  /** Read an agent-owned terminal's output (tool rows). */
+  onReadTerminal?: ReadTerminal;
   /** Set on the message the PinnedPrompt tracks, so it can be measured. */
   innerRef?: React.Ref<HTMLDivElement>;
 }) {
@@ -511,13 +526,19 @@ const MessageBubble = memo(function MessageBubble({
             </button>
           )}
         </div>
-        {expandable && expanded && call && onOpenFile && onShowAgentDiff && (
-          <ToolCallContentView
-            toolCall={call}
-            onOpenFile={onOpenFile}
-            onShowDiff={onShowAgentDiff}
-          />
-        )}
+        {expandable &&
+          expanded &&
+          call &&
+          onOpenFile &&
+          onShowAgentDiff &&
+          onReadTerminal && (
+            <ToolCallContentView
+              toolCall={call}
+              onOpenFile={onOpenFile}
+              onShowDiff={onShowAgentDiff}
+              onReadTerminal={onReadTerminal}
+            />
+          )}
       </div>
     );
   }

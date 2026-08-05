@@ -101,6 +101,8 @@ pub struct AcpSession {
     /// handshake timeout with the real complaint attached beats "did not
     /// respond in time" every time.
     stderr_tail: Mutex<VecDeque<String>>,
+    /// Client-owned terminals serving the agent's `terminal/*` requests.
+    terminals: crate::terminal::TerminalManager,
 }
 
 /// Cap on the retained stderr ring — enough to carry a stack trace,
@@ -230,6 +232,8 @@ impl AcpSession {
         for (_, tx) in self.pending.lock().unwrap_or_else(PoisonError::into_inner).drain() {
             let _ = tx.send(Err("Session closed.".to_owned()));
         }
+        // Commands the agent started must not outlive it.
+        self.terminals.kill_all();
         if let Some(mut child) = self.child.lock().unwrap_or_else(PoisonError::into_inner).take() {
             let _ = child.start_kill();
         }
@@ -643,6 +647,7 @@ async fn boot_agent(
         caps: Mutex::new(acp::AgentCaps::default()),
         available_modes: Mutex::new(Vec::new()),
         stderr_tail: Mutex::new(VecDeque::new()),
+        terminals: crate::terminal::TerminalManager::default(),
     });
 
     spawn_reader(app.clone(), tab_id.to_owned(), Arc::clone(&session), stdout);
@@ -898,6 +903,67 @@ pub(crate) async fn probe_handshake(
     result
 }
 
+/// Serve one `terminal/*` request against the session's terminals.
+async fn handle_terminal_request(
+    session: &Arc<AcpSession>,
+    request: acp::TerminalRequest,
+) -> Value {
+    use acp::TerminalRequest as T;
+    match request {
+        T::Create { id, command, args, env, cwd, output_byte_limit } => {
+            let cwd = cwd.unwrap_or_else(|| session.project_path.clone());
+            match session.terminals.create(&command, &args, &env, &cwd, output_byte_limit)
+            {
+                Ok(terminal_id) => acp::terminal_create_response(id, &terminal_id),
+                Err(message) => acp::internal_error_response(id, &message),
+            }
+        }
+        T::Output { id, terminal_id } => match session.terminals.get(&terminal_id) {
+            Some(handle) => {
+                let (output, truncated, exit) = handle.output();
+                let exit_pair = exit.as_ref().map(|e| (e.code, e.signal.as_deref()));
+                acp::terminal_output_response(id, &output, truncated, exit_pair)
+            }
+            None => acp::internal_error_response(id, &unknown_terminal(&terminal_id)),
+        },
+        T::WaitForExit { id, terminal_id } => match session.terminals.get(&terminal_id) {
+            Some(handle) => {
+                let exit = handle.wait_for_exit().await;
+                acp::terminal_exit_response(id, exit.code, exit.signal.as_deref())
+            }
+            None => acp::internal_error_response(id, &unknown_terminal(&terminal_id)),
+        },
+        T::Kill { id, terminal_id } => match session.terminals.get(&terminal_id) {
+            Some(handle) => {
+                handle.kill();
+                acp::empty_result_response(id)
+            }
+            None => acp::internal_error_response(id, &unknown_terminal(&terminal_id)),
+        },
+        T::Release { id, terminal_id } => {
+            session.terminals.release(&terminal_id);
+            acp::empty_result_response(id)
+        }
+    }
+}
+
+fn unknown_terminal(terminal_id: &str) -> String {
+    format!("No such terminal: {terminal_id}")
+}
+
+/// Read a terminal's captured output for the UI (polled by the tool-call
+/// card that embeds it).
+pub fn read_terminal_output(
+    sessions: &AcpSessions,
+    tab_id: &str,
+    terminal_id: &str,
+) -> Option<(String, bool, bool)> {
+    let session = sessions.get(tab_id)?;
+    let handle = session.terminals.get(terminal_id)?;
+    let (output, truncated, exit) = handle.output();
+    Some((output, truncated, exit.is_some()))
+}
+
 /// Resolve an agent-supplied path and require it inside the project.
 /// Canonicalizes real paths so `..` and symlinks cannot escape; for a
 /// write to a not-yet-existing file the PARENT directory must exist and
@@ -1082,6 +1148,13 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                     },
                     Err(message) => acp::internal_error_response(id, &message),
                 };
+                let _ = session.write_message(&response).await;
+            });
+        }
+        Some(acp::Incoming::Terminal(request)) => {
+            let session = Arc::clone(session);
+            tauri::async_runtime::spawn(async move {
+                let response = handle_terminal_request(&session, request).await;
                 let _ = session.write_message(&response).await;
             });
         }

@@ -50,6 +50,9 @@ class FakeGateway implements AgentGateway {
 
   async startTurn(_r: AgentTurnRequest, _e: (event: AgentTurnEvent) => void) {}
   subscribeSessionEvents() {}
+  async readTerminalOutput() {
+    return null;
+  }
   async cancelTurn() {}
   async respondPermission() {}
   async respondQuestion() {}

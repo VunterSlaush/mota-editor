@@ -47,6 +47,10 @@ export class DemoAgentGateway implements AgentGateway {
 
   subscribeSessionEvents(): void {} // demo sessions have no warm-up
 
+  async readTerminalOutput(): Promise<null> {
+    return null; // demo agents own no terminals
+  }
+
   private async run(
     request: AgentTurnRequest,
     onEvent: (event: AgentTurnEvent) => void,

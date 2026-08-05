@@ -75,6 +75,11 @@ export interface AppContext {
   readonly listCommands: ListCommands;
   readonly providerProbe: ProviderProbe;
   readonly filePicker: FilePicker;
+  /** Live output of an agent-owned terminal, for the tool-call cards. */
+  readonly readTerminalOutput: (
+    tabId: string,
+    terminalId: string,
+  ) => Promise<{ output: string; truncated: boolean; exited: boolean } | null>;
   /** Ids for things the UI creates, e.g. a new MCP server row. */
   readonly newId: () => string;
   /** False when the UI is opened in a plain browser tab (no backend). */
@@ -144,6 +149,8 @@ export function createAppContext(): AppContext {
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),
     filePicker,
+    readTerminalOutput: (tabId, terminalId) =>
+      agentGateway.readTerminalOutput(tabId, terminalId),
     newId,
     runningInTauri: inTauri,
   };
