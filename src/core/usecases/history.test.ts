@@ -12,7 +12,7 @@ import type {
 } from "../ports/transcriptStore";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
-import { SessionHistory } from "./history";
+import { type HistoryListing, SessionHistory } from "./history";
 
 class FakeTranscriptStore implements TranscriptStore {
   transcripts = new Map<string, PersistedTranscript>();
@@ -42,9 +42,15 @@ class FakeTranscriptStore implements TranscriptStore {
 
 /** Gateway with scriptable native history. */
 class FakeGateway implements AgentGateway {
+  /** Null = no live session to ask (the gateway never boots one). */
   nativeSessions: { sessionId: string; title?: string; updatedAt?: string }[] | null =
     null;
+  listError?: string;
+  listCalls = 0;
   replay: AgentTurnEvent[] = [];
+  /** False = the agent attached via `session/resume`, no replay stream. */
+  replayed = true;
+  lastLoad?: { sessionId: string; preferResume?: boolean };
   ended: string[] = [];
   warmed: string[] = [];
 
@@ -63,14 +69,17 @@ class FakeGateway implements AgentGateway {
     this.warmed.push(tabId);
   }
   async listNativeSessions() {
-    if (!this.nativeSessions) throw new Error("native history unavailable");
+    this.listCalls += 1;
+    if (this.listError) throw new Error(this.listError);
     return this.nativeSessions;
   }
   async loadNativeSession(
-    _request: unknown,
+    request: { sessionId: string; preferResume?: boolean },
     onEvent: (event: AgentTurnEvent) => void,
-  ): Promise<void> {
-    this.replay.forEach(onEvent);
+  ): Promise<{ replayed: boolean }> {
+    this.lastLoad = request;
+    if (this.replayed) this.replay.forEach(onEvent);
+    return { replayed: this.replayed };
   }
 }
 
@@ -89,22 +98,70 @@ function setup() {
 
 const DEFAULTS = projectDefaults(defaultSettings);
 
+/** Let the fire-and-forget background refresh run to completion. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** A local transcript with just enough shape to list. */
+function meta(id: string, savedAt: number): PersistedTranscript {
+  return { id, title: `chat ${id}`, savedAt, provider: "claude", messages: [] };
+}
+
 describe("SessionHistory", () => {
-  it("prefers the agent's native session list", async () => {
-    const { gateway, history } = setup();
-    gateway.nativeSessions = [
-      {
-        sessionId: "abc-123",
-        title: "Plan the feature",
-        updatedAt: "2026-08-04T10:00:00Z",
-      },
-    ];
+  it("paints the local listing without ever calling the agent", async () => {
+    const { transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("s1", meta("s1", 1));
 
     const listing = await history.list("t1");
 
-    expect(listing.native).toBe(true);
-    expect(listing.sessions[0].id).toBe("abc-123");
-    expect(listing.sessions[0].title).toBe("Plan the feature");
+    expect(listing.native).toBe(false);
+    expect(listing.sessions.map((s) => s.id)).toEqual(["s1"]);
+    expect(gateway.listCalls).toBe(0); // no refresh requested — no agent
+  });
+
+  it("resolves the local paint even while the native listing hangs", async () => {
+    const { transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("s1", meta("s1", 1));
+    // An agent mid-boot: the listing answer never comes.
+    gateway.listNativeSessions = () => new Promise<never>(() => {});
+
+    const listing = await history.list("t1", () => {});
+
+    expect(listing.sessions.map((s) => s.id)).toEqual(["s1"]);
+  });
+
+  it("keeps the local paint when no live session exists to ask", async () => {
+    const { transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("s1", meta("s1", 1));
+    gateway.nativeSessions = null; // gateway: no live session, didn't ask
+
+    let refreshed: HistoryListing | undefined;
+    await history.list("t1", (listing) => (refreshed = listing));
+    await settle();
+
+    expect(refreshed).toBeUndefined();
+  });
+
+  it("merges the native listing in the background: native ids win, local-only stays", async () => {
+    const { transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("shared", meta("shared", 500));
+    transcripts.transcripts.set("local-only", meta("local-only", 300));
+    gateway.nativeSessions = [
+      { sessionId: "shared", title: "Shared", updatedAt: "2026-08-05T10:00:00Z" },
+      // Created via the CLI, outside this app — must still appear.
+      { sessionId: "cli-only", title: "From the CLI", updatedAt: "2026-08-04T10:00:00Z" },
+    ];
+
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
+    });
+
+    expect(refreshed.native).toBe(true);
+    const byId = new Map(refreshed.sessions.map((s) => [s.id, s]));
+    expect(byId.get("shared")?.native).toBe(true); // opening truly resumes
+    expect(byId.get("cli-only")?.native).toBe(true);
+    expect(byId.get("local-only")?.native).toBe(false);
+    // Our savedAt (last message) overlays the agent's updatedAt (last look).
+    expect(byId.get("shared")?.savedAt).toBe(500);
   });
 
   it("lists newest first and drops entries without a session id", async () => {
@@ -116,42 +173,28 @@ describe("SessionHistory", () => {
       { sessionId: "new", updatedAt: "2026-08-05T10:00:00Z" },
     ];
 
-    const listing = await history.list("t1");
-
-    expect(listing.sessions.map((s) => s.id)).toEqual(["new", "old"]);
-  });
-
-  it("falls back to the local store when the agent lists nothing", async () => {
-    const { gateway, transcripts, history } = setup();
-    gateway.nativeSessions = [];
-    transcripts.transcripts.set("s1", {
-      id: "s1",
-      title: "old chat",
-      savedAt: 1,
-      provider: "claude",
-      messages: [],
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
     });
 
-    const listing = await history.list("t1");
-
-    expect(listing.native).toBe(false);
-    expect(listing.sessions[0].id).toBe("s1");
+    expect(refreshed.sessions.map((s) => s.id)).toEqual(["new", "old"]);
   });
 
-  it("falls back to the local store when native history is unavailable", async () => {
-    const { transcripts, history } = setup();
-    transcripts.transcripts.set("s1", {
-      id: "s1",
-      title: "old chat",
-      savedAt: 1,
-      provider: "claude",
-      messages: [],
+  it("surfaces a native failure only when there is nothing local to show", async () => {
+    const { transcripts, gateway, history } = setup();
+    gateway.listError = "agent broke";
+
+    const empty = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
     });
+    expect(empty.error).toBe("agent broke");
 
-    const listing = await history.list("t1");
-
-    expect(listing.native).toBe(false);
-    expect(listing.sessions[0].id).toBe("s1");
+    // With local sessions painted, the background failure stays silent.
+    transcripts.transcripts.set("s1", meta("s1", 1));
+    let refreshed: HistoryListing | undefined;
+    await history.list("t1", (listing) => (refreshed = listing));
+    await settle();
+    expect(refreshed).toBeUndefined();
   });
 
   it("native open replays the conversation and marks it resumed", async () => {
@@ -271,6 +314,43 @@ describe("SessionHistory", () => {
     expect(tab.historySessionId).toBeUndefined();
     expect(tab.messages.at(-1)?.text).toContain("session file is gone");
     expect(tab.busy).toBe(false);
+  });
+
+  it("prefers session/resume and paints from the local copy when nothing replays", async () => {
+    const { store, transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("abc-123", {
+      id: "abc-123",
+      title: "old chat",
+      savedAt: 5,
+      provider: "claude",
+      messages: [
+        { id: "m1", role: "user", text: "plan it" },
+        { id: "m2", role: "assistant", text: "done" },
+      ],
+      plan: [{ content: "step", priority: "high", status: "pending" }],
+    });
+    gateway.replayed = false; // the agent attached without a replay
+
+    await history.open("t1", "abc-123", true);
+
+    const tab = store.getState().tabs[0];
+    expect(gateway.lastLoad?.preferResume).toBe(true);
+    expect(tab.messages.map((m) => m.role)).toEqual(["user", "assistant", "info"]);
+    expect(tab.messages.at(-1)?.text).toContain("remembers");
+    expect(tab.plan).toHaveLength(1);
+    expect(tab.historySessionId).toBe("abc-123");
+    expect(tab.busy).toBe(false);
+  });
+
+  it("never asks for a resume without a local copy to paint from", async () => {
+    const { gateway, history } = setup();
+    gateway.replay = [{ kind: "userDelta", text: "plan the feature" }];
+
+    await history.open("t1", "abc-123", true);
+
+    // Resume skips the replay — without our own transcript the screen
+    // would come back blank, so the full load must be requested.
+    expect(gateway.lastLoad?.preferResume).toBe(false);
   });
 
   it("local open restores the plan by reading its FILE PATH from disk", async () => {

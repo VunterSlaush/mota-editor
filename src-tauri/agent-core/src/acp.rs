@@ -172,6 +172,10 @@ pub struct AgentCaps {
     /// `session/list` is an extension (advertised via
     /// `sessionCapabilities.list`); never call it unadvertised.
     pub session_list: bool,
+    /// `session/resume` is an extension (advertised via
+    /// `sessionCapabilities.resume`): attach to a saved session WITHOUT
+    /// replaying it — the cheap alternative to `session/load`.
+    pub session_resume: bool,
     pub prompt_image: bool,
     pub prompt_embedded_context: bool,
     pub agent_name: Option<String>,
@@ -197,6 +201,7 @@ pub fn parse_initialize_result(result: &Value) -> Result<AgentCaps, String> {
     Ok(AgentCaps {
         load_session: caps.get("loadSession").and_then(Value::as_bool).unwrap_or(false),
         session_list: caps.pointer("/sessionCapabilities/list").is_some(),
+        session_resume: caps.pointer("/sessionCapabilities/resume").is_some(),
         prompt_image: caps
             .pointer("/promptCapabilities/image")
             .and_then(Value::as_bool)
@@ -319,6 +324,29 @@ pub fn session_load_request(
         "jsonrpc": "2.0",
         "id": id,
         "method": "session/load",
+        "params": {
+            "sessionId": session_id,
+            "cwd": cwd,
+            "mcpServers": mcp_server_params(mcp_servers)
+        }
+    })
+}
+
+/// Resume one of the agent's saved sessions WITHOUT the replay: the
+/// agent attaches its memory and answers immediately, no
+/// `session/update` stream. Draft extension — only send when
+/// `sessionCapabilities.resume` was advertised, and be ready to fall
+/// back to `session/load` anyway.
+pub fn session_resume_request(
+    id: i64,
+    session_id: &str,
+    cwd: &str,
+    mcp_servers: &[McpServer],
+) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "session/resume",
         "params": {
             "sessionId": session_id,
             "cwd": cwd,
@@ -1423,6 +1451,7 @@ mod tests {
         .unwrap();
         assert!(ok.load_session);
         assert!(ok.session_list);
+        assert!(ok.session_resume);
         assert!(ok.prompt_image);
         assert!(ok.prompt_embedded_context);
         assert_eq!(ok.agent_name.as_deref(), Some("claude-agent-acp"));
@@ -1432,6 +1461,7 @@ mod tests {
         let bare = parse_initialize_result(&json!({ "protocolVersion": 1 })).unwrap();
         assert!(!bare.load_session);
         assert!(!bare.session_list);
+        assert!(!bare.session_resume);
 
         // A newer protocol than ours means the two sides would talk past
         // each other — refuse instead of limping.

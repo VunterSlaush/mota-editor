@@ -49,6 +49,12 @@ pub struct AcpSessions {
     /// on a fresh agent instead of silently starting a blank context.
     /// Cleared by `end_session` — the user asked for a reset there.
     recovery: Mutex<HashMap<String, RecoveredSession>>,
+    /// Per-tab boot serialization. Two callers arriving while no session
+    /// exists (warm-up racing the first prompt, or the History panel
+    /// opening mid-boot) must share ONE boot: each adapter process is a
+    /// ~100-300MB Node runtime, and a parallel spare helps nobody.
+    /// Entries live as long as the tab; a handful of small Arcs.
+    booting: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 pub struct AcpSession {
@@ -148,6 +154,19 @@ impl AcpSessions {
             .get(tab_id)
             .filter(|r| r.provider_id == provider_id)
             .map(|r| r.session_id.clone())
+    }
+
+    /// The tab's boot lock. Holding it while creating a session is what
+    /// coalesces concurrent boots; awaiting it is how a reader waits for
+    /// an in-flight boot instead of concluding "no session".
+    fn boot_lock(&self, tab_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(
+            self.booting
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(tab_id.to_owned())
+                .or_default(),
+        )
     }
 
     /// Evict a session only if the map still holds THIS one — a respawn
@@ -481,6 +500,13 @@ async fn ensure_session(
     let SessionSpec { project_path, model, effort, mcp_servers } = spec;
     let (model, effort) = (model.clone(), effort.clone());
 
+    // One boot per tab at a time: a second caller (the first prompt or
+    // the History panel racing the warm-up) waits here and then finds
+    // the finished session in the map, instead of spawning a duplicate
+    // adapter process in parallel.
+    let boot_lock = sessions.boot_lock(tab_id);
+    let _booting = boot_lock.lock().await;
+
     if let Some(existing) = sessions.get(tab_id) {
         let matches = existing.provider_id == provider_id
             && existing.model == model
@@ -507,23 +533,35 @@ async fn ensure_session(
     // silently starting a blank context (the tab still shows the chat —
     // the agent should still remember it).
     if let Some(old_id) = sessions.recoverable_session(tab_id, provider_id) {
-        if session.caps().load_session {
+        let caps = session.caps();
+        if caps.session_resume || caps.load_session {
             emit_stage(app, tab_id, "recovering");
-            let id = session.request_id();
-            // The replayed conversation must not flood the chat — the
-            // transcript is already on screen; only the agent's memory
-            // is being restored.
-            session.replaying.store(true, Ordering::SeqCst);
-            let loaded = session
-                .call_with_timeout(
-                    acp::session_load_request(id, &old_id, project_path, mcp_servers),
-                    id,
-                    LOAD_TIMEOUT,
-                )
-                .await;
-            session.replaying.store(false, Ordering::SeqCst);
-            match loaded {
-                Ok(_) => {
+            // `session/resume` restores the agent's memory without the
+            // whole-conversation replay — which recovery mutes anyway
+            // (the transcript never left the screen). Cheap path first,
+            // full reload as the fallback.
+            let restored = if try_resume(&session, &old_id, spec).await {
+                Ok(())
+            } else if caps.load_session {
+                let id = session.request_id();
+                // The replayed conversation must not flood the chat — the
+                // transcript is already on screen; only the agent's memory
+                // is being restored.
+                session.replaying.store(true, Ordering::SeqCst);
+                let loaded = session
+                    .call_with_timeout(
+                        acp::session_load_request(id, &old_id, project_path, mcp_servers),
+                        id,
+                        LOAD_TIMEOUT,
+                    )
+                    .await;
+                session.replaying.store(false, Ordering::SeqCst);
+                loaded.map(|_| ())
+            } else {
+                Err("the agent could not resume it".to_owned())
+            };
+            match restored {
+                Ok(()) => {
                     session.set_sid(old_id.clone());
                     sessions
                         .map
@@ -600,12 +638,11 @@ async fn ensure_session(
 /// Spawn the provider's ACP adapter and complete `initialize` — the
 /// session-agnostic half of a session. `session/new` is deliberately
 /// not part of this: it can boot the provider's full CLI (tens of
-/// seconds on slow adapters), which session-agnostic requests like
-/// `session/list` never need.
+/// seconds on slow adapters), which the settings probe never needs.
 ///
 /// `emit_stages` gates the startup progress events: real sessions want
-/// them; throwaway probes (history panel, settings) must not flash the
-/// UI with stages for a process the user never asked to watch.
+/// them; the throwaway settings probe must not flash the UI with
+/// stages for a process the user never asked to watch.
 async fn boot_agent(
     app: &AppHandle,
     tab_id: &str,
@@ -714,34 +751,35 @@ fn spawn_stderr_reader(
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180); // replays the whole conversation
+const RESUME_TIMEOUT: Duration = Duration::from_secs(30); // attaches without a replay
 
 /// The agent's own saved sessions for this project (native history).
 ///
-/// Deliberately does NOT create a session: `session/list` needs only
-/// `initialize`, while `session/new` boots the provider's full CLI —
-/// tens of seconds of blank History panel. A live session is reused
-/// whatever its spec (killing a warm session just to ask it a question
-/// was this panel's "sometimes empty" bug); otherwise a throwaway
-/// adapter answers and is shut down again.
+/// Local-first history: the panel paints from the local transcript
+/// store, and this native listing only ever asks a session that is
+/// ALREADY live — `Null` means "no live session, we didn't ask". No
+/// process may be booted here: a throwaway adapter is tens of seconds
+/// of boot and a ~100-300MB Node runtime, all to answer a listing the
+/// local store already covers.
 pub async fn list_native_sessions(
-    app: AppHandle,
     sessions: &AcpSessions,
     tab_id: &str,
     provider_id: &str,
     spec: &SessionSpec,
 ) -> Result<Value, String> {
+    // A boot already in flight (warm-up racing the panel) is worth
+    // waiting for: the session it produces can answer, while asking
+    // right now would miss it and report no history.
+    drop(sessions.boot_lock(tab_id).lock().await);
     if let Some(existing) = sessions.get(tab_id) {
+        // Reused whatever its model/effort spec — killing a warm session
+        // just to ask it a question was this panel's "sometimes empty"
+        // bug, and `session/list` only needs the cwd anyway.
         if existing.provider_id == provider_id && !existing.dead.load(Ordering::SeqCst) {
             return list_sessions_via(&existing, &spec.project_path).await;
         }
     }
-    let probe =
-        boot_agent(&app, tab_id, provider_id, spec, false).await.map_err(|e| match e {
-            AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
-        })?;
-    let result = list_sessions_via(&probe, &spec.project_path).await;
-    probe.shutdown();
-    result
+    Ok(Value::Null)
 }
 
 async fn list_sessions_via(
@@ -760,9 +798,33 @@ async fn list_sessions_via(
     Ok(result.get("sessions").cloned().unwrap_or(Value::Array(vec![])))
 }
 
-/// Truly resume one of the agent's saved sessions: the conversation is
-/// replayed through the event stream, and the agent continues WITH that
-/// context in memory.
+/// Attach the agent to a saved session WITHOUT replaying it
+/// (`session/resume`, a draft extension). False when the capability
+/// isn't advertised or the agent refused — callers fall back to the
+/// full `session/load`.
+async fn try_resume(
+    session: &Arc<AcpSession>,
+    session_id: &str,
+    spec: &SessionSpec,
+) -> bool {
+    if !session.caps().session_resume {
+        return false;
+    }
+    let id = session.request_id();
+    session
+        .call_with_timeout(
+            acp::session_resume_request(id, session_id, &spec.project_path, &spec.mcp_servers),
+            id,
+            RESUME_TIMEOUT,
+        )
+        .await
+        .is_ok()
+}
+
+/// Truly resume one of the agent's saved sessions: the agent continues
+/// WITH that context in memory. Returns whether the conversation was
+/// REPLAYED through the event stream — `session/resume` skips the
+/// replay, so the caller paints from its own transcript copy instead.
 pub async fn load_native_session(
     app: AppHandle,
     sessions: &AcpSessions,
@@ -770,7 +832,8 @@ pub async fn load_native_session(
     provider_id: &str,
     spec: &SessionSpec,
     session_id: &str,
-) -> Result<(), String> {
+    prefer_resume: bool,
+) -> Result<bool, String> {
     // Never load over an unfinished turn: replacing the session id
     // mid-flight can orphan the pending prompt and wedge the tab.
     if let Some(existing) = sessions.get(tab_id) {
@@ -786,6 +849,14 @@ pub async fn load_native_session(
         .map_err(|e| match e {
             AcpStartError::Unavailable(m) | AcpStartError::Failed(m) => m,
         })?;
+    // `prefer_resume` is only set when the caller has a transcript of
+    // its own to show — resume skips the replay, so without one the
+    // conversation would come back as a blank screen.
+    if prefer_resume && try_resume(&session, session_id, spec).await {
+        session.set_sid(session_id.to_owned());
+        sessions.record_recovery(tab_id, provider_id, session_id);
+        return Ok(false);
+    }
     if !session.caps().load_session {
         return Err("This agent cannot resume saved sessions.".to_owned());
     }
@@ -799,7 +870,7 @@ pub async fn load_native_session(
         .await?;
     session.set_sid(session_id.to_owned());
     sessions.record_recovery(tab_id, provider_id, session_id);
-    Ok(())
+    Ok(true)
 }
 
 /// A freshly launched (not yet initialized) ACP agent process.

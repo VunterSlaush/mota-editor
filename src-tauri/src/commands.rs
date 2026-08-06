@@ -228,13 +228,14 @@ pub async fn warm_session(
 }
 
 /// The agent's own saved sessions for this project (native history).
+/// Answered only by an already-live session — `null` when there is
+/// none, so the History panel never costs an agent boot.
 #[tauri::command]
 pub async fn list_agent_sessions(
-    app: AppHandle,
     acp: State<'_, AcpSessions>,
     args: WarmSessionArgs,
 ) -> Result<serde_json::Value, String> {
-    acp_session::list_native_sessions(app, &acp, &args.tab_id, &args.provider_id, &args.spec()?)
+    acp_session::list_native_sessions(&acp, &args.tab_id, &args.provider_id, &args.spec()?)
         .await
 }
 
@@ -244,15 +245,20 @@ pub struct LoadSessionArgs {
     #[serde(flatten)]
     pub warm: WarmSessionArgs,
     pub session_id: String,
+    /// Prefer `session/resume` (attach without the replay) — set only
+    /// when the caller has its own transcript copy to paint from.
+    #[serde(default)]
+    pub prefer_resume: bool,
 }
 
-/// Truly resume one of the agent's saved sessions in this tab.
+/// Truly resume one of the agent's saved sessions in this tab. Returns
+/// whether the conversation was replayed through the event stream.
 #[tauri::command]
 pub async fn load_agent_session(
     app: AppHandle,
     acp: State<'_, AcpSessions>,
     args: LoadSessionArgs,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     acp_session::load_native_session(
         app,
         &acp,
@@ -260,6 +266,7 @@ pub async fn load_agent_session(
         &args.warm.provider_id,
         &args.warm.spec()?,
         &args.session_id,
+        args.prefer_resume,
     )
     .await
 }

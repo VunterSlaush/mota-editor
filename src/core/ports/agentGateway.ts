@@ -163,9 +163,10 @@ export interface AgentGateway {
   ): Promise<void>;
 
   /**
-   * The agent's OWN saved sessions for this project (native history).
-   * `mcpServers` must match what the warm session was created with, or
-   * the listing needlessly kills and respawns the agent.
+   * The agent's OWN saved sessions for this project (native history),
+   * answered only by an ALREADY-live session. Null means "no live
+   * session — didn't ask": listing must never boot an agent process,
+   * so the History panel can serve itself from the local store.
    */
   listNativeSessions(
     tabId: string,
@@ -174,12 +175,14 @@ export interface AgentGateway {
     model?: string,
     effort?: string,
     mcpServers?: readonly McpServerSpec[],
-  ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[]>;
+  ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[] | null>;
 
   /**
-   * Truly resume one of the agent's saved sessions: the conversation is
-   * replayed through `onEvent`, and the agent continues WITH that
-   * context in memory.
+   * Truly resume one of the agent's saved sessions: the agent continues
+   * WITH that context in memory. `replayed` says whether the
+   * conversation streamed through `onEvent` — with `preferResume` the
+   * agent may attach without a replay, and the caller paints the
+   * conversation from its own transcript copy instead.
    */
   loadNativeSession(
     request: {
@@ -190,7 +193,9 @@ export interface AgentGateway {
       effort?: string;
       sessionId: string;
       mcpServers?: readonly McpServerSpec[];
+      /** Set only when a local transcript copy exists to paint from. */
+      preferResume?: boolean;
     },
     onEvent: (event: AgentTurnEvent) => void,
-  ): Promise<void>;
+  ): Promise<{ replayed: boolean }>;
 }

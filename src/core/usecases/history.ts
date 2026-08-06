@@ -13,11 +13,17 @@ import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 
+/** One history row: a transcript's metadata plus how it opens. */
+export interface HistoryItem extends TranscriptMeta {
+  /** True when the AGENT lists this session (opening truly resumes). */
+  readonly native: boolean;
+}
+
 /** The history list plus where it came from. */
 export interface HistoryListing {
-  /** True when the entries are the AGENT's own sessions (true resume). */
+  /** True when any entries are the AGENT's own sessions (true resume). */
   readonly native: boolean;
-  readonly sessions: readonly TranscriptMeta[];
+  readonly sessions: readonly HistoryItem[];
   /**
    * Why the native listing failed, when it did and there was nothing
    * local to show instead. An empty panel that could mean "no sessions"
@@ -112,10 +118,12 @@ class ReplayedSession {
 }
 
 /**
- * Use cases — the session-history panel. The AGENT's own session store
- * is the primary source (no duplication, and reopening truly resumes
- * with the agent's memory); our local transcript store is the fallback
- * for providers without native history.
+ * Use cases — the session-history panel. Local-first: our own
+ * transcript store paints the list instantly (it never needs an agent
+ * process), and the AGENT's native listing arrives as a background
+ * refresh — asked only of a session that is already live, never worth
+ * booting one for. Native entries win the merge, so opening them truly
+ * resumes with the agent's memory.
  */
 export class SessionHistory {
   constructor(
@@ -124,60 +132,89 @@ export class SessionHistory {
     private readonly agentGateway: AgentGateway,
   ) {}
 
-  async list(tabId: string): Promise<HistoryListing> {
+  /**
+   * The listing to paint NOW, from the local store alone. When
+   * `onRefresh` is given, the native listing is fetched in the
+   * background and the merged result delivered through it — or nothing,
+   * when no live session exists to ask.
+   */
+  async list(
+    tabId: string,
+    onRefresh?: (listing: HistoryListing) => void,
+  ): Promise<HistoryListing> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return { native: false, sessions: [] };
+
+    const local = await this.transcriptStore.list(tab.project.path).catch(() => []);
+    if (onRefresh) void this.refreshFromAgent(tabId, local, onRefresh);
+    return { native: false, sessions: local.map((m) => ({ ...m, native: false })) };
+  }
+
+  /**
+   * Overlay the agent's own sessions on the local listing. Native ids
+   * win (opening them truly resumes); local-only transcripts stay (the
+   * agent may have pruned them, or never owned them); sessions the
+   * agent knows and we never saw appear (created outside this app).
+   */
+  private async refreshFromAgent(
+    tabId: string,
+    local: readonly TranscriptMeta[],
+    onRefresh: (listing: HistoryListing) => void,
+  ): Promise<void> {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
-    if (!tab) return { native: false, sessions: [] };
+    if (!tab) return;
     const { provider, path, model, effort } = tab.project;
 
     try {
-      const [native, localMetas] = await Promise.all([
-        this.agentGateway.listNativeSessions(
-          tabId,
-          provider,
-          path,
-          model,
-          effort,
-          // Must match the warm session's spec, or listing kills and
-          // respawns the agent just to ask it a question.
-          serversForProvider(state.settings.mcpServers, provider),
-        ),
-        this.transcriptStore.list(path).catch(() => []),
-      ]);
-      // Our transcript is saved only when a MESSAGE is sent, while the
-      // agent's `updatedAt` also bumps on a mere open (loading touches
-      // its session file). Sorting by our timestamp when we have one
-      // keeps the list ordered by last message, not last look.
-      const lastMessagedAt = new Map(localMetas.map((m) => [m.id, m.savedAt]));
-      const sessions = native
+      const native = await this.agentGateway.listNativeSessions(
+        tabId,
+        provider,
+        path,
+        model,
+        effort,
+        serversForProvider(state.settings.mcpServers, provider),
+      );
+      // Null = no live session to ask — the local paint stands as is.
+      if (!native) return;
+      const localById = new Map(local.map((m) => [m.id, m]));
+      const nativeSessions = native
         // One malformed entry must not throw the whole list away.
         .filter((s) => typeof s.sessionId === "string" && s.sessionId !== "")
         .map((s) => {
-          const savedAt = s.updatedAt ? Date.parse(s.updatedAt) : Number.NaN;
+          const known = localById.get(s.sessionId);
+          const updatedAt = s.updatedAt ? Date.parse(s.updatedAt) : Number.NaN;
           return {
             id: s.sessionId,
-            title: s.title?.trim() || s.sessionId.slice(0, 8),
-            savedAt:
-              lastMessagedAt.get(s.sessionId) ?? (Number.isNaN(savedAt) ? 0 : savedAt),
+            title: s.title?.trim() || known?.title || s.sessionId.slice(0, 8),
+            // Our transcript is saved only when a MESSAGE is sent, while
+            // the agent's `updatedAt` also bumps on a mere open (loading
+            // touches its session file). Our timestamp, when we have one,
+            // keeps the list ordered by last message, not last look.
+            savedAt: known?.savedAt ?? (Number.isNaN(updatedAt) ? 0 : updatedAt),
             provider,
-            messageCount: undefined,
+            messageCount: known?.messageCount,
+            native: true,
           };
-        })
-        .sort((a, b) => b.savedAt - a.savedAt);
-      if (sessions.length > 0) return { native: true, sessions };
-      // An agent that lists nothing may still have local transcripts we
-      // saved ourselves — an empty panel helps nobody.
-      const local = await this.transcriptStore.list(path).catch(() => []);
-      return local.length > 0
-        ? { native: false, sessions: local }
-        : { native: true, sessions };
+        });
+      if (nativeSessions.length === 0) return; // nothing beyond the local paint
+      const nativeIds = new Set(nativeSessions.map((s) => s.id));
+      const sessions = [
+        ...nativeSessions,
+        ...local
+          .filter((m) => !nativeIds.has(m.id))
+          .map((m) => ({ ...m, native: false })),
+      ].sort((a, b) => b.savedAt - a.savedAt);
+      onRefresh({ native: true, sessions });
     } catch (e) {
-      const local = await this.transcriptStore.list(path).catch(() => []);
-      return {
+      // Best-effort refresh: the local list already painted. Only an
+      // EMPTY panel needs the failure spelled out.
+      if (local.length > 0) return;
+      onRefresh({
         native: false,
-        sessions: local,
-        error: local.length > 0 ? undefined : e instanceof Error ? e.message : String(e),
-      };
+        sessions: [],
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
@@ -211,13 +248,28 @@ export class SessionHistory {
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: Date.now() });
 
+    // Our own copy of the conversation, when we saved one. It unlocks
+    // `session/resume`: the agent attaches its memory WITHOUT the
+    // (slow) full replay, because this copy can paint the screen.
+    const localCopy = await this.transcriptStore.load(path, sessionId).catch(() => null);
+
     const replay = new ReplayedSession();
     let resumed = true;
+    let replayed = true;
     try {
-      await this.agentGateway.loadNativeSession(
-        { tabId, provider, projectPath: path, model, effort, sessionId, mcpServers },
+      ({ replayed } = await this.agentGateway.loadNativeSession(
+        {
+          tabId,
+          provider,
+          projectPath: path,
+          model,
+          effort,
+          sessionId,
+          mcpServers,
+          preferResume: localCopy !== null,
+        },
         (event) => replay.fold(event),
-      );
+      ));
       replay.note("Resumed — the agent remembers this conversation.");
     } catch (e) {
       resumed = false;
@@ -227,12 +279,22 @@ export class SessionHistory {
     }
 
     if (resumed) {
+      const messages =
+        replayed || !localCopy
+          ? replay.messages
+          : [
+              ...localCopy.messages.map((m, index) => ({
+                ...m,
+                id: `${sessionId}-${index}`,
+              })),
+              ...replay.messages, // the "Resumed" note (and any stragglers)
+            ];
       this.store.dispatch({
         type: "chat/transcriptLoaded",
         tabId,
         sessionId,
-        messages: replay.messages,
-        plan: replay.plan,
+        messages,
+        plan: replayed ? replay.plan : (localCopy?.plan ?? replay.plan),
       });
       if (replay.usage) {
         this.store.dispatch({ type: "tab/usageUpdated", tabId, ...replay.usage });
@@ -240,17 +302,20 @@ export class SessionHistory {
       // Pin the item where it was: opening must not reorder history, so
       // the local copy keeps the PRE-open timestamp. Only sending a
       // message (which saves with a fresh savedAt) moves it to the top.
+      // A resume needs no pin — it painted FROM the local copy, which
+      // already holds its own timestamp.
       const firstUserMessage = replay.messages.find((m) => m.role === "user");
-      void this.transcriptStore
-        .save(tab.project.path, {
-          id: sessionId,
-          title: (firstUserMessage?.text ?? "Untitled").slice(0, 80),
-          savedAt,
-          provider,
-          messages: replay.messages,
-          plan: replay.plan.length > 0 ? replay.plan : undefined,
-        })
-        .catch(() => undefined); // the pin is best-effort, like all history
+      if (replayed)
+        void this.transcriptStore
+          .save(tab.project.path, {
+            id: sessionId,
+            title: (firstUserMessage?.text ?? "Untitled").slice(0, 80),
+            savedAt,
+            provider,
+            messages: replay.messages,
+            plan: replay.plan.length > 0 ? replay.plan : undefined,
+          })
+          .catch(() => undefined); // the pin is best-effort, like all history
     } else {
       // A resume that failed must not leave the tab claiming that session.
       for (const message of replay.messages) {

@@ -294,3 +294,31 @@ describe("chat/turnMetaCompleted", () => {
     expect(state.tabs[0].messages[0].turn).toBeUndefined();
   });
 });
+
+describe("tab/planMarkdownUpdated", () => {
+  it("a new plan supersedes the old checklist and file path", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "tab/planUpdated",
+      tabId: "t1",
+      plan: [{ content: "old step", status: "completed", priority: "medium" }],
+    });
+    state = reduce(state, {
+      type: "tab/planMarkdownUpdated",
+      tabId: "t1",
+      markdown: "# Plan A",
+      filePath: "/plans/a.md",
+    });
+
+    state = reduce(state, {
+      type: "tab/planMarkdownUpdated",
+      tabId: "t1",
+      markdown: "# Plan B",
+    });
+
+    const tab = state.tabs[0];
+    expect(tab.planMarkdown).toBe("# Plan B");
+    expect(tab.plan).toEqual([]); // stale checklist must not shadow the new plan
+    expect(tab.planFilePath).toBeUndefined(); // A's file must not resurrect on reopen
+  });
+});

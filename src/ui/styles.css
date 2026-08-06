@@ -1029,6 +1029,22 @@ body {
   padding: 10px 16px 16px;
 }
 
+/* The plan in a centred modal; shares the side panel's header and body. */
+.plan-modal {
+  position: relative;
+  width: 680px;
+  max-width: 94vw;
+  height: 70vh;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
 /* ---- Markdown ---- */
 .md {
   line-height: 1.55;
@@ -1734,6 +1750,11 @@ body {
   z-index: 100;
 }
 
+.modal-overlay--center {
+  align-items: center;
+  padding-top: 0;
+}
+
 .branch-picker {
   width: 420px;
   max-width: 90vw;
@@ -2289,7 +2310,8 @@ body {
 
 /* Grab corner: drag to resize the modal. The chevron marks the spot but
    the whole 16px square is draggable. */
-.diff-modal__resize {
+.diff-modal__resize,
+.plan-modal__resize {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -2299,7 +2321,8 @@ body {
   z-index: 1;
 }
 
-.diff-modal__resize::after {
+.diff-modal__resize::after,
+.plan-modal__resize::after {
   content: "";
   position: absolute;
   right: 4px;
@@ -2312,7 +2335,9 @@ body {
 }
 
 .diff-modal__resize:hover::after,
-.diff-modal__resize:active::after {
+.diff-modal__resize:active::after,
+.plan-modal__resize:hover::after,
+.plan-modal__resize:active::after {
   border-color: var(--text-dim);
 }
 

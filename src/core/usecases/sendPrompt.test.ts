@@ -53,10 +53,12 @@ class FakeAgentGateway implements AgentGateway {
 
   async endSession(): Promise<void> {}
   async warmSession(): Promise<void> {}
-  async listNativeSessions(): Promise<{ sessionId: string }[]> {
-    return [];
+  async listNativeSessions(): Promise<{ sessionId: string }[] | null> {
+    return null;
   }
-  async loadNativeSession(): Promise<void> {}
+  async loadNativeSession(): Promise<{ replayed: boolean }> {
+    return { replayed: true };
+  }
 }
 
 class FakeWorkspaceStore implements WorkspaceStore {

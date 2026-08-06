@@ -17,7 +17,7 @@ import { Composer } from "./Composer";
 import { DiffModal } from "./DiffModal";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
-import { PlanBar, PlanSidePanel } from "./PlanPanel";
+import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
@@ -48,7 +48,9 @@ interface Props {
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
   onOpenSettings: () => void;
-  loadHistory: () => Promise<HistoryListing>;
+  /** Resolves with the instant local listing; `onRefresh` delivers the
+   *  merged native listing later, when a live agent could be asked. */
+  loadHistory: (onRefresh: (listing: HistoryListing) => void) => Promise<HistoryListing>;
   onOpenSession: (sessionId: string, native: boolean, savedAt: number) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
   onNewChat: () => void;
@@ -135,6 +137,7 @@ export function ChatPanel({
   const planPanel = useDragWidth(420, 280, 760, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
@@ -210,13 +213,23 @@ export function ChatPanel({
   }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
 
   // Refresh the session list when the history view is open and the tab
-  // is idle (a finished turn may have added or updated a session).
+  // is idle (a finished turn may have added or updated a session). The
+  // local listing paints first; the agent's native listing, when a live
+  // session can be asked, lands as a second update.
   useEffect(() => {
     if (sidebarView !== "history" || tab.busy) return;
     let cancelled = false;
+    let refreshed = false;
     setHistoryLoading(true);
-    loadHistory().then((loaded) => {
+    loadHistory((merged) => {
       if (cancelled) return;
+      refreshed = true;
+      setHistory(merged);
+      setHistoryLoading(false);
+    }).then((loaded) => {
+      // The merged listing may already have landed — a stale local
+      // paint must not overwrite it.
+      if (cancelled || refreshed) return;
       setHistory(loaded);
       setHistoryLoading(false);
     });
@@ -318,8 +331,8 @@ export function ChatPanel({
                   error={history.error}
                   activeSessionId={tab.historySessionId}
                   busy={tab.busy}
-                  onOpen={(id, savedAt) =>
-                    void onOpenSession(id, history.native, savedAt)
+                  onOpen={(id, native, savedAt) =>
+                    void onOpenSession(id, native, savedAt)
                   }
                   onDelete={(id) =>
                     void onDeleteSession(id).then(() =>
@@ -397,11 +410,19 @@ export function ChatPanel({
               plan={tab.plan}
               planMarkdown={tab.planMarkdown}
               width={planPanel.width}
+              onExpand={() => setPlanModalOpen(true)}
               onClose={() => setPlanOpen(false)}
             />
           </>
         )}
       </div>
+      {planModalOpen && (
+        <PlanModal
+          plan={tab.plan}
+          planMarkdown={tab.planMarkdown}
+          onClose={() => setPlanModalOpen(false)}
+        />
+      )}
       {diffTarget && (
         <DiffModal
           key={

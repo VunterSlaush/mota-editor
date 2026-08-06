@@ -216,7 +216,9 @@ export class TauriAgentGateway implements AgentGateway {
     model?: string,
     effort?: string,
     mcpServers?: readonly McpServerSpec[],
-  ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[]> {
+  ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[] | null> {
+    // Null when no live session exists — the shell never boots an
+    // agent process just to answer the History panel.
     return invoke("list_agent_sessions", {
       args: {
         tabId,
@@ -238,9 +240,10 @@ export class TauriAgentGateway implements AgentGateway {
       effort?: string;
       sessionId: string;
       mcpServers?: readonly McpServerSpec[];
+      preferResume?: boolean;
     },
     onEvent: (event: AgentTurnEvent) => void,
-  ): Promise<void> {
+  ): Promise<{ replayed: boolean }> {
     // A stale per-tab handler (e.g. left by a cancelled headless turn)
     // must not also fold the replay into the live chat.
     this.handlers.delete(request.tabId);
@@ -250,7 +253,7 @@ export class TauriAgentGateway implements AgentGateway {
     });
     try {
       // The replay streams through the listener before this resolves.
-      await invoke("load_agent_session", {
+      const replayed = await invoke<boolean>("load_agent_session", {
         args: {
           tabId: request.tabId,
           providerId: request.provider,
@@ -259,8 +262,10 @@ export class TauriAgentGateway implements AgentGateway {
           effort: request.effort ?? null,
           sessionId: request.sessionId,
           mcpServers: toWireServers(request.mcpServers),
+          preferResume: request.preferResume ?? false,
         },
       });
+      return { replayed };
     } finally {
       unlisten();
     }

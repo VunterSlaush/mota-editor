@@ -311,11 +311,16 @@ export function reduce(state: AppState, action: Action): AppState {
     case "tab/planUpdated":
       return mapTab(state, action.tabId, (tab) => ({ ...tab, plan: action.plan }));
 
+    // A NEW plan-mode plan supersedes the previous plan entirely: the
+    // old checklist would otherwise keep winning in the plan view (it
+    // renders before markdown), and the old file path would resurrect
+    // the old plan on reopen.
     case "tab/planMarkdownUpdated":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
+        plan: [],
         planMarkdown: action.markdown,
-        planFilePath: action.filePath ?? tab.planFilePath,
+        planFilePath: action.filePath,
       }));
 
     case "tab/usageUpdated":

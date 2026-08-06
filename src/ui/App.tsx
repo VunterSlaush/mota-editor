@@ -86,7 +86,9 @@ export function App({ context }: { context: AppContext }) {
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
           onOpenSettings={() => setSettingsOpen(true)}
-          loadHistory={() => context.sessionHistory.list(tab.project.id)}
+          loadHistory={(onRefresh) =>
+            context.sessionHistory.list(tab.project.id, onRefresh)
+          }
           onOpenSession={(sessionId, native, savedAt) =>
             context.sessionHistory.open(tab.project.id, sessionId, native, savedAt)
           }

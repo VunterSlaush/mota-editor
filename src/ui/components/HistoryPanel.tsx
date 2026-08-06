@@ -1,16 +1,16 @@
-import type { TranscriptMeta } from "../../core/ports/transcriptStore";
+import type { HistoryItem } from "../../core/usecases/history";
 
 interface Props {
-  sessions: readonly TranscriptMeta[];
-  /** True when these are the agent's own sessions (opening = true resume). */
+  sessions: readonly HistoryItem[];
+  /** True when any are the agent's own sessions (opening = true resume). */
   native: boolean;
-  /** True while the list is being fetched from the agent. */
+  /** True while the list is being fetched from the local store. */
   loading: boolean;
   /** Why the list is empty when it's a failure, not an absence. */
   error?: string;
   activeSessionId?: string;
   busy: boolean;
-  onOpen: (sessionId: string, savedAt: number) => void;
+  onOpen: (sessionId: string, native: boolean, savedAt: number) => void;
   onDelete: (sessionId: string) => void;
   onNewChat: () => void;
 }
@@ -60,7 +60,7 @@ export function HistoryPanel({
             className={`history__item ${
               session.id === activeSessionId ? "history__item--active" : ""
             }`}
-            onClick={() => !busy && onOpen(session.id, session.savedAt)}
+            onClick={() => !busy && onOpen(session.id, session.native, session.savedAt)}
             title={
               session.messageCount !== undefined
                 ? `${session.messageCount} messages · ${session.provider}`
@@ -71,7 +71,7 @@ export function HistoryPanel({
             <div className="history__meta">
               <span>{formatWhen(session.savedAt)}</span>
               <span className="history__provider">{session.provider}</span>
-              {!native && (
+              {!session.native && (
                 <button
                   type="button"
                   className="history__delete"

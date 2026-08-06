@@ -24,10 +24,12 @@ class RecordingGateway implements AgentGateway {
   async cancelTurn(): Promise<void> {}
   async endSession(): Promise<void> {}
   async warmSession(): Promise<void> {}
-  async listNativeSessions(): Promise<{ sessionId: string }[]> {
-    return [];
+  async listNativeSessions(): Promise<{ sessionId: string }[] | null> {
+    return null;
   }
-  async loadNativeSession(): Promise<void> {}
+  async loadNativeSession(): Promise<{ replayed: boolean }> {
+    return { replayed: true };
+  }
   async respondPermission(tabId: string, requestId: string, optionId: string) {
     this.responses.push({ tabId, requestId, optionId });
   }

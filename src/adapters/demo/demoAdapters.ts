@@ -193,10 +193,12 @@ export class DemoAgentGateway implements AgentGateway {
 
   async endSession(): Promise<void> {}
   async warmSession(): Promise<void> {}
-  async listNativeSessions(): Promise<{ sessionId: string }[]> {
-    throw new Error("demo: no native history");
+  async listNativeSessions(): Promise<{ sessionId: string }[] | null> {
+    return null; // demo: no live agent, so no native history to ask
   }
-  async loadNativeSession(): Promise<void> {}
+  async loadNativeSession(): Promise<{ replayed: boolean }> {
+    return { replayed: true };
+  }
 }
 
 export class DemoWorkspaceStore implements WorkspaceStore {
