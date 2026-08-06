@@ -6,6 +6,7 @@ import {
   Check,
   CircleNotch,
   ClipboardText,
+  Info,
   LockKey,
   Paperclip,
   X,
@@ -13,7 +14,8 @@ import {
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { permissionOptionHint } from "../../core/entities/approval";
 import { formatElapsed } from "../../core/entities/duration";
-import type { ChatMessage, ToolCallState } from "../../core/entities/message";
+import type { ChatMessage, ToolCallState, TurnMeta } from "../../core/entities/message";
+import { formatTokens } from "../../core/entities/tokens";
 import { fileName } from "../fileName";
 import { CommandText } from "./CommandText";
 import { Markdown } from "./MarkdownLite";
@@ -495,6 +497,9 @@ const MessageBubble = memo(function MessageBubble({
   // Expansion is per-row UI state, not message state: collapsing again
   // must not touch the transcript.
   const [expanded, setExpanded] = useState(false);
+  // Separate from `expanded` (tool rows own that): the per-prompt
+  // details panel on user bubbles.
+  const [turnOpen, setTurnOpen] = useState(false);
   if (message.role === "tool") {
     const lines = (detail ?? message.text).split("\n");
     const call = message.toolCall;
@@ -571,8 +576,15 @@ const MessageBubble = memo(function MessageBubble({
       </div>
     );
   }
+  // The details icon appears only once the turn completed (durationMs
+  // set) — while it runs, the WorkingIndicator already shows elapsed.
+  const turn = message.role === "user" ? message.turn : undefined;
+  const turnDone = turn?.durationMs !== undefined;
   return (
-    <div className={`msg msg--${message.role}`} ref={innerRef}>
+    <div
+      className={`msg msg--${message.role} ${turnDone ? "msg--has-turn" : ""}`}
+      ref={innerRef}
+    >
       <div className="msg__text">
         <CommandText text={message.text} commands={commands} />
       </div>
@@ -585,6 +597,44 @@ const MessageBubble = memo(function MessageBubble({
           ))}
         </div>
       )}
+      {turnDone && turn && (
+        <>
+          <button
+            type="button"
+            className="msg__turn-toggle"
+            aria-expanded={turnOpen}
+            aria-label={turnOpen ? "Hide turn details" : "Show turn details"}
+            title="Turn details"
+            onClick={() => setTurnOpen((open) => !open)}
+          >
+            <Info size={12} weight="bold" />
+          </button>
+          {turnOpen && <TurnDetails turn={turn} />}
+        </>
+      )}
     </div>
   );
 });
+
+/** The expanded per-prompt details. Pure display: every value is already
+ *  on the message, so there are no timers and no store reads. */
+function TurnDetails({ turn }: { turn: TurnMeta }) {
+  return (
+    <div className="msg__turn-details">
+      {turn.command && <span className="msg__turn-cmd">{turn.command}</span>}
+      <span>{new Date(turn.sentAt).toLocaleTimeString()}</span>
+      {turn.durationMs !== undefined && <span>{formatElapsed(turn.durationMs)}</span>}
+      {turn.tokens !== undefined && (
+        <span>
+          {turn.tokensEstimated ? "≈" : ""}
+          {formatTokens(turn.tokens)} tokens
+        </span>
+      )}
+      <span>model {turn.model ?? "default"}</span>
+      <span>effort {turn.effort ?? "default"}</span>
+      <span>{turn.mode}</span>
+      <span>{turn.permission}</span>
+      {turn.stopReason && <span>{turn.stopReason}</span>}
+    </div>
+  );
+}

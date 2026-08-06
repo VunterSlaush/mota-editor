@@ -634,3 +634,88 @@ describe("SendPrompt", () => {
     ]);
   });
 });
+
+describe("SendPrompt turn meta", () => {
+  it("stamps the user message with the turn's settings and command", async () => {
+    const { store, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({ type: "tab/modelChanged", tabId: "t1", model: "sonnet" });
+    store.dispatch({ type: "tab/effortChanged", tabId: "t1", effort: "high" });
+
+    await useCase.execute("t1", "/review src");
+    await useCase.execute("t1", "plain prose prompt");
+
+    const [first, second] = store
+      .getState()
+      .tabs[0].messages.filter((m) => m.role === "user");
+    expect(first.turn).toMatchObject({
+      mode: DEFAULTS.mode,
+      permission: DEFAULTS.permission,
+      model: "sonnet",
+      effort: "high",
+      command: "/review",
+    });
+    expect(first.turn?.sentAt).toBeGreaterThan(0);
+    expect(second.turn?.command).toBeUndefined();
+  });
+
+  it("patches duration and the usage delta onto the prompt at completion", async () => {
+    const { store, gateway, useCase } = setup([
+      { kind: "usage", used: 1000, size: 200_000 },
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "first");
+    gateway.script = [
+      { kind: "usage", used: 1600, size: 200_000 },
+      { kind: "completed", isError: false },
+    ];
+    await useCase.execute("t1", "second");
+
+    const users = store.getState().tabs[0].messages.filter((m) => m.role === "user");
+    expect(users[0].turn?.tokens).toBe(1000); // from an empty context
+    expect(users[1].turn?.tokens).toBe(600);
+    expect(users[1].turn?.tokensEstimated).toBeUndefined();
+    expect(users[1].turn?.durationMs).toBeGreaterThanOrEqual(0);
+    expect(users[1].turn?.stopReason).toBeUndefined(); // end_turn is the quiet default
+  });
+
+  it("omits tokens on a negative delta and flags estimated endpoints", async () => {
+    // (a) compaction shrank the context between the endpoints.
+    const shrunk = setup([
+      { kind: "usage", used: 5000, size: 200_000 },
+      { kind: "completed", isError: false },
+    ]);
+    await shrunk.useCase.execute("t1", "first");
+    shrunk.gateway.script = [
+      { kind: "usage", used: 1000, size: 200_000 },
+      { kind: "completed", isError: false },
+    ];
+    await shrunk.useCase.execute("t1", "second");
+    const users = shrunk.store
+      .getState()
+      .tabs[0].messages.filter((m) => m.role === "user");
+    expect(users[1].turn?.tokens).toBeUndefined();
+    expect(users[1].turn?.durationMs).toBeGreaterThanOrEqual(0);
+
+    // (b) the agent reported nothing — the client estimate taints the delta.
+    const estimated = setup([{ kind: "completed", isError: false }]);
+    await estimated.useCase.execute("t1", "no usage reported");
+    const message = estimated.store
+      .getState()
+      .tabs[0].messages.find((m) => m.role === "user");
+    expect(message?.turn?.tokens).toBeGreaterThan(0);
+    expect(message?.turn?.tokensEstimated).toBe(true);
+  });
+
+  it("records the stop reason of a cancelled turn", async () => {
+    const { store, useCase } = setup([
+      { kind: "completed", isError: false, stopReason: "cancelled" },
+    ]);
+
+    await useCase.execute("t1", "abort me");
+
+    const message = store.getState().tabs[0].messages.find((m) => m.role === "user");
+    expect(message?.turn?.stopReason).toBe("cancelled");
+    expect(message?.turn?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+});

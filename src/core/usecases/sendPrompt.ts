@@ -1,5 +1,6 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
 import { dedupeCommands } from "../entities/command";
+import { leadingCommand } from "../entities/commandConfig";
 import { serversForProvider } from "../entities/mcpServer";
 import {
   approvalMessage,
@@ -89,18 +90,29 @@ export class SendPrompt {
       ? configured.project.providerSessions[provider]
       : undefined;
 
-    this.store.dispatch({
-      type: "chat/messageAppended",
-      tabId,
-      message: userMessage(trimmed, attachments),
+    // Stamp the prompt with the turn's settings (post-command-config, so
+    // it reflects what the command switched the tab to). The outcome —
+    // duration, token delta, stop reason — is patched on at completion.
+    const sentAt = Date.now();
+    const command = leadingCommand(trimmed);
+    const message = userMessage(trimmed, attachments, {
+      sentAt,
+      mode,
+      permission,
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
+      ...(command ? { command } : {}),
     });
+    this.inflight.set(tabId, {
+      messageId: message.id,
+      sentAt,
+      usedBefore: configured.usage?.used ?? 0,
+      usedBeforeEstimated: configured.usage?.estimated === true,
+    });
+
+    this.store.dispatch({ type: "chat/messageAppended", tabId, message });
     // The clock comes from here, not the reducer, which stays pure.
-    this.store.dispatch({
-      type: "chat/busyChanged",
-      tabId,
-      busy: true,
-      at: Date.now(),
-    });
+    this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: sentAt });
 
     try {
       await this.agentGateway.startTurn(
@@ -123,6 +135,8 @@ export class SendPrompt {
         (event) => this.onEvent(tabId, event),
       );
     } catch (e) {
+      // A turn that never started has no outcome to stamp.
+      this.inflight.delete(tabId);
       this.store.dispatch({
         type: "chat/messageAppended",
         tabId,
@@ -133,6 +147,18 @@ export class SendPrompt {
   }
 
   private readonly deltas = new Map<string, DeltaBuffer>();
+
+  /** The prompt each tab's running turn belongs to, so completion can
+   *  patch it in O(1) — tab.turnStartedAt is already cleared by then. */
+  private readonly inflight = new Map<
+    string,
+    {
+      messageId: string;
+      sentAt: number;
+      usedBefore: number;
+      usedBeforeEstimated: boolean;
+    }
+  >();
 
   private onEvent(tabId: string, event: AgentTurnEvent): void {
     // Deltas coalesce; everything else flushes first so ordering holds
@@ -325,6 +351,9 @@ export class SendPrompt {
         // A cancel already has the user's full attention.
         if (event.stopReason !== "cancelled") this.requestAttention(tabId);
         this.estimateUsageIfUnreported(tabId);
+        // After the estimate (so the delta has an endpoint) and before
+        // the save (so the transcript carries the completed meta).
+        this.completeTurnMeta(tabId, event.stopReason);
         void persistWorkspace(this.store.getState(), this.workspaceStore);
         void this.saveTranscript(tabId);
         this.autoCompactIfNeeded(tabId);
@@ -471,6 +500,37 @@ export class SendPrompt {
       ),
     });
     void this.execute(tabId, compactCommand);
+  }
+
+  /**
+   * Stamp the turn's outcome onto the prompt that started it: duration,
+   * the context-usage delta, and any abnormal stop reason. Exactly one
+   * dispatch, replacing exactly one message object.
+   */
+  private completeTurnMeta(tabId: string, stopReason?: string): void {
+    const entry = this.inflight.get(tabId);
+    if (!entry) return;
+    this.inflight.delete(tabId);
+
+    const usage = tabById(this.store.getState(), tabId)?.usage;
+    const delta = usage ? usage.used - entry.usedBefore : undefined;
+    // A negative delta means compaction shrank the context mid-turn — a
+    // token count would be noise, so only the duration is kept.
+    const tokens = delta !== undefined && delta >= 0 ? delta : undefined;
+    const estimated =
+      tokens !== undefined && (entry.usedBeforeEstimated || usage?.estimated === true);
+
+    this.store.dispatch({
+      type: "chat/turnMetaCompleted",
+      tabId,
+      messageId: entry.messageId,
+      patch: {
+        durationMs: Date.now() - entry.sentAt,
+        ...(tokens !== undefined ? { tokens } : {}),
+        ...(estimated ? { tokensEstimated: true } : {}),
+        ...(stopReason && stopReason !== "end_turn" ? { stopReason } : {}),
+      },
+    });
   }
 
   /** Persist the conversation so it appears in the History panel. */

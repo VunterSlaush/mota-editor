@@ -12,6 +12,11 @@ const CHARS_PER_TOKEN = 4;
 /** Fixed cost per message for role/framing overhead. */
 const PER_MESSAGE_OVERHEAD = 4;
 
+/** Token counts for display: "742", "12k". */
+export function formatTokens(tokens: number): string {
+  return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
+}
+
 export function estimateTokens(messages: readonly ChatMessage[]): number {
   let characters = 0;
   for (const message of messages) {

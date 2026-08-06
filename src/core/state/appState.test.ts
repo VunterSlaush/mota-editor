@@ -248,3 +248,49 @@ describe("appState reducer", () => {
     expect(state.tabs[1].project.effort).toBe("max");
   });
 });
+
+describe("chat/turnMetaCompleted", () => {
+  const meta = { sentAt: 1000, mode: "agent", permission: "manual" };
+
+  it("patches exactly the addressed message", () => {
+    let state = open(initialState, "t1", "/a");
+    const first = userMessage("one", [], meta);
+    const second = userMessage("two", [], meta);
+    state = reduce(state, { type: "chat/messageAppended", tabId: "t1", message: first });
+    state = reduce(state, { type: "chat/messageAppended", tabId: "t1", message: second });
+
+    state = reduce(state, {
+      type: "chat/turnMetaCompleted",
+      tabId: "t1",
+      messageId: first.id,
+      patch: { durationMs: 250, tokens: 600 },
+    });
+
+    const [patched, untouched] = state.tabs[0].messages;
+    expect(patched.turn).toMatchObject({ ...meta, durationMs: 250, tokens: 600 });
+    expect(untouched).toBe(second); // same object — memoized rows stay put
+  });
+
+  it("ignores unknown ids and messages without turn meta", () => {
+    let state = open(initialState, "t1", "/a");
+    const bare = userMessage("no meta");
+    state = reduce(state, { type: "chat/messageAppended", tabId: "t1", message: bare });
+    const before = state.tabs[0].messages;
+
+    state = reduce(state, {
+      type: "chat/turnMetaCompleted",
+      tabId: "t1",
+      messageId: bare.id,
+      patch: { durationMs: 1 },
+    });
+    state = reduce(state, {
+      type: "chat/turnMetaCompleted",
+      tabId: "t1",
+      messageId: "nope",
+      patch: { durationMs: 1 },
+    });
+
+    expect(state.tabs[0].messages[0]).toBe(before[0]);
+    expect(state.tabs[0].messages[0].turn).toBeUndefined();
+  });
+});

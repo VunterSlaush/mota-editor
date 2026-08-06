@@ -1,3 +1,4 @@
+import { formatTokens } from "../../core/entities/tokens";
 import type { AppSettings, TabState } from "../../core/state/appState";
 
 interface Props {
@@ -94,8 +95,4 @@ export function SettingsUsage({ settings, onChange, tabs }: Props) {
       })}
     </div>
   );
-}
-
-function formatTokens(tokens: number): string {
-  return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
 }

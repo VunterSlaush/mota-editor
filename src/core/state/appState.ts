@@ -165,6 +165,18 @@ export type Action =
   | { type: "chat/userDelta"; tabId: string; text: string }
   | { type: "chat/thoughtDelta"; tabId: string; text: string }
   | { type: "chat/historySessionAssigned"; tabId: string; sessionId: string }
+  /** A turn finished: stamp its outcome onto the prompt that started it. */
+  | {
+      type: "chat/turnMetaCompleted";
+      tabId: string;
+      messageId: string;
+      patch: {
+        readonly durationMs: number;
+        readonly tokens?: number;
+        readonly tokensEstimated?: boolean;
+        readonly stopReason?: string;
+      };
+    }
   | {
       type: "chat/transcriptLoaded";
       tabId: string;
@@ -381,6 +393,19 @@ export function reduce(state: AppState, action: Action): AppState {
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         historySessionId: action.sessionId,
+      }));
+
+    // Like chat/toolCallUpdated: exactly one message object changes, so
+    // memoized rows elsewhere don't re-render. The `turn` guard makes an
+    // unknown or replayed id a no-op.
+    case "chat/turnMetaCompleted":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        messages: tab.messages.map((m) =>
+          m.id === action.messageId && m.turn
+            ? { ...m, turn: { ...m.turn, ...action.patch } }
+            : m,
+        ),
       }));
 
     case "chat/transcriptLoaded":

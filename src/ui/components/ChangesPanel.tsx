@@ -47,8 +47,9 @@ interface Props {
   onShowAgentDiff: (diff: AgentDiff) => void;
 }
 
-/** Which sections start open — all of them; collapsing is the exception. */
-const ALL_OPEN = { agent: true, staged: true, unstaged: true, commits: true };
+/** Which sections start open — the git ones; agent edits is a review
+ *  extra (it survives commits), so it starts folded out of the way. */
+const ALL_OPEN = { agent: false, staged: true, unstaged: true, commits: true };
 
 /**
  * UI — the project's source control, VS-style: fetch/pull/push, staged
@@ -121,6 +122,46 @@ export function ChangesPanel({
   /** The verb's icon, swapped for a spinner while that verb runs. */
   const verbIcon = (verb: NonNullable<typeof working>, Idle: Icon) =>
     working === verb ? <CircleNotch className="changes__watching" /> : <Idle />;
+
+  // Rendered below "Not staged" (or under the no-repo notice: the agent
+  // reports its edits even where git can't).
+  const agentSection = agentEdits.length > 0 && (
+    <Section
+      title="Agent edits"
+      count={agentEdits.length}
+      open={open.agent}
+      onToggle={() => toggle("agent")}
+    >
+      <ul className="changes__list">
+        {agentEdits.map((file) => (
+          <li key={file.path} className="changes__item" title={file.path}>
+            <span className="changes__badge changes__badge--agent">
+              <GitDiff size={12} />
+            </span>
+            <button
+              type="button"
+              className="changes__file"
+              title={
+                file.diff
+                  ? `Show the agent's change to ${file.path}`
+                  : `Open ${file.path}`
+              }
+              onClick={() =>
+                file.diff
+                  ? onShowAgentDiff({ path: file.path, ...file.diff })
+                  : void onOpenFile(file.path)
+              }
+            >
+              <span className="changes__filename">{fileName(file.path)}</span>
+              {parentDir(file.path) && (
+                <span className="changes__dir">{parentDir(file.path)}</span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
 
   return (
     <aside className="changes">
@@ -207,46 +248,11 @@ export function ChangesPanel({
         </p>
       )}
 
-      {agentEdits.length > 0 && (
-        <Section
-          title="Agent edits"
-          count={agentEdits.length}
-          open={open.agent}
-          onToggle={() => toggle("agent")}
-        >
-          <ul className="changes__list">
-            {agentEdits.map((file) => (
-              <li key={file.path} className="changes__item" title={file.path}>
-                <span className="changes__badge changes__badge--agent">
-                  <GitDiff size={12} />
-                </span>
-                <button
-                  type="button"
-                  className="changes__file"
-                  title={
-                    file.diff
-                      ? `Show the agent's change to ${file.path}`
-                      : `Open ${file.path}`
-                  }
-                  onClick={() =>
-                    file.diff
-                      ? onShowAgentDiff({ path: file.path, ...file.diff })
-                      : void onOpenFile(file.path)
-                  }
-                >
-                  <span className="changes__filename">{fileName(file.path)}</span>
-                  {parentDir(file.path) && (
-                    <span className="changes__dir">{parentDir(file.path)}</span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-
       {!changes ? (
-        <p className="changes__empty">Not a git repository (or git isn't installed).</p>
+        <>
+          <p className="changes__empty">Not a git repository (or git isn't installed).</p>
+          {agentSection}
+        </>
       ) : (
         <>
           {changes.staged.length === 0 && changes.unstaged.length === 0 && (
@@ -284,6 +290,7 @@ export function ChangesPanel({
               onShowDiff={(file) => onShowDiff(file, false)}
             />
           </Section>
+          {agentSection}
           <Section
             title="Recent commits"
             count={changes.commits.length}

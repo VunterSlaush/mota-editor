@@ -1,4 +1,4 @@
-import { GitBranch } from "@phosphor-icons/react";
+import { GitBranch, NotePencil } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import { type CommandInfo, commandNames } from "../../core/entities/command";
@@ -244,16 +244,30 @@ export function ChatPanel({
           </button>
         )}
         <div className="chat-panel__controls">
+          <button
+            type="button"
+            className="new-chat-button"
+            disabled={tab.busy}
+            title="New chat — clears the screen AND starts a fresh agent context"
+            onClick={onNewChat}
+          >
+            <NotePencil size={14} aria-hidden="true" />
+            New chat
+          </button>
           <label
             className="verbose-toggle"
             title="Verbose: show tool activity, thoughts, and status rows. Off: only the conversation."
           >
+            Verbose
             <input
               type="checkbox"
+              role="switch"
+              aria-checked={tab.project.verbose}
+              className="switch__input"
               checked={tab.project.verbose}
               onChange={(e) => onToggleVerbose(e.target.checked)}
             />
-            Verbose
+            <span className="switch" aria-hidden="true" />
           </label>
           <ProviderPicker
             value={tab.project.provider}

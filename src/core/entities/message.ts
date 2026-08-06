@@ -111,6 +111,37 @@ export interface ErrorInfo {
   readonly stderrTail?: string;
 }
 
+/**
+ * Per-prompt turn details, on user messages only. Send-time fields are
+ * set when the prompt goes out; durationMs/tokens/stopReason are patched
+ * once when the turn completes. Absent on rows rebuilt from native agent
+ * history — such rows render no details affordance.
+ */
+export interface TurnMeta {
+  /** Epoch ms the prompt was sent. */
+  readonly sentAt: number;
+  /** Plain strings, not the settings types: message.ts imports nothing
+   *  and the UI only displays these values. */
+  readonly mode: string;
+  readonly permission: string;
+  /** Undefined = provider default (the agent never reports the model it
+   *  actually resolved to). */
+  readonly model?: string;
+  readonly effort?: string;
+  /** Leading slash command, when the prompt was one (e.g. "/review"). */
+  readonly command?: string;
+  // — patched at completion; durationMs presence gates the details icon —
+  /** Turn wall time in ms. */
+  readonly durationMs?: number;
+  /** Context tokens this turn consumed (usage delta); absent when
+   *  unknown, or negative because compaction shrank the context. */
+  readonly tokens?: number;
+  /** True when either endpoint of the delta was a client-side estimate. */
+  readonly tokensEstimated?: boolean;
+  /** ACP stop reason, recorded only when not a plain "end_turn". */
+  readonly stopReason?: string;
+}
+
 export interface ChatMessage {
   readonly id: string;
   readonly role: MessageRole;
@@ -127,6 +158,8 @@ export interface ChatMessage {
   readonly approval?: ApprovalState;
   /** For question messages: what the agent asked. */
   readonly question?: QuestionState;
+  /** For user messages: the turn's settings and outcome. */
+  readonly turn?: TurnMeta;
 }
 
 let counter = 0;
@@ -140,9 +173,15 @@ export function nextMessageId(): string {
 export function userMessage(
   text: string,
   attachments: readonly string[] = [],
+  turn?: TurnMeta,
 ): ChatMessage {
-  const message: ChatMessage = { id: nextMessageId(), role: "user", text };
-  return attachments.length > 0 ? { ...message, attachments } : message;
+  return {
+    id: nextMessageId(),
+    role: "user",
+    text,
+    ...(attachments.length > 0 ? { attachments } : {}),
+    ...(turn ? { turn } : {}),
+  };
 }
 
 export function assistantMessage(text: string): ChatMessage {
