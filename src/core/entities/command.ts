@@ -3,10 +3,14 @@ import type { ProviderId } from "./provider";
 /**
  * Entities layer — a slash command the user can send to an agent.
  */
+/** Where a command comes from: the CLI itself, the project's command
+ *  folder, or the user's home command folder. */
+export type CommandSource = "builtin" | "project" | "user";
+
 export interface CommandInfo {
   readonly name: string;
   readonly description: string;
-  readonly source: "builtin" | "custom";
+  readonly source: CommandSource;
 }
 
 /**

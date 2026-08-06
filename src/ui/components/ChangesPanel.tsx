@@ -8,6 +8,7 @@ import {
   CaretDown,
   CaretRight,
   Check,
+  CircleNotch,
   DotsThree,
   GitBranch,
   GitDiff,
@@ -71,7 +72,11 @@ export function ChangesPanel({
   onShowDiff,
   onShowAgentDiff,
 }: Props) {
-  const [working, setWorking] = useState(false);
+  // Which verb is in flight — its button shows a spinner while the
+  // remote round-trip (fetch/pull/push can take seconds) runs.
+  const [working, setWorking] = useState<
+    "fetch" | "pull" | "push" | "commit" | "file" | null
+  >(null);
   const [notice, setNotice] = useState<GitActionResult | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [open, setOpen] = useState(ALL_OPEN);
@@ -80,13 +85,14 @@ export function ChangesPanel({
     setOpen((current) => ({ ...current, [section]: !current[section] }));
 
   const run = async (
+    verb: NonNullable<typeof working>,
     action: () => Promise<GitActionResult>,
   ): Promise<GitActionResult> => {
-    setWorking(true);
+    setWorking(verb);
     setNotice(null);
     const result = await action();
     setNotice(result.message ? result : null);
-    setWorking(false);
+    setWorking(null);
     onRefresh();
     return result;
   };
@@ -100,7 +106,7 @@ export function ChangesPanel({
 
   // Reading git is safe while the agent works; moving the index under it
   // is not. Only the refresh stays live.
-  const mutationsDisabled = busy || working;
+  const mutationsDisabled = busy || working !== null;
   const currentBranch = changes?.branches.find((b) => b.current)?.name ?? "";
   const canCommit =
     !mutationsDisabled &&
@@ -108,9 +114,13 @@ export function ChangesPanel({
     commitMessage.trim() !== "";
 
   const commitPush = async () => {
-    const result = await run(() => onCommitPush(commitMessage));
+    const result = await run("commit", () => onCommitPush(commitMessage));
     if (result.ok) setCommitMessage("");
   };
+
+  /** The verb's icon, swapped for a spinner while that verb runs. */
+  const verbIcon = (verb: NonNullable<typeof working>, Idle: Icon) =>
+    working === verb ? <CircleNotch className="changes__watching" /> : <Idle />;
 
   return (
     <aside className="changes">
@@ -133,32 +143,32 @@ export function ChangesPanel({
           className="changes__action"
           // Fetch moves no files, so it is safe even mid-turn — the only
           // remote verb the running agent can't be disturbed by.
-          disabled={working}
+          disabled={working !== null}
           title="Fetch and prune remote-tracking branches"
-          onClick={() => void run(onFetch)}
+          onClick={() => void run("fetch", onFetch)}
         >
-          <ArrowsClockwise /> Fetch
+          {verbIcon("fetch", ArrowsClockwise)} Fetch
         </button>
         <button
           type="button"
           className="changes__action"
           disabled={mutationsDisabled}
-          onClick={() => void run(onPull)}
+          onClick={() => void run("pull", onPull)}
         >
-          <ArrowLineDown /> Pull
+          {verbIcon("pull", ArrowLineDown)} Pull
         </button>
         <button
           type="button"
           className="changes__action"
           disabled={mutationsDisabled}
-          onClick={() => void run(onPush)}
+          onClick={() => void run("push", onPush)}
         >
-          <ArrowLineUp /> Push
+          {verbIcon("push", ArrowLineUp)} Push
         </button>
         <button
           type="button"
           className="changes__action changes__action--icon"
-          disabled={working}
+          disabled={working !== null}
           aria-label="Refresh git status"
           title={
             busy ? "Watching the agent's changes live — click to refresh now" : "Refresh"
@@ -187,7 +197,7 @@ export function ChangesPanel({
           title="Commit staged changes and push"
           onClick={() => void commitPush()}
         >
-          <Check /> Commit & Push
+          {verbIcon("commit", Check)} Commit & Push
         </button>
       </div>
 
@@ -253,7 +263,7 @@ export function ChangesPanel({
               ActionIcon={Minus}
               actionTitle="Unstage"
               disabled={mutationsDisabled}
-              onAction={(path) => void run(() => onUnstage(path))}
+              onAction={(path) => void run("file", () => onUnstage(path))}
               onOpenFile={(path) => void openFile(path)}
               onShowDiff={(file) => onShowDiff(file, true)}
             />
@@ -269,7 +279,7 @@ export function ChangesPanel({
               ActionIcon={Plus}
               actionTitle="Stage"
               disabled={mutationsDisabled}
-              onAction={(path) => void run(() => onStage(path))}
+              onAction={(path) => void run("file", () => onStage(path))}
               onOpenFile={(path) => void openFile(path)}
               onShowDiff={(file) => onShowDiff(file, false)}
             />

@@ -10,7 +10,7 @@ interface Props {
   error?: string;
   activeSessionId?: string;
   busy: boolean;
-  onOpen: (sessionId: string) => void;
+  onOpen: (sessionId: string, savedAt: number) => void;
   onDelete: (sessionId: string) => void;
   onNewChat: () => void;
 }
@@ -60,7 +60,7 @@ export function HistoryPanel({
             className={`history__item ${
               session.id === activeSessionId ? "history__item--active" : ""
             }`}
-            onClick={() => !busy && onOpen(session.id)}
+            onClick={() => !busy && onOpen(session.id, session.savedAt)}
             title={
               session.messageCount !== undefined
                 ? `${session.messageCount} messages · ${session.provider}`

@@ -15,6 +15,112 @@
   color-scheme: dark;
 }
 
+/* ---- Themes ----
+   Palettes in the spirit of well-known editors (color values only; no
+   vendor assets). The catalog the settings screen shows lives in
+   src/core/entities/theme.ts — keep ids in step. `:root` above IS the
+   default "mota-dark" palette. */
+:root[data-theme="monokai"] {
+  --bg: #272822;
+  --bg-raised: #1e1f1c;
+  --bg-input: #3e3d32;
+  --border: #49483e;
+  --text: #f8f8f2;
+  --text-dim: #75715e;
+  --accent: #66d9ef;
+  --error: #f92672;
+  --warning: #fd971f;
+  --success: #a6e22e;
+  --tool: #ae81ff;
+}
+
+:root[data-theme="dark-plus"] {
+  --bg: #1e1e1e;
+  --bg-raised: #252526;
+  --bg-input: #3c3c3c;
+  --border: #454545;
+  --text: #d4d4d4;
+  --text-dim: #858585;
+  --accent: #3794ff;
+  --error: #f48771;
+  --warning: #cca700;
+  --success: #89d185;
+  --tool: #c586c0;
+}
+
+:root[data-theme="light-plus"] {
+  --bg: #ffffff;
+  --bg-raised: #f3f3f3;
+  --bg-input: #f8f8f8;
+  --border: #d4d4d4;
+  --text: #333333;
+  --text-dim: #6e6e6e;
+  --accent: #005fb8;
+  --error: #e51400;
+  --warning: #bf8803;
+  --success: #107c10;
+  --tool: #af00db;
+  color-scheme: light;
+}
+
+:root[data-theme="one-dark"] {
+  --bg: #282c34;
+  --bg-raised: #21252b;
+  --bg-input: #1d2025;
+  --border: #3e4451;
+  --text: #abb2bf;
+  --text-dim: #5c6370;
+  --accent: #61afef;
+  --error: #e06c75;
+  --warning: #e5c07b;
+  --success: #98c379;
+  --tool: #c678dd;
+}
+
+:root[data-theme="one-light"] {
+  --bg: #fafafa;
+  --bg-raised: #eaeaeb;
+  --bg-input: #ffffff;
+  --border: #dbdbdc;
+  --text: #383a42;
+  --text-dim: #a0a1a7;
+  --accent: #4078f2;
+  --error: #e45649;
+  --warning: #c18401;
+  --success: #50a14f;
+  --tool: #a626a4;
+  color-scheme: light;
+}
+
+:root[data-theme="brackets"] {
+  --bg: #f8f8f8;
+  --bg-raised: #ffffff;
+  --bg-input: #ffffff;
+  --border: #d9d9d9;
+  --text: #333333;
+  --text-dim: #949494;
+  --accent: #1474bf;
+  --error: #dc4b42;
+  --warning: #d78b28;
+  --success: #3c9f4e;
+  --tool: #8757ad;
+  color-scheme: light;
+}
+
+:root[data-theme="darcula"] {
+  --bg: #2b2b2b;
+  --bg-raised: #3c3f41;
+  --bg-input: #45494a;
+  --border: #515658;
+  --text: #a9b7c6;
+  --text-dim: #808080;
+  --accent: #589df6;
+  --error: #ff6b68;
+  --warning: #ffc66d;
+  --success: #6a8759;
+  --tool: #9876aa;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1239,6 +1345,28 @@ body {
   border-color: var(--accent);
 }
 
+/* Separator naming where the commands beneath it come from. */
+.command-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 18px;
+  padding-bottom: 6px;
+}
+
+.command-group__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.command-group__hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 /* One slash command and the settings it applies to its tab. */
 .command-row {
   display: flex;
@@ -1510,6 +1638,9 @@ body {
 /* ---- Header branch chip ---- */
 .branch-chip {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--accent);
@@ -2968,4 +3099,163 @@ body {
 .empty-state__hint {
   font-size: 12px;
   max-width: 420px;
+}
+
+/* ---- Settings: Usage section ---- */
+.settings-section__subtitle {
+  margin: 22px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.usage-threshold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.usage-threshold input[type="range"] {
+  width: 160px;
+  accent-color: var(--accent);
+}
+
+.usage-threshold__value {
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* One open session and its live context reading. */
+.usage-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.usage-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usage-row__name {
+  font-size: 13px;
+}
+
+.usage-row__provider {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.usage-row__reading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.usage-row__bar {
+  width: 140px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.usage-row__fill {
+  height: 100%;
+  background: var(--success);
+}
+
+.usage-row__fill--over {
+  background: var(--warning);
+}
+
+.usage-row__numbers {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.usage-row__numbers--none {
+  font-style: italic;
+}
+
+/* ---- Settings: Theme section ---- */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.theme-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-card:hover {
+  border-color: var(--text-dim);
+}
+
+.theme-card--active {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+/* A miniature of the palette: its background with three key colors. */
+.theme-card__preview {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 56px;
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.theme-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.theme-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.theme-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.theme-card__label svg {
+  color: var(--accent);
+}
+
+.theme-card__hint {
+  font-size: 11px;
+  color: var(--text-dim);
 }

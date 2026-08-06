@@ -61,6 +61,9 @@ export interface TabState {
   /** Where session startup stands (installing|booting|creating|recovering);
    *  undefined once ready or failed. */
   readonly sessionStage?: string;
+  /** The project's current git branch, cached from the last git read —
+   *  tooltips read this instead of asking git on every hover. */
+  readonly branch?: string;
 }
 
 /**
@@ -78,6 +81,10 @@ export interface AppSettings {
   readonly commandConfigs: Readonly<Record<string, CommandConfig>>;
   /** MCP servers Mota hands to agents, per provider enablement. */
   readonly mcpServers: readonly McpServerConfig[];
+  /** Fraction of the context window at which sessions auto-compact. */
+  readonly autoCompactThreshold: number;
+  /** Color theme id, from `entities/theme`. */
+  readonly theme: string;
 }
 
 export interface AppState {
@@ -94,6 +101,8 @@ export const defaultSettings: AppSettings = {
   defaultEffort: {},
   commandConfigs: {},
   mcpServers: [],
+  autoCompactThreshold: 0.85,
+  theme: "mota-dark",
 };
 
 export const initialState: AppState = {
@@ -136,6 +145,7 @@ export type Action =
       estimated?: boolean;
     }
   | { type: "tab/sessionStageChanged"; tabId: string; stage: string | undefined }
+  | { type: "tab/branchUpdated"; tabId: string; branch: string | undefined }
   /** The backend agent session was ended on purpose: forget everything
    *  tied to it (resume id, usage, advertised commands). */
   | { type: "chat/sessionReset"; tabId: string; provider: ProviderId }
@@ -323,6 +333,9 @@ export function reduce(state: AppState, action: Action): AppState {
         ...tab,
         sessionStage: action.stage,
       }));
+
+    case "tab/branchUpdated":
+      return mapTab(state, action.tabId, (tab) => ({ ...tab, branch: action.branch }));
 
     case "chat/messageAppended":
       return mapTab(state, action.tabId, (tab) => ({

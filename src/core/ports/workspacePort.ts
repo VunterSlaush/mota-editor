@@ -33,6 +33,8 @@ export interface PersistedSettings {
   readonly defaultEffort?: Readonly<Partial<Record<ProviderId, string>>>;
   readonly commandConfigs?: Readonly<Record<string, CommandConfig>>;
   readonly mcpServers?: readonly McpServerConfig[];
+  readonly autoCompactThreshold?: number;
+  readonly theme?: string;
 }
 
 export interface PersistedWorkspace {

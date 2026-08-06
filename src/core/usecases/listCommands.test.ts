@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import type { CommandInfo } from "../entities/command";
 import { newProject } from "../entities/project";
 import type { CommandCatalog } from "../ports/commandCatalog";
@@ -31,7 +31,7 @@ const DEFAULTS = projectDefaults(defaultSettings);
 describe("ListCommands", () => {
   it("merges built-ins with discovered custom commands, sorted by name", async () => {
     const { catalog, useCase } = setup();
-    catalog.custom = [{ name: "/deploy", description: "Ship it", source: "custom" }];
+    catalog.custom = [{ name: "/deploy", description: "Ship it", source: "project" }];
 
     const commands = await useCase.execute("t1");
 
@@ -43,7 +43,7 @@ describe("ListCommands", () => {
 
   it("custom commands never shadow a built-in with the same name", async () => {
     const { catalog, useCase } = setup();
-    catalog.custom = [{ name: "/init", description: "impostor", source: "custom" }];
+    catalog.custom = [{ name: "/init", description: "impostor", source: "project" }];
 
     const commands = await useCase.execute("t1");
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   type CommandInfo,
   commandNames,
@@ -10,7 +10,7 @@ import {
 const COMMANDS: readonly CommandInfo[] = [
   { name: "/review", description: "Review changes", source: "builtin" },
   { name: "/init", description: "Write CLAUDE.md", source: "builtin" },
-  { name: "/start-task", description: "Start from Linear", source: "custom" },
+  { name: "/start-task", description: "Start from Linear", source: "project" },
 ];
 
 const NAMES = commandNames(COMMANDS);
@@ -32,10 +32,10 @@ describe("filterCommands", () => {
 describe("dedupeCommands", () => {
   it("keeps one entry per name, first occurrence winning", () => {
     const listed = dedupeCommands([
-      { name: "/prepare-pr", description: "from command file", source: "custom" },
-      { name: "/prepare-pr", description: "from skill", source: "custom" },
+      { name: "/prepare-pr", description: "from command file", source: "project" },
+      { name: "/prepare-pr", description: "from skill", source: "project" },
       { name: "/review", description: "Review changes", source: "builtin" },
-      { name: "/prepare-pr", description: "from plugin", source: "custom" },
+      { name: "/prepare-pr", description: "from plugin", source: "project" },
     ]);
     expect(listed.map((c) => c.name)).toEqual(["/prepare-pr", "/review"]);
     expect(listed[0].description).toBe("from command file");

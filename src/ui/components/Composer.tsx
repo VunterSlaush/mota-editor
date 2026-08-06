@@ -21,7 +21,6 @@ import {
 } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
-import { AUTO_COMPACT_THRESHOLD } from "../../core/usecases/sendPrompt";
 import { fileName } from "../fileName";
 import { CommandPalette } from "./CommandPalette";
 import { CommandText } from "./CommandText";
@@ -78,6 +77,8 @@ interface Props {
   model: string;
   effort: string;
   usage: { readonly used: number; readonly size: number } | undefined;
+  /** Fraction of the context window at which auto-compact kicks in. */
+  autoCompactThreshold: number;
   onSend: (prompt: string, attachments: readonly string[]) => void;
   onCancel: () => void;
   onPickFiles: () => Promise<string[]>;
@@ -109,6 +110,7 @@ export function Composer({
   model,
   effort,
   usage,
+  autoCompactThreshold,
   onSend,
   onCancel,
   onPickFiles,
@@ -362,7 +364,7 @@ export function Composer({
             />
           </div>
           <div className="composer-card__group">
-            <ContextGauge usage={usage} threshold={AUTO_COMPACT_THRESHOLD} />
+            <ContextGauge usage={usage} threshold={autoCompactThreshold} />
             <ModelPicker
               provider={provider}
               value={model}

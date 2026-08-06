@@ -7,6 +7,7 @@ import type { CommandCatalog } from "../../core/ports/commandCatalog";
 interface WireCommand {
   name: string;
   description: string;
+  origin: "project" | "user";
 }
 
 /**
@@ -22,6 +23,12 @@ export class TauriCommandCatalog implements CommandCatalog {
       projectPath,
       providerId: provider,
     });
-    return wire.map((c) => ({ ...c, source: "custom" as const }));
+    // A backend from before origins reported nothing — assume "project",
+    // the more visible group.
+    return wire.map(({ name, description, origin }) => ({
+      name,
+      description,
+      source: origin ?? "project",
+    }));
   }
 }

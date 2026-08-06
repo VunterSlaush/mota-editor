@@ -67,5 +67,8 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     defaultEffort: persisted?.defaultEffort ?? defaultSettings.defaultEffort,
     commandConfigs: persisted?.commandConfigs ?? defaultSettings.commandConfigs,
     mcpServers: persisted?.mcpServers ?? defaultSettings.mcpServers,
+    autoCompactThreshold:
+      persisted?.autoCompactThreshold ?? defaultSettings.autoCompactThreshold,
+    theme: persisted?.theme ?? defaultSettings.theme,
   };
 }

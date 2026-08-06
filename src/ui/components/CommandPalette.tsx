@@ -35,8 +35,8 @@ export function CommandPalette({ commands, selectedIndex, onPick }: Props) {
         >
           <span className="command-palette__name">{command.name}</span>
           <span className="command-palette__description">{command.description}</span>
-          {command.source === "custom" && (
-            <span className="command-palette__badge">custom</span>
+          {command.source !== "builtin" && (
+            <span className="command-palette__badge">{command.source}</span>
           )}
         </div>
       ))}

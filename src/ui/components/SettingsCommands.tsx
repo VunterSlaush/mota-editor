@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
-import type { CommandInfo } from "../../core/entities/command";
+import type { CommandInfo, CommandSource } from "../../core/entities/command";
 import {
   type CommandConfig,
   commandConfigKey,
@@ -18,6 +18,21 @@ interface Props {
 
 /** Empty id = "leave this alone", which is every command's default. */
 const INHERIT = "";
+
+/** The origin groups, in display order, with what each one means. */
+const SOURCE_GROUPS: readonly { source: CommandSource; label: string; hint: string }[] = [
+  { source: "builtin", label: "Native", hint: "The agent's own commands." },
+  {
+    source: "project",
+    label: "Project",
+    hint: "From this project's command and skill folders.",
+  },
+  {
+    source: "user",
+    label: "User",
+    hint: "From the command folders in your home directory.",
+  },
+];
 
 /**
  * UI — what each slash command does to its tab. Picking a value here
@@ -82,61 +97,73 @@ export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
         <p className="settings-section__hint">No commands found for this provider yet.</p>
       )}
 
-      {commands.map((command) => (
-        <div className="command-row" key={command.name}>
-          <div className="command-row__text">
-            <span className="command-row__name">{command.name}</span>
-            <span className="command-row__description">{command.description}</span>
-          </div>
-          <div className="command-row__controls">
-            <OptionPicker
-              ariaLabel={`Mode for ${command.name}`}
-              placement="bottom"
-              className="command-row__picker"
-              disabled={false}
-              placeholder="Mode"
-              value={configFor(command.name).mode ?? INHERIT}
-              options={[
-                { id: INHERIT, label: "Leave as is" },
-                ...MODES.map((m) => ({ id: m.id, label: m.label })),
-              ]}
-              onChange={(mode) => update(command.name, { mode: mode || undefined })}
-            />
-            <OptionPicker
-              ariaLabel={`Permissions for ${command.name}`}
-              placement="bottom"
-              className="command-row__picker"
-              disabled={false}
-              placeholder="Permissions"
-              value={configFor(command.name).permission ?? INHERIT}
-              options={[
-                { id: INHERIT, label: "Leave as is" },
-                ...PERMISSIONS.map((p) => ({ id: p.id, label: p.label })),
-              ]}
-              onChange={(permission) =>
-                update(command.name, { permission: permission || undefined })
-              }
-            />
-            {efforts.length > 0 && (
-              <OptionPicker
-                ariaLabel={`Effort for ${command.name}`}
-                placement="bottom"
-                className="command-row__picker"
-                disabled={false}
-                placeholder="Effort"
-                value={configFor(command.name).effort ?? INHERIT}
-                options={[
-                  { id: INHERIT, label: "Leave as is" },
-                  ...efforts.map((effort) => ({ id: effort, label: effort })),
-                ]}
-                onChange={(effort) =>
-                  update(command.name, { effort: effort || undefined })
-                }
-              />
-            )}
-          </div>
-        </div>
-      ))}
+      {SOURCE_GROUPS.map((group) => {
+        const grouped = commands.filter((c) => c.source === group.source);
+        if (grouped.length === 0) return null;
+        return (
+          <section key={group.source} aria-label={`${group.label} commands`}>
+            <div className="command-group">
+              <span className="command-group__label">{group.label}</span>
+              <span className="command-group__hint">{group.hint}</span>
+            </div>
+            {grouped.map((command) => (
+              <div className="command-row" key={command.name}>
+                <div className="command-row__text">
+                  <span className="command-row__name">{command.name}</span>
+                  <span className="command-row__description">{command.description}</span>
+                </div>
+                <div className="command-row__controls">
+                  <OptionPicker
+                    ariaLabel={`Mode for ${command.name}`}
+                    placement="bottom"
+                    className="command-row__picker"
+                    disabled={false}
+                    placeholder="Mode"
+                    value={configFor(command.name).mode ?? INHERIT}
+                    options={[
+                      { id: INHERIT, label: "Leave as is" },
+                      ...MODES.map((m) => ({ id: m.id, label: m.label })),
+                    ]}
+                    onChange={(mode) => update(command.name, { mode: mode || undefined })}
+                  />
+                  <OptionPicker
+                    ariaLabel={`Permissions for ${command.name}`}
+                    placement="bottom"
+                    className="command-row__picker"
+                    disabled={false}
+                    placeholder="Permissions"
+                    value={configFor(command.name).permission ?? INHERIT}
+                    options={[
+                      { id: INHERIT, label: "Leave as is" },
+                      ...PERMISSIONS.map((p) => ({ id: p.id, label: p.label })),
+                    ]}
+                    onChange={(permission) =>
+                      update(command.name, { permission: permission || undefined })
+                    }
+                  />
+                  {efforts.length > 0 && (
+                    <OptionPicker
+                      ariaLabel={`Effort for ${command.name}`}
+                      placement="bottom"
+                      className="command-row__picker"
+                      disabled={false}
+                      placeholder="Effort"
+                      value={configFor(command.name).effort ?? INHERIT}
+                      options={[
+                        { id: INHERIT, label: "Leave as is" },
+                        ...efforts.map((effort) => ({ id: effort, label: effort })),
+                      ]}
+                      onChange={(effort) =>
+                        update(command.name, { effort: effort || undefined })
+                      }
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+          </section>
+        );
+      })}
     </div>
   );
 }

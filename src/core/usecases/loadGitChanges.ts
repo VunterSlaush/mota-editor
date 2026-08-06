@@ -37,6 +37,12 @@ export class LoadGitChanges {
         this.git.branches(path).catch(() => []),
         this.git.remoteUrl(path).catch(() => ""),
       ]);
+      // Cache the current branch on the tab: tooltips and other passive
+      // UI read it from state instead of asking git again.
+      const branch = branches.find((b) => b.current)?.name;
+      if (branch !== tab.branch) {
+        this.store.dispatch({ type: "tab/branchUpdated", tabId, branch });
+      }
       return {
         staged: changes.filter((c) => c.staged),
         unstaged: changes.filter((c) => c.unstaged),

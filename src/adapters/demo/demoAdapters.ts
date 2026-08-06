@@ -225,7 +225,7 @@ export class DemoFilePicker implements FilePicker {
 
 export class DemoCommandCatalog implements CommandCatalog {
   async listCustomCommands(): Promise<CommandInfo[]> {
-    return [{ name: "/deploy", description: "Ship it to production", source: "custom" }];
+    return [{ name: "/deploy", description: "Ship it to production", source: "project" }];
   }
 }
 

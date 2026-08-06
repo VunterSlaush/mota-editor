@@ -25,9 +25,6 @@ import { persistWorkspace } from "./persistWorkspace";
 
 export type IdGenerator = () => string;
 
-/** Auto-compact when the session's context window is this full. */
-export const AUTO_COMPACT_THRESHOLD = 0.85;
-
 /**
  * Streamed text arrives at token rate, and every dispatch re-renders the
  * transcript. Deltas are buffered and flushed at most this often — one
@@ -456,9 +453,10 @@ export class SendPrompt {
    * triggered by the compact turn itself.
    */
   private autoCompactIfNeeded(tabId: string): void {
-    const tab = tabById(this.store.getState(), tabId);
+    const state = this.store.getState();
+    const tab = tabById(state, tabId);
     if (!tab?.usage) return;
-    if (tab.usage.used / tab.usage.size < AUTO_COMPACT_THRESHOLD) return;
+    if (tab.usage.used / tab.usage.size < state.settings.autoCompactThreshold) return;
 
     const compactCommand = COMPACT_COMMAND[tab.project.provider];
     const lastUserMessage = [...tab.messages].reverse().find((m) => m.role === "user");

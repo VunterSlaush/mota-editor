@@ -1,3 +1,4 @@
+import { GitBranch } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import { type CommandInfo, commandNames } from "../../core/entities/command";
@@ -42,11 +43,13 @@ type DiffTarget =
 
 interface Props {
   tab: TabState;
+  /** Fraction of the context window at which auto-compact kicks in. */
+  autoCompactThreshold: number;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
   onOpenSettings: () => void;
   loadHistory: () => Promise<HistoryListing>;
-  onOpenSession: (sessionId: string, native: boolean) => Promise<void>;
+  onOpenSession: (sessionId: string, native: boolean, savedAt: number) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
   onNewChat: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
@@ -87,6 +90,7 @@ interface Props {
 /** UI — the chat for one project: header, transcript, plan, composer. */
 export function ChatPanel({
   tab,
+  autoCompactThreshold,
   sidebarView,
   onSelectSidebarView,
   onOpenSettings,
@@ -235,6 +239,7 @@ export function ChatPanel({
             title="Checkout a branch"
             onClick={() => setBranchPickerOpen(true)}
           >
+            <GitBranch size={12} aria-hidden="true" />
             {currentBranch}
           </button>
         )}
@@ -299,7 +304,9 @@ export function ChatPanel({
                   error={history.error}
                   activeSessionId={tab.historySessionId}
                   busy={tab.busy}
-                  onOpen={(id) => void onOpenSession(id, history.native)}
+                  onOpen={(id, savedAt) =>
+                    void onOpenSession(id, history.native, savedAt)
+                  }
                   onDelete={(id) =>
                     void onDeleteSession(id).then(() =>
                       setHistory({
@@ -353,6 +360,7 @@ export function ChatPanel({
             model={tab.project.model ?? ""}
             effort={tab.project.effort ?? ""}
             usage={tab.usage}
+            autoCompactThreshold={autoCompactThreshold}
             onSend={onSend}
             onCancel={onCancel}
             onPickFiles={onPickFiles}

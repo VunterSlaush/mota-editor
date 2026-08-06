@@ -131,16 +131,24 @@ export class SessionHistory {
     const { provider, path, model, effort } = tab.project;
 
     try {
-      const native = await this.agentGateway.listNativeSessions(
-        tabId,
-        provider,
-        path,
-        model,
-        effort,
-        // Must match the warm session's spec, or listing kills and
-        // respawns the agent just to ask it a question.
-        serversForProvider(state.settings.mcpServers, provider),
-      );
+      const [native, localMetas] = await Promise.all([
+        this.agentGateway.listNativeSessions(
+          tabId,
+          provider,
+          path,
+          model,
+          effort,
+          // Must match the warm session's spec, or listing kills and
+          // respawns the agent just to ask it a question.
+          serversForProvider(state.settings.mcpServers, provider),
+        ),
+        this.transcriptStore.list(path).catch(() => []),
+      ]);
+      // Our transcript is saved only when a MESSAGE is sent, while the
+      // agent's `updatedAt` also bumps on a mere open (loading touches
+      // its session file). Sorting by our timestamp when we have one
+      // keeps the list ordered by last message, not last look.
+      const lastMessagedAt = new Map(localMetas.map((m) => [m.id, m.savedAt]));
       const sessions = native
         // One malformed entry must not throw the whole list away.
         .filter((s) => typeof s.sessionId === "string" && s.sessionId !== "")
@@ -149,7 +157,8 @@ export class SessionHistory {
           return {
             id: s.sessionId,
             title: s.title?.trim() || s.sessionId.slice(0, 8),
-            savedAt: Number.isNaN(savedAt) ? 0 : savedAt,
+            savedAt:
+              lastMessagedAt.get(s.sessionId) ?? (Number.isNaN(savedAt) ? 0 : savedAt),
             provider,
             messageCount: undefined,
           };
@@ -172,18 +181,28 @@ export class SessionHistory {
     }
   }
 
-  async open(tabId: string, sessionId: string, native: boolean): Promise<void> {
+  async open(
+    tabId: string,
+    sessionId: string,
+    native: boolean,
+    /** The item's timestamp as listed, BEFORE this open touches anything. */
+    savedAt = 0,
+  ): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab || tab.busy) return;
     if (native) {
-      await this.openNative(tabId, sessionId);
+      await this.openNative(tabId, sessionId, savedAt);
     } else {
       await this.openLocal(tabId, sessionId);
     }
   }
 
   /** True resume: the agent replays and REMEMBERS the conversation. */
-  private async openNative(tabId: string, sessionId: string): Promise<void> {
+  private async openNative(
+    tabId: string,
+    sessionId: string,
+    savedAt: number,
+  ): Promise<void> {
     const state = this.store.getState();
     const tab = tabById(state, tabId)!;
     const { provider, path, model, effort } = tab.project;
@@ -218,6 +237,20 @@ export class SessionHistory {
       if (replay.usage) {
         this.store.dispatch({ type: "tab/usageUpdated", tabId, ...replay.usage });
       }
+      // Pin the item where it was: opening must not reorder history, so
+      // the local copy keeps the PRE-open timestamp. Only sending a
+      // message (which saves with a fresh savedAt) moves it to the top.
+      const firstUserMessage = replay.messages.find((m) => m.role === "user");
+      void this.transcriptStore
+        .save(tab.project.path, {
+          id: sessionId,
+          title: (firstUserMessage?.text ?? "Untitled").slice(0, 80),
+          savedAt,
+          provider,
+          messages: replay.messages,
+          plan: replay.plan.length > 0 ? replay.plan : undefined,
+        })
+        .catch(() => undefined); // the pin is best-effort, like all history
     } else {
       // A resume that failed must not leave the tab claiming that session.
       for (const message of replay.messages) {

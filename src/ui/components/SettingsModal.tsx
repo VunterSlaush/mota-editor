@@ -1,4 +1,6 @@
 import {
+  Gauge,
+  Palette,
   PlugsConnected,
   Sliders,
   TerminalWindow,
@@ -9,19 +11,29 @@ import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
-import type { AppSettings } from "../../core/state/appState";
+import type { AppSettings, TabState } from "../../core/state/appState";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsProviders } from "./SettingsProviders";
+import { SettingsTheme } from "./SettingsTheme";
 import { SettingsTools } from "./SettingsTools";
+import { SettingsUsage } from "./SettingsUsage";
 
-export type SettingsSection = "defaults" | "commands" | "tools" | "providers";
+export type SettingsSection =
+  | "defaults"
+  | "commands"
+  | "tools"
+  | "providers"
+  | "usage"
+  | "theme";
 
 interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
   probeProvider: (provider: ProviderId) => Promise<ProviderStatus>;
+  /** The open tabs — the Usage section reads their live context usage. */
+  tabs: readonly TabState[];
   newId: () => string;
   onClose: () => void;
 }
@@ -32,6 +44,8 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
     { id: "commands", label: "Commands", Icon: TerminalWindow },
     { id: "tools", label: "Tools", Icon: Toolbox },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
+    { id: "usage", label: "Usage", Icon: Gauge },
+    { id: "theme", label: "Theme", Icon: Palette },
   ];
 
 /**
@@ -44,6 +58,7 @@ export function SettingsModal({
   onChange,
   loadCommands,
   probeProvider,
+  tabs,
   newId,
   onClose,
 }: Props) {
@@ -98,6 +113,12 @@ export function SettingsModal({
             <SettingsTools settings={settings} onChange={onChange} newId={newId} />
           )}
           {section === "providers" && <SettingsProviders probe={probeProvider} />}
+          {section === "usage" && (
+            <SettingsUsage settings={settings} onChange={onChange} tabs={tabs} />
+          )}
+          {section === "theme" && (
+            <SettingsTheme settings={settings} onChange={onChange} />
+          )}
         </div>
         <button
           type="button"

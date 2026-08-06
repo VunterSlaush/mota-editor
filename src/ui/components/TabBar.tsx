@@ -18,11 +18,15 @@ export function TabBar({ tabs, activeTabId, onSelect, onClose, onOpenProject }: 
         const isActive = id === activeTabId;
         const status = tabStatus(tab);
         const label = TAB_STATUS_LABELS[status];
+        // The branch comes from the tab's cached git read, never a live call.
+        const where = tab.branch
+          ? `${tab.project.path} (${tab.branch})`
+          : tab.project.path;
         return (
           <div
             key={id}
             className={`tab ${isActive ? "tab--active" : ""} tab--${status}`}
-            title={label ? `${tab.project.path} — ${label}` : tab.project.path}
+            title={label ? `${where} — ${label}` : where}
             onClick={() => onSelect(id)}
           >
             {status !== "idle" && (

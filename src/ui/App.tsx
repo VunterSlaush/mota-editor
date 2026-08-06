@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ProviderId } from "../core/entities/provider";
+import { themeById } from "../core/entities/theme";
 import { activeTab } from "../core/state/appState";
 import type { AppContext } from "../wiring/context";
 import type { SidebarView } from "./components/ActivityBar";
@@ -20,6 +21,12 @@ export function App({ context }: { context: AppContext }) {
   const [sidebarView, setSidebarView] = useState<SidebarView | null>("changes");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const projectPath = tab?.project.path ?? "";
+
+  // The theme is a document-level attribute: the CSS palettes hang off
+  // `[data-theme]`, so one line here restyles everything at once.
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeById(state.settings.theme).id;
+  }, [state.settings.theme]);
 
   // Stable identity: the settings screen loads commands from an effect,
   // and a fresh closure every render would re-run it forever.
@@ -75,12 +82,13 @@ export function App({ context }: { context: AppContext }) {
         <ChatPanel
           key={tab.project.id}
           tab={tab}
+          autoCompactThreshold={state.settings.autoCompactThreshold}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
           onOpenSettings={() => setSettingsOpen(true)}
           loadHistory={() => context.sessionHistory.list(tab.project.id)}
-          onOpenSession={(sessionId, native) =>
-            context.sessionHistory.open(tab.project.id, sessionId, native)
+          onOpenSession={(sessionId, native, savedAt) =>
+            context.sessionHistory.open(tab.project.id, sessionId, native, savedAt)
           }
           onDeleteSession={(sessionId) =>
             context.sessionHistory.remove(tab.project.id, sessionId)
@@ -142,6 +150,7 @@ export function App({ context }: { context: AppContext }) {
           onChange={(patch) => void context.updateSettings.execute(patch)}
           loadCommands={loadCommandsFor}
           probeProvider={probeProvider}
+          tabs={state.tabs}
           newId={context.newId}
           onClose={closeSettings}
         />
