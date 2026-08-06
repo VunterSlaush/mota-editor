@@ -77,6 +77,7 @@ pub fn run() {
             history_file::list_sessions,
             history_file::load_session,
             history_file::delete_session,
+            history_file::list_session_stats,
         ])
         .build(tauri::generate_context!())
         .expect("error while running mota-editor")

@@ -3392,3 +3392,293 @@ body {
   border-radius: 999px;
   padding: 1px 8px;
 }
+
+/* ---- Settings: Insights section ---- */
+.insights-range {
+  display: inline-flex;
+  gap: 2px;
+  margin: 10px 0 4px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+
+.insights-range__option {
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.insights-range__option:hover {
+  color: var(--text);
+}
+
+.insights-range__option--active {
+  background: var(--bg-raised);
+  color: var(--text);
+  outline: 1px solid var(--accent);
+}
+
+.insights-error {
+  font-size: 12px;
+  color: var(--error);
+}
+
+.insights-group {
+  margin-bottom: 8px;
+}
+
+.insights-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.insights-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+}
+
+.insights-tile--alert {
+  border-color: var(--error);
+}
+
+.insights-tile__value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.insights-tile__label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.insights-tile__note {
+  font-size: 11px;
+  color: var(--error);
+}
+
+.insights-caption {
+  display: block;
+  margin: 14px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.insights-chart {
+  width: 100%;
+  height: auto;
+  margin: 6px 0;
+}
+
+.insights-chart__bar {
+  fill: var(--accent);
+}
+
+.insights-chart__bar:hover {
+  fill: var(--tool);
+}
+
+.insights-chart__axis {
+  fill: var(--text-dim);
+  font-size: 10px;
+}
+
+/* Week columns × 7 weekday rows, filled column-first like GitHub's. */
+.insights-heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 10px);
+  grid-auto-columns: 10px;
+  gap: 2px;
+  margin: 8px 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.insights-heatmap__cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--bg-input);
+}
+
+.insights-heatmap__cell--pad {
+  background: transparent;
+}
+
+.insights-heatmap__cell--active {
+  background: var(--accent);
+}
+
+.insights-distributions {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 18px;
+}
+
+.insights-minibars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 42px;
+  margin-top: 4px;
+}
+
+.insights-minibars__col {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  min-width: 3px;
+}
+
+.insights-minibars__bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+.insights-minibars__bar--peak {
+  opacity: 1;
+}
+
+.insights-bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.insights-bar-list__row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1.4fr) 1fr minmax(90px, auto);
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.insights-bar-list__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insights-bar-list__detail {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.insights-bar-list__track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.insights-bar-list__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.insights-bar-list__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.insights-split {
+  margin: 10px 0;
+}
+
+.insights-split__label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+/* Stacked bar: the column gap provides the 2px surface spacer. */
+.insights-split__bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.insights-split__seg {
+  min-width: 3px;
+}
+
+/* Fixed categorical order, derived from theme hues so every theme
+ * recolors it; identity is carried by the legend text, not color. */
+.insights-split__seg--0 {
+  background: var(--accent);
+}
+
+.insights-split__seg--1 {
+  background: var(--tool);
+}
+
+.insights-split__seg--2 {
+  background: color-mix(in srgb, var(--accent) 45%, var(--bg-raised));
+}
+
+.insights-split__seg--3 {
+  background: color-mix(in srgb, var(--tool) 45%, var(--bg-raised));
+}
+
+.insights-split__seg--4 {
+  background: var(--text-dim);
+}
+
+.insights-split__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.insights-split__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.insights-split__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.insights-split__count {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.insights-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--warning);
+}

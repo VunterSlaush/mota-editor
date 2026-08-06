@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SessionStats } from "../../core/entities/insights";
 import type {
   PersistedTranscript,
   TranscriptMeta,
@@ -35,5 +36,11 @@ export class TauriTranscriptStore implements TranscriptStore {
 
   async readPlanFile(projectPath: string, path: string): Promise<string | null> {
     return invoke<string | null>("read_plan_file", { projectPath, path });
+  }
+
+  async listStats(knownProjects: readonly string[]): Promise<SessionStats[]> {
+    return invoke<SessionStats[]>("list_session_stats", {
+      knownProjects: [...knownProjects],
+    });
   }
 }

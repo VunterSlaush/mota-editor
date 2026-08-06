@@ -1,4 +1,5 @@
 import {
+  ChartBar,
   Gauge,
   Palette,
   PlugsConnected,
@@ -9,11 +10,13 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
+import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
+import { SettingsInsights } from "./SettingsInsights";
 import { SettingsProviders } from "./SettingsProviders";
 import { SettingsTheme } from "./SettingsTheme";
 import { SettingsTools } from "./SettingsTools";
@@ -25,6 +28,7 @@ export type SettingsSection =
   | "tools"
   | "providers"
   | "usage"
+  | "insights"
   | "theme";
 
 interface Props {
@@ -32,6 +36,8 @@ interface Props {
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
   probeProvider: (provider: ProviderId) => Promise<ProviderStatus>;
+  /** Historical usage report for the Insights section. */
+  loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   /** The open tabs — the Usage section reads their live context usage. */
   tabs: readonly TabState[];
   newId: () => string;
@@ -45,6 +51,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
     { id: "tools", label: "Tools", Icon: Toolbox },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
     { id: "usage", label: "Usage", Icon: Gauge },
+    { id: "insights", label: "Insights", Icon: ChartBar },
     { id: "theme", label: "Theme", Icon: Palette },
   ];
 
@@ -58,6 +65,7 @@ export function SettingsModal({
   onChange,
   loadCommands,
   probeProvider,
+  loadInsights,
   tabs,
   newId,
   onClose,
@@ -116,6 +124,7 @@ export function SettingsModal({
           {section === "usage" && (
             <SettingsUsage settings={settings} onChange={onChange} tabs={tabs} />
           )}
+          {section === "insights" && <SettingsInsights loadInsights={loadInsights} />}
           {section === "theme" && (
             <SettingsTheme settings={settings} onChange={onChange} />
           )}

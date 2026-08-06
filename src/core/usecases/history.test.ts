@@ -38,6 +38,9 @@ class FakeTranscriptStore implements TranscriptStore {
   async readPlanFile(_projectPath: string, path: string): Promise<string | null> {
     return this.planFiles.get(path) ?? null;
   }
+  async listStats() {
+    return [];
+  }
 }
 
 /** Gateway with scriptable native history. */

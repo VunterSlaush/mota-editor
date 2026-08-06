@@ -19,6 +19,7 @@ import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
 import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
+import type { InsightsRange, InsightsReport } from "../core/entities/insights";
 import type { ProviderProbe } from "../core/ports/providerProbe";
 import type { FilePicker } from "../core/ports/workspacePort";
 import { Store } from "../core/state/store";
@@ -30,6 +31,7 @@ import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
 import { ListCommands } from "../core/usecases/listCommands";
 import { LoadGitChanges } from "../core/usecases/loadGitChanges";
+import { LoadInsights } from "../core/usecases/loadInsights";
 import { OpenProject } from "../core/usecases/openProject";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
@@ -73,6 +75,8 @@ export interface AppContext {
   readonly respondPermission: RespondPermission;
   readonly respondQuestion: RespondQuestion;
   readonly listCommands: ListCommands;
+  /** Historical usage report for the settings Insights section. */
+  readonly loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   readonly providerProbe: ProviderProbe;
   readonly filePicker: FilePicker;
   /** Live output of an agent-owned terminal, for the tool-call cards. */
@@ -145,6 +149,7 @@ export function createAppContext(): AppContext {
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
+    loadInsights: (range) => new LoadInsights(store, transcriptStore).execute(range),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),

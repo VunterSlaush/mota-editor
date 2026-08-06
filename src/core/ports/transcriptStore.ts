@@ -1,3 +1,4 @@
+import type { SessionStats } from "../entities/insights";
 import type { ChatMessage } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { ProviderId } from "../entities/provider";
@@ -11,6 +12,10 @@ export interface PersistedTranscript {
   readonly title: string;
   readonly savedAt: number;
   readonly provider: ProviderId;
+  /** Full project path, for Insights attribution. Absent on transcripts
+   *  saved before this field existed — those fall back to dir-hash
+   *  matching against known projects. */
+  readonly projectPath?: string;
   readonly messages: readonly ChatMessage[];
   /** The agent's structured plan at save time, when any (small). */
   readonly plan?: readonly PlanEntry[];
@@ -36,6 +41,13 @@ export interface TranscriptStore {
   save(projectPath: string, transcript: PersistedTranscript): Promise<void>;
   /** Newest first. */
   list(projectPath: string): Promise<TranscriptMeta[]>;
+  /**
+   * Per-session stat rows across ALL projects' session dirs (not just
+   * one project) for the Insights view. `knownProjects` lets the store
+   * map hashed session dirs back to paths for transcripts saved before
+   * projectPath was embedded.
+   */
+  listStats(knownProjects: readonly string[]): Promise<SessionStats[]>;
   load(projectPath: string, id: string): Promise<PersistedTranscript | null>;
   remove(projectPath: string, id: string): Promise<void>;
   /**

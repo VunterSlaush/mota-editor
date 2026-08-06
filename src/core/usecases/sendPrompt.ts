@@ -551,6 +551,7 @@ export class SendPrompt {
         title: (firstUserMessage?.text ?? "Untitled").slice(0, 80),
         savedAt: Date.now(),
         provider: tab.project.provider,
+        projectPath: tab.project.path,
         messages: tab.messages,
         plan: tab.plan.length > 0 ? tab.plan : undefined,
         planFilePath: tab.planFilePath, // path only — content read on reopen

@@ -152,6 +152,7 @@ export function App({ context }: { context: AppContext }) {
           onChange={(patch) => void context.updateSettings.execute(patch)}
           loadCommands={loadCommandsFor}
           probeProvider={probeProvider}
+          loadInsights={context.loadInsights}
           tabs={state.tabs}
           newId={context.newId}
           onClose={closeSettings}

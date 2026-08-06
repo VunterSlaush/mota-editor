@@ -1,4 +1,5 @@
 import type { CommandInfo } from "../../core/entities/command";
+import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
 import type {
   AgentGateway,
@@ -339,6 +340,41 @@ export class DemoTranscriptStore implements TranscriptStore {
   }
   async readPlanFile(_projectPath: string, _path: string): Promise<string | null> {
     return "# Demo plan\n\n1. Step one\n2. Step two";
+  }
+  async listStats(): Promise<SessionStats[]> {
+    // A small synthetic spread so the Insights section renders populated
+    // charts in the browser demo.
+    const day = 86_400_000;
+    const now = Date.now();
+    const turn = (
+      daysAgo: number,
+      tokens: number,
+      extra: Partial<TurnStat> = {},
+    ): TurnStat => ({
+      sentAt: now - daysAgo * day,
+      mode: "normal",
+      permission: "default",
+      durationMs: 45_000 + tokens,
+      tokens,
+      toolCounts: { read: 3, edit: 1, execute: 1 },
+      ...extra,
+    });
+    return [
+      {
+        sessionId: "demo-1",
+        projectPath: "/demo/project",
+        projectDirHash: "demo1",
+        provider: "claude",
+        savedAt: now,
+        turns: [
+          turn(6, 12_000, { mode: "plan" }),
+          turn(3, 24_000, { command: "/review" }),
+          turn(1, 18_000, { model: "sonnet" }),
+          turn(0, 9_000, { stopReason: "cancelled" }),
+        ],
+        touchedFiles: { "src/app.ts": 5, "src/ui/view.tsx": 2 },
+      },
+    ];
   }
 }
 

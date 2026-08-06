@@ -93,6 +93,9 @@ class FakeTranscriptStore implements TranscriptStore {
   async readPlanFile(_projectPath: string, _path: string): Promise<string | null> {
     return null;
   }
+  async listStats() {
+    return [];
+  }
 }
 
 function setup(script: AgentTurnEvent[] = []) {
@@ -576,6 +579,7 @@ describe("SendPrompt", () => {
 
     expect(transcripts.saved).toHaveLength(1);
     expect(transcripts.saved[0].title).toBe("refactor the login module please");
+    expect(transcripts.saved[0].projectPath).toBe("/work/alpha");
     expect(transcripts.saved[0].messages.map((m) => m.role)).toEqual([
       "user",
       "assistant",
