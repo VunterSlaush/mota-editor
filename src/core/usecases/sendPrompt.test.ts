@@ -52,7 +52,10 @@ class FakeAgentGateway implements AgentGateway {
   }
 
   async endSession(): Promise<void> {}
-  async warmSession(): Promise<void> {}
+  warms = 0;
+  async warmSession(): Promise<void> {
+    this.warms += 1;
+  }
   async listNativeSessions(): Promise<{ sessionId: string }[] | null> {
     return null;
   }
@@ -194,6 +197,45 @@ describe("SendPrompt with per-command settings", () => {
     await useCase.execute("t1", "/review");
 
     expect(store.getState().tabs[0].project.mode).toBe("plan");
+  });
+
+  it("does not re-warm the session when the tab already matches", async () => {
+    // Effort changes respawn the agent (env-based over ACP). Running the
+    // same command again with the setup already in place must not pay
+    // that respawn a second time.
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandConfigs: { "claude:/review": { effort: "high" } } },
+    });
+
+    await useCase.execute("t1", "/review the diff");
+    const warmsAfterFirst = gateway.warms;
+    await useCase.execute("t1", "/review again");
+
+    expect(warmsAfterFirst).toBe(1);
+    expect(gateway.warms).toBe(1);
+  });
+
+  it("keeps the session's effort once a conversation exists", async () => {
+    // Applying a different effort means respawning the agent, and the
+    // respawned session re-ingests the whole conversation on its next
+    // turn. Saving those tokens outranks the command's preference: the
+    // command runs under the session's current effort instead.
+    const { store, gateway, useCase } = setup([
+      { kind: "session", providerSessionId: "native-1" },
+      { kind: "completed", isError: false },
+    ]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandConfigs: { "claude:/preview": { effort: "high" } } },
+    });
+
+    await useCase.execute("t1", "hello there");
+    await useCase.execute("t1", "/preview");
+
+    expect(store.getState().tabs[0].project.effort).not.toBe("high");
+    expect(gateway.warms).toBe(0);
   });
 
   it("leaves an unconfigured prompt alone", async () => {

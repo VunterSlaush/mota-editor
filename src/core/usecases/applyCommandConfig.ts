@@ -9,6 +9,14 @@ import type { SelectEffort, SelectMode, SelectPermission } from "./switchTab";
  * the toolbar visibly moves and stays moved, because a setting that
  * silently reverted would be a setting the user cannot trust.
  *
+ * One exception, and it is deliberate: a field whose change can only
+ * take hold by RESPAWNING the agent (effort is env-based over ACP) is
+ * skipped once a conversation exists — the respawn makes the next turn
+ * re-ingest the whole conversation, and saving those tokens outranks
+ * honouring the command's preference. The command then simply runs
+ * under the session's current setup, and the toolbar (truthfully)
+ * doesn't move.
+ *
  * Composed from the existing selection use cases rather than dispatching
  * directly, so each field keeps the persistence and session-restart
  * behaviour it already has.
@@ -30,11 +38,23 @@ export class ApplyCommandConfig {
     const config = this.store.getState().settings.commandConfigs[key];
     if (!config) return;
 
-    if (config.mode) await this.selectMode.execute(tabId, config.mode);
-    if (config.permission) {
+    // Only fields that actually differ are applied: SelectEffort
+    // respawns the tab's agent session (effort is env-based over ACP),
+    // so re-running a command with the setup already in place must cost
+    // nothing.
+    if (config.mode && config.mode !== tab.project.mode) {
+      await this.selectMode.execute(tabId, config.mode);
+    }
+    if (config.permission && config.permission !== tab.project.permission) {
       await this.selectPermission.execute(tabId, config.permission);
     }
-    if (config.effort !== undefined) {
+    if (
+      config.effort !== undefined &&
+      config.effort !== (tab.project.effort ?? "") &&
+      // A conversation in flight makes the effort respawn too expensive
+      // (see the class comment); before the first turn it is free.
+      !tab.project.providerSessions[tab.project.provider]
+    ) {
       await this.selectEffort.execute(tabId, config.effort);
     }
   }

@@ -128,6 +128,18 @@ impl AcpSessions {
         self.recovery.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id);
     }
 
+    /// Kill the tab's agent process but KEEP its conversation restorable.
+    /// A reconfigure (model/effort/servers switch forces a respawn) is
+    /// not a reset: the respawned agent should resume the conversation,
+    /// not greet the user with amnesia.
+    fn retire_session(&self, tab_id: &str) {
+        if let Some(session) =
+            self.map.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id)
+        {
+            session.shutdown();
+        }
+    }
+
     /// App exit: kill every agent subprocess deliberately rather than
     /// hoping `kill_on_drop` still runs.
     pub fn shutdown_all(&self) {
@@ -519,8 +531,19 @@ async fn ensure_session(
         }
         // Provider, model, effort or tools switched: start over. Servers
         // are fixed when the session is created, so a changed list is
-        // only real once the agent has been handed it.
-        sessions.end_session(tab_id);
+        // only real once the agent has been handed it. But start over
+        // does NOT mean start from zero — remember the live conversation
+        // so the recovery path below resumes it into the fresh agent.
+        // (A dead session keeps whatever recovery entry it recorded at
+        // creation; a changed provider is filtered out by
+        // `recoverable_session`, which matches on provider id.)
+        if !existing.dead.load(Ordering::SeqCst) {
+            let sid = existing.sid();
+            if !sid.is_empty() {
+                sessions.record_recovery(tab_id, &existing.provider_id, &sid);
+            }
+        }
+        sessions.retire_session(tab_id);
     }
 
     let session = boot_agent(app, tab_id, provider_id, spec, true).await.map_err(|e| {
@@ -528,10 +551,11 @@ async fn ensure_session(
         e
     })?;
 
-    // Crash recovery: when the previous process died with a conversation
-    // in it, try to reload that session into the fresh agent instead of
-    // silently starting a blank context (the tab still shows the chat —
-    // the agent should still remember it).
+    // Recovery: when the previous process died — or was retired by a
+    // model/effort reconfigure — with a conversation in it, try to reload
+    // that session into the fresh agent instead of silently starting a
+    // blank context (the tab still shows the chat — the agent should
+    // still remember it).
     if let Some(old_id) = sessions.recoverable_session(tab_id, provider_id) {
         let caps = session.caps();
         if caps.session_resume || caps.load_session {
