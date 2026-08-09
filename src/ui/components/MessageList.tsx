@@ -9,12 +9,18 @@ import {
   Info,
   LockKey,
   Paperclip,
+  SignIn,
   X,
 } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { permissionOptionHint } from "../../core/entities/approval";
 import { formatElapsed } from "../../core/entities/duration";
-import type { ChatMessage, ToolCallState, TurnMeta } from "../../core/entities/message";
+import {
+  AUTH_REQUIRED_CONTEXT,
+  type ChatMessage,
+  type ToolCallState,
+  type TurnMeta,
+} from "../../core/entities/message";
 import { formatTokens } from "../../core/entities/tokens";
 import { fileName } from "../fileName";
 import { CommandText } from "./CommandText";
@@ -37,6 +43,9 @@ interface Props {
   /** Re-send the last prompt; offered on the trailing error bubble.
    *  Stable identity — reaches memoized rows. */
   onRetry: () => void;
+  /** Open the provider's login prompt; offered on a sign-in failure.
+   *  Stable identity — reaches memoized rows. */
+  onSignIn: () => void;
   /** Open a file the agent touched. Stable identity. */
   onOpenFile: (path: string) => void;
   /** Show an agent-reported diff in the diff modal. Stable identity. */
@@ -72,6 +81,7 @@ export function MessageList({
   turnStartedAt,
   sessionStage,
   onRetry,
+  onSignIn,
   onOpenFile,
   onShowAgentDiff,
   onReadTerminal,
@@ -167,6 +177,7 @@ export function MessageList({
               onRetry={
                 !busy && m.role === "error" && m.id === last?.id ? onRetry : undefined
               }
+              onSignIn={onSignIn}
               onOpenFile={onOpenFile}
               onShowAgentDiff={onShowAgentDiff}
               onReadTerminal={onReadTerminal}
@@ -476,6 +487,7 @@ const MessageBubble = memo(function MessageBubble({
   commands,
   streaming,
   onRetry,
+  onSignIn,
   onOpenFile,
   onShowAgentDiff,
   onReadTerminal,
@@ -492,6 +504,8 @@ const MessageBubble = memo(function MessageBubble({
   streaming: boolean;
   /** Set only on the trailing error bubble while idle: offer a retry. */
   onRetry?: () => void;
+  /** Open the provider's login prompt (sign-in failures only). */
+  onSignIn?: () => void;
   /** Open a file the agent touched (tool rows). */
   onOpenFile?: (path: string) => void;
   /** Show an agent-reported diff (tool rows). */
@@ -563,9 +577,12 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
   if (message.role === "error") {
+    // A sign-in failure is the one error with a known remedy, so it
+    // shows the remedy instead of its own diagnostic tag.
+    const needsSignIn = message.error?.context === AUTH_REQUIRED_CONTEXT;
     return (
       <div className="msg msg--error">
-        {message.error?.context && (
+        {message.error?.context && !needsSignIn && (
           <div className="msg__error-context">{message.error.context}</div>
         )}
         <div className="msg__text">{message.text}</div>
@@ -575,11 +592,19 @@ const MessageBubble = memo(function MessageBubble({
             <pre>{message.error.stderrTail}</pre>
           </details>
         )}
-        {onRetry && (
-          <button type="button" className="msg__retry" onClick={onRetry}>
-            Retry
-          </button>
-        )}
+        <div className="msg__error-actions">
+          {needsSignIn && onSignIn && (
+            <button type="button" className="msg__signin" onClick={onSignIn}>
+              <SignIn size={13} />
+              Sign in
+            </button>
+          )}
+          {onRetry && (
+            <button type="button" className="msg__retry" onClick={onRetry}>
+              Retry
+            </button>
+          )}
+        </div>
       </div>
     );
   }

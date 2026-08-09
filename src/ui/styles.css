@@ -189,10 +189,15 @@ body {
   white-space: nowrap;
 }
 
-/* The tab under the pointer stays put while the others slide past it. */
+/* The dragged tab rides the pointer, lifted above the row, while the
+   others slide out of its way. */
 .tab--dragging {
-  opacity: 0.6;
+  position: relative;
+  z-index: 1;
   cursor: grabbing;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
 }
 
 .tab--active {
@@ -568,6 +573,33 @@ body {
 
 .msg__retry:hover {
   background: rgba(229, 83, 75, 0.12);
+}
+
+.msg__error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Sign in leads over Retry: retrying without signing in just fails again. */
+.msg__signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.msg__signin:hover {
+  filter: brightness(1.1);
 }
 
 /* Warm-up progress shown while no turn is running. */
@@ -1671,6 +1703,13 @@ body {
   background: var(--success, #3fb950);
 }
 
+/* Running, but sign-in is only tested on the first message — neither a
+   promise nor a problem, so it reads as neutral rather than green. */
+.provider-row__dot--unverified {
+  background: var(--text-dim);
+  box-shadow: inset 0 0 0 2px var(--bg-input);
+}
+
 /* Installed but unusable — a warning, not a failure. */
 .provider-row__dot--blocked {
   background: var(--warning, #d29922);
@@ -1745,6 +1784,25 @@ body {
 .provider-row__recheck:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* The one action that fixes a sign-in problem, so it leads. */
+.provider-row__signin {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.provider-row__signin:hover {
+  filter: brightness(1.1);
 }
 
 /* ---- Changes panel (left sidebar, resizable) ---- */

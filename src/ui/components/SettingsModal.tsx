@@ -37,6 +37,8 @@ interface Props {
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
   probeProvider: (provider: ProviderId) => Promise<ProviderStatus>;
+  /** Opens the provider's own login prompt in a terminal. */
+  signInProvider: (provider: ProviderId) => Promise<void>;
   /** Historical usage report for the Insights section. */
   loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   /** The open tabs — the Usage section reads their live context usage. */
@@ -70,6 +72,7 @@ export function SettingsModal({
   onChange,
   loadCommands,
   probeProvider,
+  signInProvider,
   loadInsights,
   tabs,
   activeTab,
@@ -135,7 +138,9 @@ export function SettingsModal({
               onOverrideChange={onScopeMcpServer}
             />
           )}
-          {section === "providers" && <SettingsProviders probe={probeProvider} />}
+          {section === "providers" && (
+            <SettingsProviders probe={probeProvider} signIn={signInProvider} />
+          )}
           {section === "usage" && (
             <SettingsUsage settings={settings} onChange={onChange} tabs={tabs} />
           )}

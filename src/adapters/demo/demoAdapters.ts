@@ -506,34 +506,40 @@ export class DemoMcpProbe implements McpProbe {
   }
 }
 
-/** Claude answers; the others show the two failure states worth seeing. */
+/** One provider per readiness state, so the settings screen can be seen
+ * in every shape it has without three broken machines. */
 export class DemoProviderProbe implements ProviderProbe {
   async probe(provider: ProviderId): Promise<ProviderStatus> {
     await delay(400);
     if (provider === "claude") {
       return {
         provider,
-        installed: true,
-        authenticated: true,
-        detail: "Connected via demo-agent.",
+        readiness: "started",
+        detail: "Started via demo-agent. Sign-in is confirmed on the first message.",
         installHint: "",
+        signInCommand: "claude auth login",
       };
     }
     if (provider === "codex") {
       return {
         provider,
-        installed: true,
-        authenticated: false,
-        detail: "Not signed in. Sign in to the codex CLI in a terminal first.",
+        readiness: "signInRequired",
+        detail:
+          "Failed to authenticate: OAuth session expired and could not be refreshed",
         installHint: "npm i -g @agentclientprotocol/codex-acp",
+        signInCommand: "codex login",
       };
     }
     return {
       provider,
-      installed: false,
-      authenticated: false,
+      readiness: "notInstalled",
       detail: "no launch candidate found on PATH",
       installHint: "npm i -g @google/gemini-cli",
+      signInCommand: "gemini",
     };
+  }
+
+  async signIn(): Promise<void> {
+    await delay(200);
   }
 }
