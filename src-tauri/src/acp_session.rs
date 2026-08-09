@@ -549,7 +549,10 @@ async fn ensure_session(
                 // The user is about to pay for the re-send, so the
                 // recovery path below says so. A crash already reports
                 // itself and is nobody's decision to second-guess.
-                reconfigured = Some(respawn_reason(&existing, provider_id, spec));
+                reconfigured = Some(respawn_reason(
+                    &SessionShape::of(&existing),
+                    &SessionShape::wanted(provider_id, spec),
+                ));
             }
         }
         sessions.retire_session(tab_id);
@@ -755,18 +758,46 @@ async fn boot_agent(
     Ok(session)
 }
 
+/// The spawn-time identity of a session: the fields whose change forces
+/// a respawn. Borrowed, because it is only ever compared — and plain
+/// values, so the comparison can be tested without a live agent.
+struct SessionShape<'a> {
+    provider_id: &'a str,
+    model: Option<&'a str>,
+    effort: Option<&'a str>,
+}
+
+impl<'a> SessionShape<'a> {
+    /// The shape of the session currently running.
+    fn of(session: &'a AcpSession) -> Self {
+        Self {
+            provider_id: &session.provider_id,
+            model: session.model.as_deref(),
+            effort: session.effort.as_deref(),
+        }
+    }
+
+    /// The shape the caller is asking for.
+    fn wanted(provider_id: &'a str, spec: &'a SessionSpec) -> Self {
+        Self {
+            provider_id,
+            model: spec.model.as_deref(),
+            effort: spec.effort.as_deref(),
+        }
+    }
+}
+
 /// Which spec field forced a respawn, phrased for the transcript notice.
+///
 /// Checked in the order the user is most likely to have just changed.
-fn respawn_reason(
-    existing: &AcpSession,
-    provider_id: &str,
-    spec: &SessionSpec,
-) -> &'static str {
-    if existing.provider_id != provider_id {
+/// The fallback names the tool servers: they are the only other field in
+/// the spec, and this is only ever called once something has differed.
+fn respawn_reason(before: &SessionShape, after: &SessionShape) -> &'static str {
+    if before.provider_id != after.provider_id {
         "a provider change"
-    } else if existing.model != spec.model {
+    } else if before.model != after.model {
         "a model change"
-    } else if existing.effort != spec.effort {
+    } else if before.effort != after.effort {
         "an effort change"
     } else {
         "a tool-server change"
@@ -1329,5 +1360,71 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 .await;
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shape<'a>(
+        provider_id: &'a str,
+        model: Option<&'a str>,
+        effort: Option<&'a str>,
+    ) -> SessionShape<'a> {
+        SessionShape { provider_id, model, effort }
+    }
+
+    #[test]
+    fn names_the_field_the_user_just_changed() {
+        let running = shape("claude", Some("sonnet"), Some("medium"));
+        assert_eq!(
+            respawn_reason(&running, &shape("codex", Some("sonnet"), Some("medium"))),
+            "a provider change"
+        );
+        assert_eq!(
+            respawn_reason(&running, &shape("claude", Some("opus"), Some("medium"))),
+            "a model change"
+        );
+        assert_eq!(
+            respawn_reason(&running, &shape("claude", Some("sonnet"), Some("high"))),
+            "an effort change"
+        );
+    }
+
+    #[test]
+    fn blames_the_tool_servers_when_nothing_else_moved() {
+        // The only other field in the spec, and this is only called once
+        // something has already differed.
+        let running = shape("claude", Some("sonnet"), Some("medium"));
+        assert_eq!(respawn_reason(&running, &running), "a tool-server change");
+    }
+
+    #[test]
+    fn treats_clearing_a_field_as_a_change_to_it() {
+        // Dropping back to the provider default respawns just as surely
+        // as picking a different model does.
+        let running = shape("claude", Some("opus"), None);
+        assert_eq!(
+            respawn_reason(&running, &shape("claude", None, None)),
+            "a model change"
+        );
+        assert_eq!(
+            respawn_reason(&shape("claude", None, None), &running),
+            "a model change"
+        );
+    }
+
+    #[test]
+    fn reports_the_provider_first_when_several_fields_differ() {
+        // A provider switch changes the model vocabulary too, so naming
+        // the model would describe a consequence rather than the cause.
+        assert_eq!(
+            respawn_reason(
+                &shape("claude", Some("sonnet"), Some("medium")),
+                &shape("codex", Some("gpt-5.5"), Some("high")),
+            ),
+            "a provider change"
+        );
     }
 }
