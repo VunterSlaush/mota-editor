@@ -38,6 +38,10 @@ export function App({ context }: { context: AppContext }) {
     (provider: ProviderId) => context.providerProbe.probe(provider, projectPath),
     [context, projectPath],
   );
+  const signInProvider = useCallback(
+    (provider: ProviderId) => context.providerProbe.signIn(provider),
+    [context],
+  );
   // Stable identities: these reach memoized transcript rows (ApprovalCard)
   // and a document-level keydown effect; fresh arrows every render would
   // defeat the memo / re-register the listener on every streamed token.
@@ -157,6 +161,7 @@ export function App({ context }: { context: AppContext }) {
           onChange={(patch) => void context.updateSettings.execute(patch)}
           loadCommands={loadCommandsFor}
           probeProvider={probeProvider}
+          signInProvider={signInProvider}
           loadInsights={context.loadInsights}
           tabs={state.tabs}
           newId={context.newId}

@@ -113,6 +113,81 @@ pub fn agent_env(
     }
 }
 
+/// How to sign a provider in, for the "Sign in" action on the settings
+/// screen. Program and args are compile-time constants — nothing here is
+/// ever built from user or project input, which is what makes it safe to
+/// hand to a terminal emulator further down.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SignInCommand {
+    pub program: &'static str,
+    pub args: &'static [&'static str],
+    /// What the user will see happen, in one line.
+    pub hint: &'static str,
+}
+
+impl SignInCommand {
+    /// The command as a user would type it — for the copyable fallback
+    /// when no terminal can be opened.
+    pub fn display(&self) -> String {
+        if self.args.is_empty() {
+            self.program.to_owned()
+        } else {
+            format!("{} {}", self.program, self.args.join(" "))
+        }
+    }
+}
+
+/// The sign-in command for a provider, or None when we don't know one.
+///
+/// These are the vendors' own login entry points; we deliberately do not
+/// try to drive the OAuth flow ourselves, because the credential store
+/// (macOS Keychain, `~/.claude`, …) belongs to the CLI, not to us.
+pub fn sign_in_command(provider_id: &str) -> Option<SignInCommand> {
+    match provider_id {
+        "claude" => Some(SignInCommand {
+            program: "claude",
+            args: &["auth", "login"],
+            hint: "Opens a terminal and your browser to sign in to Claude.",
+        }),
+        "codex" => Some(SignInCommand {
+            program: "codex",
+            args: &["login"],
+            hint: "Opens a terminal and your browser to sign in to Codex.",
+        }),
+        // Gemini has no login subcommand: the CLI signs in on first run.
+        "gemini" => Some(SignInCommand {
+            program: "gemini",
+            args: &[],
+            hint: "Opens a terminal running Gemini; use /auth to sign in.",
+        }),
+        _ => None,
+    }
+}
+
+/// Does this agent error mean "the user is not signed in"?
+///
+/// Matched against the adapter's own words, so the list is phrases these
+/// CLIs actually emit rather than a generic search for "auth" — a tool
+/// named `authorize_payment` failing must not be read as a login problem.
+pub fn is_auth_failure(message: &str) -> bool {
+    const NEEDLES: [&str; 12] = [
+        "oauth session expired",
+        "failed to authenticate",
+        "authentication_failed",
+        "authentication failed",
+        "authentication required",
+        "auth required",
+        "not authenticated",
+        "not logged in",
+        "please run /login",
+        "invalid api key",
+        "invalid_api_key",
+        "unauthorized",
+    ];
+    let haystack = message.to_ascii_lowercase();
+    NEEDLES.iter().any(|needle| haystack.contains(needle))
+}
+
 /// The agent-defined session-mode id that natively enforces our mode,
 /// per provider (verified against each adapter's advertised modes).
 pub fn native_mode_id(provider_id: &str, mode: Mode) -> Option<&'static str> {
@@ -1220,6 +1295,7 @@ fn parse_tool_locations(update: &Value) -> Vec<ToolLocation> {
 /// watchdog forcing a wedged prompt down): not an error, reason
 /// "cancelled".
 pub fn completion_from_prompt_result(
+    provider_id: &str,
     result: &Result<Value, String>,
     was_cancelled: bool,
 ) -> AgentEvent {
@@ -1245,12 +1321,49 @@ pub fn completion_from_prompt_result(
                 stop_reason: Some(stop_reason.to_owned()),
             }
         }
+        // A login problem is the one failure the user can always fix, so
+        // it gets its own stop reason: the UI turns that into a Sign in
+        // button instead of showing the adapter's raw wire error.
+        Err(message) if is_auth_failure(message) => AgentEvent::TurnCompleted {
+            result: Some(auth_failure_message(provider_id, message)),
+            provider_session_id: None,
+            is_error: true,
+            stop_reason: Some(AUTH_REQUIRED.to_owned()),
+        },
         Err(message) => AgentEvent::TurnCompleted {
             result: Some(message.clone()),
             provider_session_id: None,
             is_error: true,
             stop_reason: None,
         },
+    }
+}
+
+/// Stop reason marking a turn that failed only because nobody is signed
+/// in. The frontend keys its Sign in affordance off this exact string.
+pub const AUTH_REQUIRED: &str = "auth_required";
+
+/// Plain words for a login failure, keeping the agent's own explanation
+/// underneath — the detail is what distinguishes an expired token from a
+/// revoked one, and support has no other copy of it.
+pub fn auth_failure_message(provider_id: &str, detail: &str) -> String {
+    let name = display_name(provider_id);
+    match sign_in_command(provider_id) {
+        Some(command) => format!(
+            "{name} needs you to sign in again. Open Settings → Providers and \
+             choose Sign in, or run `{}` in a terminal.\n\n{detail}",
+            command.display()
+        ),
+        None => format!("{name} needs you to sign in again.\n\n{detail}"),
+    }
+}
+
+fn display_name(provider_id: &str) -> &str {
+    match provider_id {
+        "claude" => "Claude",
+        "codex" => "Codex",
+        "gemini" => "Gemini",
+        other => other,
     }
 }
 
@@ -2064,7 +2177,7 @@ mod tests {
 
     #[test]
     fn prompt_result_maps_to_completion() {
-        let done = completion_from_prompt_result(&Ok(json!({"stopReason":"end_turn"})), false);
+        let done = completion_from_prompt_result("claude", &Ok(json!({"stopReason":"end_turn"})), false);
         match &done {
             AgentEvent::TurnCompleted { is_error: false, stop_reason: Some(reason), .. } => {
                 assert_eq!(reason, "end_turn");
@@ -2072,10 +2185,10 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
 
-        let refused = completion_from_prompt_result(&Ok(json!({"stopReason":"refusal"})), false);
+        let refused = completion_from_prompt_result("claude", &Ok(json!({"stopReason":"refusal"})), false);
         assert!(matches!(refused, AgentEvent::TurnCompleted { is_error: true, .. }));
 
-        let failed = completion_from_prompt_result(&Err("boom".to_owned()), false);
+        let failed = completion_from_prompt_result("claude", &Err("boom".to_owned()), false);
         match failed {
             AgentEvent::TurnCompleted { result: Some(message), is_error: true, .. } => {
                 assert_eq!(message, "boom");
@@ -2085,10 +2198,76 @@ mod tests {
     }
 
     #[test]
+    fn a_login_failure_becomes_an_actionable_message_not_a_wire_error() {
+        // The exact string the Claude adapter sends when its stored
+        // OAuth token can no longer be refreshed.
+        let raw = "Internal error: Failed to authenticate: OAuth session expired \
+                   and could not be refreshed";
+        let event = completion_from_prompt_result("claude", &Err(raw.to_owned()), false);
+        match event {
+            AgentEvent::TurnCompleted {
+                result: Some(message),
+                is_error: true,
+                stop_reason: Some(reason),
+                ..
+            } => {
+                assert_eq!(reason, AUTH_REQUIRED);
+                assert!(message.starts_with("Claude needs you to sign in again."));
+                assert!(message.contains("claude auth login"));
+                // The adapter's own words survive: they are the only
+                // thing that separates an expired token from a revoked
+                // one when the user asks for help.
+                assert!(message.contains(raw));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_cancelled_login_failure_is_still_just_a_cancellation() {
+        let event = completion_from_prompt_result(
+            "claude",
+            &Err("Failed to authenticate".to_owned()),
+            true,
+        );
+        assert!(matches!(
+            event,
+            AgentEvent::TurnCompleted { is_error: false, .. }
+        ));
+    }
+
+    #[test]
+    fn auth_detection_reads_the_clis_own_words_not_any_mention_of_auth() {
+        for message in [
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+            "API Error: 401 Unauthorized",
+            "Not logged in. Please run /login",
+            "invalid api key",
+        ] {
+            assert!(is_auth_failure(message), "should detect: {message}");
+        }
+        for message in [
+            "the tool `authorize_payment` returned a non-zero exit code",
+            "Could not read file: permission denied",
+            "",
+        ] {
+            assert!(!is_auth_failure(message), "should not detect: {message}");
+        }
+    }
+
+    #[test]
+    fn every_provider_offers_a_sign_in_command_and_none_is_invented() {
+        assert_eq!(sign_in_command("claude").unwrap().display(), "claude auth login");
+        assert_eq!(sign_in_command("codex").unwrap().display(), "codex login");
+        assert_eq!(sign_in_command("gemini").unwrap().display(), "gemini");
+        assert!(sign_in_command("nobody").is_none());
+    }
+
+    #[test]
     fn truncated_and_cancelled_turns_keep_their_stop_reason_without_erroring() {
         // A reply cut short by limits is not a success to pass off
         // silently, but not an error either — the reason travels.
-        let capped = completion_from_prompt_result(&Ok(json!({"stopReason":"max_tokens"})), false);
+        let capped = completion_from_prompt_result("claude", &Ok(json!({"stopReason":"max_tokens"})), false);
         assert_eq!(
             capped,
             AgentEvent::TurnCompleted {
@@ -2100,7 +2279,7 @@ mod tests {
         );
         // A user-stopped turn resolves as cancelled even when the wire
         // call failed (the watchdog force-fails wedged prompts).
-        let stopped = completion_from_prompt_result(&Err("Cancelled.".to_owned()), true);
+        let stopped = completion_from_prompt_result("claude", &Err("Cancelled.".to_owned()), true);
         assert_eq!(
             stopped,
             AgentEvent::TurnCompleted {
