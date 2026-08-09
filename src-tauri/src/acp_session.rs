@@ -330,6 +330,7 @@ pub async fn start_turn(
 
     let app_for_task = app.clone();
     let tab = tab_id.to_owned();
+    let provider = provider_id.to_owned();
     let session_for_task = Arc::clone(&session);
     tauri::async_runtime::spawn(async move {
         let result = session_for_task.call(prompt, id).await;
@@ -344,11 +345,14 @@ pub async fn start_turn(
         // (agent acknowledges, or the watchdog fails it) — either way the
         // completion is a cancellation, not an error or a success.
         let was_cancelled = cancelled.load(Ordering::SeqCst);
-        runner::emit(
-            &app_for_task,
-            &tab,
-            &acp::completion_from_prompt_result(&result, was_cancelled),
-        );
+        let completion = acp::completion_from_prompt_result(&provider, &result, was_cancelled);
+        // A turn that reached the model is the only real proof the CLI is
+        // signed in — the handshake never exercises credentials. This is
+        // what lets the settings screen show green honestly.
+        if result.is_ok() {
+            crate::provider_probe::mark_verified(&provider);
+        }
+        runner::emit(&app_for_task, &tab, &completion);
     });
 
     Ok(())

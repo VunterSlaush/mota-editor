@@ -1,14 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ProviderId } from "../../core/entities/provider";
-import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
+import type {
+  ProviderProbe,
+  ProviderStatus,
+  Readiness,
+} from "../../core/ports/providerProbe";
 
 /** Wire shape returned by the Rust backend (`probe_provider`). */
 interface WireStatus {
   provider: string;
-  installed: boolean;
-  authenticated: boolean;
+  readiness: Readiness;
   detail: string;
   installHint: string;
+  signInCommand: string;
 }
 
 /**
@@ -22,5 +26,9 @@ export class TauriProviderProbe implements ProviderProbe {
       projectPath,
     });
     return { ...wire, provider };
+  }
+
+  async signIn(provider: ProviderId): Promise<void> {
+    await invoke("open_provider_login", { providerId: provider });
   }
 }
