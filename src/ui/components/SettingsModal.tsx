@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
+import type { McpProbe } from "../../core/ports/mcpProbe";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
 import { SettingsCommands } from "./SettingsCommands";
@@ -40,6 +41,10 @@ interface Props {
   loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   /** The open tabs — the Usage section reads their live context usage. */
   tabs: readonly TabState[];
+  /** The tab the Tools section scopes servers for; null with none open. */
+  activeTab: TabState | null;
+  mcpProbe: McpProbe;
+  onScopeMcpServer: (serverId: string, enabled: boolean | undefined) => void;
   newId: () => string;
   onClose: () => void;
 }
@@ -67,6 +72,9 @@ export function SettingsModal({
   probeProvider,
   loadInsights,
   tabs,
+  activeTab,
+  mcpProbe,
+  onScopeMcpServer,
   newId,
   onClose,
 }: Props) {
@@ -118,7 +126,14 @@ export function SettingsModal({
             />
           )}
           {section === "tools" && (
-            <SettingsTools settings={settings} onChange={onChange} newId={newId} />
+            <SettingsTools
+              settings={settings}
+              onChange={onChange}
+              newId={newId}
+              activeTab={activeTab}
+              mcpProbe={mcpProbe}
+              onOverrideChange={onScopeMcpServer}
+            />
           )}
           {section === "providers" && <SettingsProviders probe={probeProvider} />}
           {section === "usage" && (

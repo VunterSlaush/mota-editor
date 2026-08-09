@@ -149,6 +149,13 @@ export type Action =
   | { type: "tab/specDeferred"; tabId: string; model?: string; effort?: string }
   | { type: "tab/pendingSpecApplied"; tabId: string }
   | { type: "tab/pendingSpecDiscarded"; tabId: string }
+  | {
+      type: "tab/mcpOverrideChanged";
+      tabId: string;
+      serverId: string;
+      /** undefined clears the override and follows the provider toggle. */
+      enabled: boolean | undefined;
+    }
   | { type: "tab/verboseChanged"; tabId: string; verbose: boolean }
   | { type: "tab/commandsUpdated"; tabId: string; commands: readonly CommandInfo[] }
   | { type: "tab/planUpdated"; tabId: string; plan: readonly PlanEntry[] }
@@ -328,6 +335,16 @@ export function reduce(state: AppState, action: Action): AppState {
 
     case "tab/pendingSpecDiscarded":
       return mapTab(state, action.tabId, ({ pendingSpec: _, ...tab }) => tab);
+
+    case "tab/mcpOverrideChanged":
+      return mapTab(state, action.tabId, (tab) => {
+        const overrides = { ...tab.project.mcpOverrides };
+        // Clearing must REMOVE the key, not store a false: absent means
+        // "follow the provider toggle", which false would silently pin.
+        if (action.enabled === undefined) delete overrides[action.serverId];
+        else overrides[action.serverId] = action.enabled;
+        return { ...tab, project: { ...tab.project, mcpOverrides: overrides } };
+      });
 
     case "tab/verboseChanged":
       return mapTab(state, action.tabId, (tab) => ({

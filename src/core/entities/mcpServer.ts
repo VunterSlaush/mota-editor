@@ -31,8 +31,27 @@ export interface McpServerSpec {
   readonly env: Readonly<Record<string, string>>;
 }
 
+/**
+ * Which servers a project overrides, by server id.
+ *
+ * Absent means "follow the provider toggle" — the common case, and the
+ * reason this is a sparse map rather than a full list. A server is a
+ * fixed tax on every request of every session it is enabled for, so one
+ * needed in a single repo should not be paid for in the other six.
+ */
+export type ProjectMcpOverrides = Readonly<Record<string, boolean>>;
+
 export function isEnabledFor(server: McpServerConfig, provider: ProviderId): boolean {
   return server.enabledFor.includes(provider);
+}
+
+/** The provider toggle, unless this project overrode it. */
+export function isEnabledForProject(
+  server: McpServerConfig,
+  provider: ProviderId,
+  overrides: ProjectMcpOverrides | undefined,
+): boolean {
+  return overrides?.[server.id] ?? isEnabledFor(server, provider);
 }
 
 /**
@@ -43,9 +62,12 @@ export function isEnabledFor(server: McpServerConfig, provider: ProviderId): boo
 export function serversForProvider(
   servers: readonly McpServerConfig[],
   provider: ProviderId,
+  overrides?: ProjectMcpOverrides,
 ): McpServerSpec[] {
   return servers
-    .filter((server) => isEnabledFor(server, provider) && isRunnable(server))
+    .filter(
+      (server) => isEnabledForProject(server, provider, overrides) && isRunnable(server),
+    )
     .map(({ name, command, args, env }) => ({ name, command, args, env }));
 }
 

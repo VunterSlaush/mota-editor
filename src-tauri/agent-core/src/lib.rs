@@ -10,6 +10,7 @@ pub mod acp;
 pub mod billing;
 pub mod commands;
 pub mod event;
+pub mod mcp;
 pub mod provider;
 pub mod providers;
 pub mod turn;

@@ -1,6 +1,6 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { CommandConfig } from "../entities/commandConfig";
-import type { McpServerConfig } from "../entities/mcpServer";
+import type { McpServerConfig, ProjectMcpOverrides } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
 
 /**
@@ -19,6 +19,8 @@ export interface PersistedProject {
   readonly effort?: string;
   readonly verbose?: boolean;
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
+  /** Per-project MCP on/off overrides, by server id. */
+  readonly mcpOverrides?: ProjectMcpOverrides;
 }
 
 /**

@@ -6,6 +6,7 @@ mod acp_session;
 mod billing_log;
 mod command_discovery;
 mod commands;
+mod mcp_probe;
 mod git;
 mod history_file;
 mod provider_probe;
@@ -77,6 +78,7 @@ pub fn run() {
             history_file::delete_session,
             history_file::list_session_stats,
             billing_log::read_billed_usage,
+            mcp_probe::probe_mcp_server,
         ])
         .build(tauri::generate_context!())
         .expect("error while running mota-editor")

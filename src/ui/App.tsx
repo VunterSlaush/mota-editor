@@ -159,6 +159,12 @@ export function App({ context }: { context: AppContext }) {
           probeProvider={probeProvider}
           loadInsights={context.loadInsights}
           tabs={state.tabs}
+          activeTab={tab}
+          mcpProbe={context.mcpProbe}
+          onScopeMcpServer={(serverId, enabled) => {
+            if (tab)
+              void context.scopeMcpServer.execute(tab.project.id, serverId, enabled);
+          }}
           newId={context.newId}
           onClose={closeSettings}
         />

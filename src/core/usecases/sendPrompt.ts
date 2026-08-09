@@ -130,6 +130,7 @@ export class SendPrompt {
           mcpServers: serversForProvider(
             this.store.getState().settings.mcpServers,
             provider,
+            configured.project.mcpOverrides,
           ),
         },
         (event) => this.onEvent(tabId, event),

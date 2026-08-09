@@ -1597,6 +1597,34 @@ body {
   color: var(--warning, #d29922);
 }
 
+.tool-row__cost {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tool-row__project {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tool-row__project-label strong {
+  color: var(--text);
+}
+
+.tool-row__project-choices {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .tool-add {
   display: inline-flex;
   align-items: center;

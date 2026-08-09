@@ -13,7 +13,7 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
   const state = store.getState();
   const tab = tabById(state, tabId);
   if (!tab) return;
-  const { provider, path, model, effort } = tab.project;
+  const { provider, path, model, effort, mcpOverrides } = tab.project;
   void agentGateway
     .warmSession(
       tabId,
@@ -21,7 +21,7 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
       path,
       model,
       effort,
-      serversForProvider(state.settings.mcpServers, provider),
+      serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
     )
     .catch(() => undefined);
 }

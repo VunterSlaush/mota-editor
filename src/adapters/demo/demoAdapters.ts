@@ -1,6 +1,7 @@
 import type { BilledRequest } from "../../core/entities/billing";
 import type { CommandInfo } from "../../core/entities/command";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
+import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type { ProviderId } from "../../core/entities/provider";
 import type {
   AgentGateway,
@@ -10,6 +11,7 @@ import type {
 import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
 import type { GitBranch, GitChange, GitCommit, GitPort } from "../../core/ports/gitPort";
+import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
 import type { NotificationPort } from "../../core/ports/notificationPort";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
 import type {
@@ -439,6 +441,15 @@ export class DemoBillingStore implements BillingStore {
 
 export class DemoNotifications implements NotificationPort {
   async turnCompleted(): Promise<void> {}
+}
+
+/** Browser demo — a plausible inventory so the Tools screen has numbers. */
+export class DemoMcpProbe implements McpProbe {
+  async probe(server: McpServerSpec): Promise<McpProbeResult> {
+    await delay(400);
+    if (server.command === "broken") return { error: "`broken` is not on your PATH." };
+    return { inventory: { toolCount: 12, prefixTokens: 3_400 } };
+  }
 }
 
 /** Claude answers; the others show the two failure states worth seeing. */

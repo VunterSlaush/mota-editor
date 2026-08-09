@@ -164,7 +164,7 @@ export class SessionHistory {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
     if (!tab) return;
-    const { provider, path, model, effort } = tab.project;
+    const { provider, path, model, effort, mcpOverrides } = tab.project;
 
     try {
       const native = await this.agentGateway.listNativeSessions(
@@ -173,7 +173,7 @@ export class SessionHistory {
         path,
         model,
         effort,
-        serversForProvider(state.settings.mcpServers, provider),
+        serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
       );
       // Null = no live session to ask — the local paint stands as is.
       if (!native) return;
@@ -242,8 +242,12 @@ export class SessionHistory {
   ): Promise<void> {
     const state = this.store.getState();
     const tab = tabById(state, tabId)!;
-    const { provider, path, model, effort } = tab.project;
-    const mcpServers = serversForProvider(state.settings.mcpServers, provider);
+    const { provider, path, model, effort, mcpOverrides } = tab.project;
+    const mcpServers = serversForProvider(
+      state.settings.mcpServers,
+      provider,
+      mcpOverrides,
+    );
 
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: Date.now() });
@@ -387,7 +391,7 @@ export class SessionHistory {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
     if (!tab) return;
-    const { path, model, effort } = tab.project;
+    const { path, model, effort, mcpOverrides } = tab.project;
     void this.agentGateway
       .warmSession(
         tabId,
@@ -395,7 +399,7 @@ export class SessionHistory {
         path,
         model,
         effort,
-        serversForProvider(state.settings.mcpServers, provider),
+        serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
       )
       .catch(() => undefined); // warm-up is best-effort
   }

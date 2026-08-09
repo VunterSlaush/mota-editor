@@ -5,6 +5,7 @@ import {
   DemoFilePicker,
   DemoFolderPicker,
   DemoGit,
+  DemoMcpProbe,
   DemoNotifications,
   DemoPastedImageStore,
   DemoProviderProbe,
@@ -18,12 +19,14 @@ import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
 import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
 import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
+import { TauriMcpProbe } from "../adapters/tauri/tauriMcpProbe";
 import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
 import { TauriPastedImageStore } from "../adapters/tauri/tauriPastedImageStore";
 import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
+import type { McpProbe } from "../core/ports/mcpProbe";
 import type { ProviderProbe } from "../core/ports/providerProbe";
 import type { FilePicker, PastedImageStore } from "../core/ports/workspacePort";
 import { Store } from "../core/state/store";
@@ -40,6 +43,7 @@ import { LoadInsights } from "../core/usecases/loadInsights";
 import { OpenProject } from "../core/usecases/openProject";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
+import { ScopeMcpServer } from "../core/usecases/scopeMcpServer";
 import { SendPrompt } from "../core/usecases/sendPrompt";
 import { SessionStatus } from "../core/usecases/sessionStatus";
 import {
@@ -72,6 +76,7 @@ export interface AppContext {
   readonly applyPendingSpec: ApplyPendingSpec;
   readonly discardPendingSpec: DiscardPendingSpec;
   readonly selectVerbose: SelectVerbose;
+  readonly scopeMcpServer: ScopeMcpServer;
   readonly loadGitChanges: LoadGitChanges;
   readonly gitActions: GitActions;
   readonly sessionHistory: SessionHistory;
@@ -85,6 +90,8 @@ export interface AppContext {
   /** Historical usage report for the settings Insights section. */
   readonly loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   readonly providerProbe: ProviderProbe;
+  /** Measures what an MCP server's tools cost on every request. */
+  readonly mcpProbe: McpProbe;
   readonly filePicker: FilePicker;
   readonly pastedImages: PastedImageStore;
   /** Live output of an agent-owned terminal, for the tool-call cards. */
@@ -111,6 +118,7 @@ export function createAppContext(): AppContext {
     ? new TauriTranscriptStore()
     : new DemoTranscriptStore();
   const billingStore = inTauri ? new TauriBillingStore() : new DemoBillingStore();
+  const mcpProbe = inTauri ? new TauriMcpProbe() : new DemoMcpProbe();
   const notifications = inTauri ? new TauriNotifications() : new DemoNotifications();
   const newId = () => crypto.randomUUID();
 
@@ -145,6 +153,7 @@ export function createAppContext(): AppContext {
     discardPendingSpec: new DiscardPendingSpec(store),
     selectEffort,
     selectVerbose: new SelectVerbose(store, workspaceStore),
+    scopeMcpServer: new ScopeMcpServer(store, workspaceStore, agentGateway),
     loadGitChanges: new LoadGitChanges(store, gitPort),
     gitActions: new GitActions(store, gitPort),
     sendPrompt: new SendPrompt(
@@ -172,6 +181,7 @@ export function createAppContext(): AppContext {
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),
+    mcpProbe,
     filePicker,
     pastedImages: inTauri ? new TauriPastedImageStore() : new DemoPastedImageStore(),
     readTerminalOutput: (tabId, terminalId) =>

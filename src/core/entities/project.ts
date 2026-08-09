@@ -1,4 +1,5 @@
 import type { AgentMode, PermissionPolicy } from "./agentSettings";
+import type { ProjectMcpOverrides } from "./mcpServer";
 import type { ProviderId } from "./provider";
 
 /**
@@ -25,6 +26,13 @@ export interface Project {
    * resumed across turns (and across app restarts where supported).
    */
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
+  /**
+   * Per-project MCP overrides, by server id. Absent entries follow the
+   * provider toggle in settings; an entry pins the server on or off for
+   * this project only. Sparse on purpose — a server needed in one repo
+   * shouldn't be a fixed per-request cost in every other one.
+   */
+  readonly mcpOverrides?: ProjectMcpOverrides;
 }
 
 export function projectNameFromPath(path: string): string {
