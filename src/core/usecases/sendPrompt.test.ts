@@ -495,6 +495,34 @@ describe("SendPrompt", () => {
     expect(info?.text).toContain("cut short");
   });
 
+  it("tags a sign-in failure so the transcript can offer Sign in", async () => {
+    const { store, useCase } = setup([
+      {
+        kind: "completed",
+        isError: true,
+        result: "Claude needs you to sign in again.",
+        stopReason: "auth_required",
+      },
+    ]);
+
+    await useCase.execute("t1", "hello");
+
+    const error = store.getState().tabs[0].messages.find((m) => m.role === "error");
+    expect(error?.error?.context).toBe("auth-required");
+  });
+
+  it("leaves an ordinary failure untagged — only sign-in has a known remedy", async () => {
+    const { store, useCase } = setup([
+      { kind: "completed", isError: true, result: "API Error: 529 Overloaded" },
+    ]);
+
+    await useCase.execute("t1", "hello");
+
+    const error = store.getState().tabs[0].messages.find((m) => m.role === "error");
+    expect(error?.text).toContain("529");
+    expect(error?.error?.context).toBeUndefined();
+  });
+
   it("a cancelled turn completes quietly without demanding attention", async () => {
     const { store, notifications, useCase } = setup([
       { kind: "completed", isError: false, stopReason: "cancelled" },

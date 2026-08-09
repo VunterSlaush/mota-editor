@@ -3,6 +3,7 @@ import { dedupeCommands } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
 import { serversForProvider } from "../entities/mcpServer";
 import {
+  AUTH_REQUIRED_CONTEXT,
   approvalMessage,
   assistantMessage,
   errorMessage,
@@ -348,10 +349,17 @@ export class SendPrompt {
           });
         }
         if (event.isError && event.result) {
+          // A login failure is tagged rather than left as prose: the
+          // transcript offers Sign in beside it, which is the whole
+          // difference between "go read this" and "fix it".
+          const isAuthFailure = event.stopReason === "auth_required";
           this.store.dispatch({
             type: "chat/messageAppended",
             tabId,
-            message: errorMessage(event.result),
+            message: errorMessage(
+              event.result,
+              isAuthFailure ? { context: AUTH_REQUIRED_CONTEXT } : undefined,
+            ),
           });
         }
         // A turn cut short by limits is not a success to pass off

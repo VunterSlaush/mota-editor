@@ -570,6 +570,33 @@ body {
   background: rgba(229, 83, 75, 0.12);
 }
 
+.msg__error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Sign in leads over Retry: retrying without signing in just fails again. */
+.msg__signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.msg__signin:hover {
+  filter: brightness(1.1);
+}
+
 /* Warm-up progress shown while no turn is running. */
 .session-stage {
   display: flex;

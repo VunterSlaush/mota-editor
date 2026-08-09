@@ -88,10 +88,13 @@ produce failures nobody could explain.
   has been sent. That is the honest state and the hint says so.
 - `completion_from_prompt_result` now takes the provider id, so it can
   name the CLI and its login command in the message.
-- The transcript's auth error points at Settings → Providers rather than
-  offering an inline button: the message rows are memoized and threading
-  a callback to them was more coupling than the second click is worth.
-  Worth revisiting if this turns out to be a common path.
+- The failed message carries a Sign in button itself. This was first
+  deferred — the message rows are memoized and threading a callback down
+  looked like more coupling than a second click was worth — and that was
+  wrong: the first user to hit it went to a terminal rather than to
+  Settings. The completion tags the error with `auth-required`
+  (`AUTH_REQUIRED_CONTEXT`) and the row shows Sign in ahead of Retry,
+  because retrying without signing in only fails again.
 - macOS startup can cost up to 3 seconds when a shell profile is slow.
   The window is already up; only provider resolution waits.
 - Nothing here can help a machine where the CLI itself cannot

@@ -67,6 +67,8 @@ interface Props {
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
   onRetry: () => void;
+  /** Open the provider's login prompt, offered on a sign-in failure. */
+  onSignIn: () => void;
   loadCommands: () => Promise<CommandInfo[]>;
   loadGitChanges: () => Promise<GitChanges | null>;
   onGitStage: (path: string) => Promise<GitActionResult>;
@@ -117,6 +119,7 @@ export function ChatPanel({
   onRespondPermission,
   onAnswerQuestion,
   onRetry,
+  onSignIn,
   loadCommands,
   loadGitChanges,
   onGitStage,
@@ -369,6 +372,7 @@ export function ChatPanel({
             turnStartedAt={tab.turnStartedAt}
             sessionStage={tab.sessionStage}
             onRetry={onRetry}
+            onSignIn={onSignIn}
             onOpenFile={openTouchedFile}
             onShowAgentDiff={showAgentDiff}
             onReadTerminal={onReadTerminal}
