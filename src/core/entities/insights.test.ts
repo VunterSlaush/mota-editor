@@ -299,6 +299,154 @@ function billed(overrides: Partial<BilledRequest> = {}): BilledRequest {
 
 const logged = session({ providerSessionId: "provider-1", turns: [turn()] });
 
+describe("buildInsights token rankings", () => {
+  it("ranks commands by tokens, dearest first", () => {
+    const s = session({
+      turns: [
+        turn({ command: "/review", tokens: 40_000 }),
+        turn({ command: "/commit", tokens: 2_000 }),
+        turn({ command: "/review", tokens: 20_000 }),
+        turn({ tokens: 99_000 }), // no command — not a command cost
+      ],
+    });
+    const rows = build([s]).tokens.byCommand;
+    expect(rows.map((r) => r.command)).toEqual(["/review", "/commit"]);
+    expect(rows[0]).toMatchObject({ tokens: 60_000, turns: 2 });
+  });
+
+  it("prefers the vendor's billed tokens over the context delta", () => {
+    // A turn's delta says how much the window GREW; the billed count
+    // says how much was sent. Re-sent context is most of what a turn
+    // costs, so the two differ by a lot and only one is the truth.
+    const s = session({
+      providerSessionId: "provider-1",
+      turns: [turn({ command: "/review", sentAt: NOW - DAY, tokens: 500 })],
+    });
+    const report = build([s], {
+      billed: [billed({ timestampMs: NOW - DAY + 1_000, inputTokens: 90_000 })],
+    });
+    expect(report.tokens.byCommand[0]).toMatchObject({
+      tokens: 90_000,
+      estimated: false,
+    });
+  });
+
+  it("credits each request to the turn that was running when it was made", () => {
+    const s = session({
+      providerSessionId: "provider-1",
+      turns: [
+        turn({ command: "/first", sentAt: NOW - DAY }),
+        turn({ command: "/second", sentAt: NOW - DAY + 10_000 }),
+      ],
+    });
+    const report = build([s], {
+      billed: [
+        // Before any turn started — that IS the first turn's startup.
+        billed({ requestId: "r0", timestampMs: NOW - DAY - 5_000, inputTokens: 1_000 }),
+        billed({ requestId: "r1", timestampMs: NOW - DAY + 1_000, inputTokens: 2_000 }),
+        billed({ requestId: "r2", timestampMs: NOW - DAY + 11_000, inputTokens: 7_000 }),
+      ],
+    });
+    const byCommand = new Map(report.tokens.byCommand.map((r) => [r.command, r.tokens]));
+    expect(byCommand.get("/first")).toBe(3_000);
+    expect(byCommand.get("/second")).toBe(7_000);
+  });
+
+  it("marks a command estimated when any of its turns had no vendor log", () => {
+    const logged = session({
+      providerSessionId: "provider-1",
+      turns: [turn({ command: "/review", sentAt: NOW - DAY })],
+    });
+    const unlogged = session({
+      sessionId: "s2",
+      turns: [turn({ command: "/review", tokens: 100 })],
+    });
+    const report = build([logged, unlogged], {
+      billed: [billed({ timestampMs: NOW - DAY + 1_000, inputTokens: 1_000 })],
+    });
+    expect(report.tokens.byCommand[0].estimated).toBe(true);
+  });
+
+  it("ranks folders by what ONE new chat costs, not by how busy they are", () => {
+    // The busy project would win a total; the expensive one should win
+    // this, because that is the number a project can be edited to change.
+    const busy = session({
+      sessionId: "a",
+      projectPath: "/work/busy",
+      turns: [turn({ tokens: 10_000 })],
+    });
+    const busyAgain = session({
+      sessionId: "b",
+      projectPath: "/work/busy",
+      turns: [turn({ tokens: 10_000 })],
+    });
+    const heavy = session({
+      sessionId: "c",
+      projectPath: "/work/heavy",
+      turns: [turn({ tokens: 30_000 })],
+    });
+    const rows = build([busy, busyAgain, heavy]).tokens.coldStarts;
+    expect(rows.map((r) => r.label)).toEqual(["heavy", "busy"]);
+    expect(rows[0]).toMatchObject({ avgTokens: 30_000, conversations: 1 });
+    expect(rows[1]).toMatchObject({
+      avgTokens: 10_000,
+      conversations: 2,
+      tokens: 20_000,
+    });
+  });
+
+  it("counts only a conversation's own first turn", () => {
+    const s = session({
+      projectPath: "/work/alpha",
+      turns: [
+        turn({ sentAt: NOW - 2 * DAY, tokens: 25_000 }),
+        turn({ sentAt: NOW - DAY, tokens: 900 }),
+      ],
+    });
+    expect(build([s]).tokens.coldStarts[0].avgTokens).toBe(25_000);
+  });
+
+  it("does not treat an older chat's first in-range turn as a cold start", () => {
+    // The conversation began before the range; nothing in it is a start.
+    const s = session({
+      projectPath: "/work/alpha",
+      turns: [
+        turn({ sentAt: NOW - 40 * DAY, tokens: 25_000 }),
+        turn({ sentAt: NOW - DAY, tokens: 900 }),
+      ],
+    });
+    expect(build([s], { range: "30d" }).tokens.coldStarts).toEqual([]);
+  });
+
+  it("keeps closed projects in the ranking under their fallback name", () => {
+    const s = session({ projectDirHash: "deadbeef", turns: [turn({ tokens: 5_000 })] });
+    expect(build([s]).tokens.coldStarts[0]).toMatchObject({
+      key: "#deadbeef",
+      label: "Closed project",
+    });
+  });
+
+  it("falls back to the estimate when turns have no clock to line up against", () => {
+    // Transcripts predating turn stats have sentAt 0; attributing by
+    // timestamp would pile the whole session onto its last turn.
+    const s = session({
+      providerSessionId: "provider-1",
+      turns: [
+        turn({ command: "/review", sentAt: 0, tokens: 300 }),
+        turn({ command: "/commit", sentAt: 0, tokens: 100 }),
+      ],
+    });
+    const report = build([s], {
+      range: "all",
+      billed: [billed({ inputTokens: 50_000 })],
+    });
+    const byCommand = new Map(report.tokens.byCommand.map((r) => [r.command, r.tokens]));
+    expect(byCommand.get("/review")).toBe(300);
+    expect(byCommand.get("/commit")).toBe(100);
+    expect(report.tokens.byCommand.every((r) => r.estimated)).toBe(true);
+  });
+});
+
 describe("buildInsights billed spend", () => {
   it("is absent when no vendor log covers the range", () => {
     expect(build([logged]).billed).toBeUndefined();

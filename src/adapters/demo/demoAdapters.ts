@@ -438,7 +438,10 @@ export class DemoTranscriptStore implements TranscriptStore {
         projectDirHash: "demo2",
         provider: "codex",
         savedAt: now - day,
-        turns: [turn(4, 15_000), turn(2, 7_000, { effort: "high" })],
+        turns: [
+          turn(4, 15_000, { command: "/commit" }),
+          turn(2, 7_000, { effort: "high" }),
+        ],
         touchedFiles: { "src/queue.ts": 3 },
       },
     ];
@@ -448,19 +451,27 @@ export class DemoTranscriptStore implements TranscriptStore {
 /**
  * Browser demo — one session's worth of billed usage, shaped like a real
  * conversation: a big first cache write, then mostly cache reads.
+ *
+ * Timestamps land just after DemoTranscriptStore's turns on purpose. The
+ * report credits each request to the turn that was running when it was
+ * made, so a demo whose requests drifted away from its turns would show
+ * commands costing nothing.
  */
 export class DemoBillingStore implements BillingStore {
   async readBilledUsage(sessionIds: readonly string[]): Promise<BilledRequest[]> {
     if (!sessionIds.includes("demo-provider-1")) return [];
-    const hour = 3_600_000;
+    const day = 86_400_000;
+    const minute = 60_000;
     const now = Date.now();
+    /** `daysAgo` mirrors a turn in DemoTranscriptStore.listStats. */
     const request = (
-      index: number,
+      id: string,
+      daysAgo: number,
       patch: Partial<BilledRequest> = {},
     ): BilledRequest => ({
-      requestId: `demo-req-${index}`,
+      requestId: `demo-req-${id}`,
       sessionId: "demo-provider-1",
-      timestampMs: now - index * hour,
+      timestampMs: now - daysAgo * day + minute,
       model: "claude-opus-5",
       isSidechain: false,
       inputTokens: 120,
@@ -471,11 +482,13 @@ export class DemoBillingStore implements BillingStore {
       ...patch,
     });
     return [
-      request(0, { cacheWrite1hTokens: 32_000, cacheReadTokens: 0 }),
-      request(1),
-      request(2, { cacheWrite5mTokens: 6_500 }),
-      request(3, { isSidechain: true, model: "claude-haiku-4-5-20251001" }),
-      request(4),
+      // The cold start: nothing cached yet, so the whole prefix is written.
+      request("a", 6, { cacheWrite1hTokens: 32_000, cacheReadTokens: 0 }),
+      // Two requests and a subagent inside the /review turn.
+      request("b", 3),
+      request("c", 3, { cacheWrite5mTokens: 6_500 }),
+      request("d", 3, { isSidechain: true, model: "claude-haiku-4-5-20251001" }),
+      request("e", 1),
     ];
   }
 }

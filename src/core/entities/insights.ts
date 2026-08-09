@@ -5,6 +5,7 @@ import {
   cacheHitRate,
   NO_BILLED_TOKENS,
   sumBilled,
+  totalBilledTokens,
 } from "./billing";
 import { billedCostUsd, estimateCostUsd } from "./modelPricing";
 import { COMPACT_COMMAND, PROVIDERS } from "./provider";
@@ -13,9 +14,18 @@ import { COMPACT_COMMAND, PROVIDERS } from "./provider";
  * Entities layer — historical usage statistics ("Insights") built from
  * persisted transcripts. Pure aggregation: no React, no Tauri, no IO.
  *
- * Token figures everywhere in this module are CONTEXT-WINDOW DELTAS per
- * turn (what ACP reports), not billed API tokens — displays must mark
- * them and any derived cost as estimates.
+ * Two kinds of token figure live here and must not be confused:
+ *
+ * - CONTEXT-WINDOW DELTAS per turn (what ACP reports) — how much the
+ *   window GREW. This is `TurnStat.tokens`, and it drives `total`,
+ *   `byModel`, `byProvider` and every cost derived from them, all of
+ *   which displays must mark as estimates.
+ * - BILLED tokens from the vendor's own log — how much was actually
+ *   SENT, re-sent context included. Exact, and never marked.
+ *
+ * `billedSpend`, `byCommand` and `coldStarts` prefer the billed figure
+ * and fall back to the delta, carrying an `estimated` flag that says
+ * which one a row ended up using.
  */
 
 /** One prompt turn extracted from a persisted transcript.
@@ -110,6 +120,35 @@ export interface BilledSessionRow {
   readonly costUsd: number;
 }
 
+/** One slash command's total token spend. */
+export interface CommandTokenRow {
+  readonly command: string;
+  readonly turns: number;
+  readonly tokens: number;
+  /** True when any contributing turn had no vendor log to read. */
+  readonly estimated: boolean;
+}
+
+/**
+ * What it costs to OPEN a conversation in one project.
+ *
+ * The first turn of a chat pays for everything the agent has to be told
+ * before it can help: the system prompt, every tool schema, and whatever
+ * CLAUDE.md/AGENTS.md the project carries. Every new chat there pays it
+ * again, which makes it the one token cost that a project can actually
+ * be edited to reduce.
+ */
+export interface ColdStartRow {
+  readonly key: string;
+  readonly label: string;
+  /** Conversations started here in range. */
+  readonly conversations: number;
+  readonly tokens: number;
+  /** The actionable figure: what one new chat here costs. */
+  readonly avgTokens: number;
+  readonly estimated: boolean;
+}
+
 export interface BilledModelRow {
   readonly model: string;
   readonly provider: string;
@@ -180,6 +219,10 @@ export interface InsightsReport {
     readonly compactionTurns: number;
     /** Sessions whose cumulative delta crossed threshold × contextWindow. */
     readonly sessionsNearThreshold: number;
+    /** Slash commands by total tokens, dearest first. */
+    readonly byCommand: readonly CommandTokenRow[];
+    /** Projects by what starting a conversation there costs. */
+    readonly coldStarts: readonly ColdStartRow[];
   };
   /**
    * Exact spend from the vendors' own logs. Absent when no session in
@@ -228,6 +271,64 @@ function basename(path: string): string {
 
 function contextWindowOf(provider: string): number | undefined {
   return PROVIDERS.find((p) => p.id === provider)?.contextWindow;
+}
+
+/** How a session's project is keyed and named in every ranking. */
+function projectIdentity(session: SessionStats): { key: string; label: string } {
+  return {
+    key: session.projectPath ?? `#${session.projectDirHash}`,
+    label: session.projectPath ? basename(session.projectPath) : "Closed project",
+  };
+}
+
+/** What one turn really cost, and whether that number is a guess. */
+interface TurnTokens {
+  readonly tokens: number;
+  readonly estimated: boolean;
+}
+
+/**
+ * Tokens each of a session's turns actually cost, keyed by turn.
+ *
+ * Billed requests carry a timestamp but no turn, so each is credited to
+ * the most recent turn already under way when it was made — within a
+ * session turns run one at a time, which makes that exact. Requests
+ * predating the first turn are credited to it: they ARE the startup.
+ *
+ * Falls back to the per-turn context delta when the session has no
+ * vendor log, or no usable turn clock to line one up against — a
+ * ranking that silently dropped those sessions would mislead worse than
+ * one that marks them estimated.
+ */
+function tokensPerTurn(
+  session: SessionStats,
+  billed: readonly BilledRequest[],
+): Map<TurnStat, TurnTokens> {
+  const ordered = [...session.turns].sort((a, b) => a.sentAt - b.sentAt);
+  const estimate = (): Map<TurnStat, TurnTokens> =>
+    new Map(ordered.map((t) => [t, { tokens: t.tokens ?? 0, estimated: true }]));
+  if (ordered.length === 0) return new Map();
+
+  const mine = session.providerSessionId
+    ? billed.filter((r) => r.sessionId === session.providerSessionId)
+    : [];
+  // A turn with no clock (transcripts predating turn stats) cannot be
+  // lined up against a timestamp; guessing would pile the whole session
+  // onto its last turn.
+  if (mine.length === 0 || ordered.some((t) => t.sentAt <= 0)) return estimate();
+
+  const totals = ordered.map(() => 0);
+  let index = 0;
+  for (const request of [...mine].sort((a, b) => a.timestampMs - b.timestampMs)) {
+    while (
+      index + 1 < ordered.length &&
+      ordered[index + 1].sentAt <= request.timestampMs
+    ) {
+      index += 1;
+    }
+    totals[index] += totalBilledTokens(request);
+  }
+  return new Map(ordered.map((t, i) => [t, { tokens: totals[i], estimated: false }]));
 }
 
 /**
@@ -462,6 +563,76 @@ export function buildInsights(
       ? knownCosts.reduce((sum, r) => sum + (r.costUsd ?? 0), 0)
       : null;
 
+  // --- What the tokens were spent ON ------------------------------------
+  // Both rankings are in TOKENS, and both prefer the vendor's billed
+  // count over the context delta: a turn's delta says how much the
+  // window grew, not how much was sent, and re-sent context is most of
+  // what a turn costs.
+  const billedRequests = options.billed ?? [];
+  const commandTokens = new Map<
+    string,
+    { turns: number; tokens: number; estimated: boolean }
+  >();
+  const coldStarts = new Map<
+    string,
+    { label: string; conversations: number; tokens: number; estimated: boolean }
+  >();
+
+  for (const { session, turns } of included) {
+    const measured = tokensPerTurn(session, billedRequests);
+    for (const turn of turns) {
+      if (turn.command === undefined) continue;
+      const cost = measured.get(turn) ?? { tokens: turn.tokens ?? 0, estimated: true };
+      const row = commandTokens.get(turn.command) ?? {
+        turns: 0,
+        tokens: 0,
+        estimated: false,
+      };
+      row.turns += 1;
+      row.tokens += cost.tokens;
+      row.estimated = row.estimated || cost.estimated;
+      commandTokens.set(turn.command, row);
+    }
+  }
+
+  // Cold starts are counted from the session's OWN first turn, and the
+  // session is included by when that turn happened — the first in-range
+  // turn of an older conversation is not a cold start, it is just a turn.
+  for (const session of sessions) {
+    const first = [...session.turns].sort((a, b) => a.sentAt - b.sentAt)[0];
+    if (!first || !inRange(first)) continue;
+    const cost = tokensPerTurn(session, billedRequests).get(first) ?? {
+      tokens: first.tokens ?? 0,
+      estimated: true,
+    };
+    const { key, label } = projectIdentity(session);
+    const row = coldStarts.get(key) ?? {
+      label,
+      conversations: 0,
+      tokens: 0,
+      estimated: false,
+    };
+    row.conversations += 1;
+    row.tokens += cost.tokens;
+    row.estimated = row.estimated || cost.estimated;
+    coldStarts.set(key, row);
+  }
+
+  const byCommand: CommandTokenRow[] = [...commandTokens.entries()]
+    .map(([command, row]) => ({ command, ...row }))
+    .sort((a, b) => b.tokens - a.tokens || a.command.localeCompare(b.command));
+
+  const coldStartRows: ColdStartRow[] = [...coldStarts.entries()]
+    .map(([key, row]) => ({
+      key,
+      ...row,
+      avgTokens: row.tokens / row.conversations,
+    }))
+    // Ranked by what ONE new chat costs, not by the total: a project
+    // worked in all week would otherwise always top a list meant to
+    // point at the expensive project, not the busy one.
+    .sort((a, b) => b.avgTokens - a.avgTokens || a.label.localeCompare(b.label));
+
   let sessionsNearThreshold = 0;
   for (const { session } of included) {
     const window = contextWindowOf(session.provider);
@@ -548,6 +719,8 @@ export function buildInsights(
       estimatedCostUsd,
       compactionTurns,
       sessionsNearThreshold,
+      byCommand,
+      coldStarts: coldStartRows,
     },
     billed: buildBilledSpend(sessions, options.billed ?? [], cutoff, dayKey),
     habits: {

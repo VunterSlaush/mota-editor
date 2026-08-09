@@ -76,6 +76,43 @@ export function InsightsTokens({ report }: { report: InsightsReport }) {
         </>
       )}
 
+      {tokens.byCommand.length > 0 && (
+        <>
+          <span className="insights-caption">Most expensive commands</span>
+          <BarList
+            rows={tokens.byCommand.slice(0, 10).map((c) => ({
+              key: c.command,
+              label: c.command,
+              detail: `${String(c.turns)} ${c.turns === 1 ? "run" : "runs"}`,
+              value: c.tokens,
+              display: `${c.estimated ? "≈ " : ""}${formatTokens(c.tokens)} tok`,
+            }))}
+          />
+        </>
+      )}
+
+      {tokens.coldStarts.length > 0 && (
+        <>
+          <span className="insights-caption">Costliest folders to start a chat in</span>
+          <BarList
+            rows={tokens.coldStarts.slice(0, 10).map((f) => ({
+              key: f.key,
+              label: f.label,
+              detail: `${String(f.conversations)} ${
+                f.conversations === 1 ? "chat" : "chats"
+              }`,
+              value: f.avgTokens,
+              display: `${f.estimated ? "≈ " : ""}${formatTokens(f.avgTokens)} tok / chat`,
+            }))}
+          />
+          <p className="settings-section__hint">
+            What the first turn of a new chat costs there — the system prompt, every tool
+            schema, and the project's own CLAUDE.md or AGENTS.md. Every new chat pays it
+            again, so it is the one token cost a project can be edited to reduce.
+          </p>
+        </>
+      )}
+
       {tokens.byProvider.length > 1 && (
         <>
           <span className="insights-caption">By provider</span>
