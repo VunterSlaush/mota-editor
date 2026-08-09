@@ -189,10 +189,15 @@ body {
   white-space: nowrap;
 }
 
-/* The tab under the pointer stays put while the others slide past it. */
+/* The dragged tab rides the pointer, lifted above the row, while the
+   others slide out of its way. */
 .tab--dragging {
-  opacity: 0.6;
+  position: relative;
+  z-index: 1;
   cursor: grabbing;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
 }
 
 .tab--active {

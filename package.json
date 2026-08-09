@@ -14,7 +14,7 @@
     "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "node scripts/check-rust.mjs && tauri"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
