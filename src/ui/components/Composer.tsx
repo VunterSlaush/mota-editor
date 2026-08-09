@@ -19,18 +19,33 @@ import {
   commandNames,
   filterCommands,
 } from "../../core/entities/command";
+import {
+  FILE_MENTION_LIMIT,
+  filterFiles,
+  mentionToken,
+  replaceMention,
+} from "../../core/entities/fileMention";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
 import { fileName } from "../fileName";
 import { CommandPalette } from "./CommandPalette";
 import { CommandText } from "./CommandText";
 import { ContextGauge } from "./ContextGauge";
+import { FileMentionMenu } from "./FileMentionMenu";
 import { ModelPicker } from "./ModelPicker";
 import { OptionPicker, type PickerOption } from "./OptionPicker";
 
 /** The input grows with the text up to this many lines, then scrolls. */
 const MAX_INPUT_LINES = 4;
 const LINE_HEIGHT_PX = 22;
+
+/**
+ * How long a fetched file list is reused before "@" asks git again. Long
+ * enough that a burst of typing costs one `git ls-files`, short enough
+ * that a file the agent just wrote shows up while you are still reading
+ * about it.
+ */
+const FILE_LIST_TTL_MS = 30_000;
 
 /** Bounds for a hand-resized input: one line up to half the window. */
 const MIN_INPUT_HEIGHT_PX = LINE_HEIGHT_PX;
@@ -84,6 +99,8 @@ interface Props {
   onPickFiles: () => Promise<string[]>;
   /** Save an image pasted into the composer; returns its file path. */
   onPasteImage: (bytes: Uint8Array, mimeType: string) => Promise<string>;
+  /** The project's files, for the "@" menu. Empty outside a repository. */
+  loadProjectFiles: () => Promise<string[]>;
   onSelectMode: (mode: AgentMode) => void;
   onSelectPermission: (permission: PermissionPolicy) => void;
   onSelectModel: (model: string) => void;
@@ -121,14 +138,18 @@ export function Composer({
   onCancel,
   onPickFiles,
   onPasteImage,
+  loadProjectFiles,
   onSelectMode,
   onSelectPermission,
   onSelectModel,
   onSelectEffort,
   pendingSpec,
 }: Props) {
-  const [paletteDismissed, setPaletteDismissed] = useState(false);
+  // One dismissal serves both menus: only one of them can be open, since
+  // a word starts with either "/" or "@", never both.
+  const [menuDismissed, setMenuDismissed] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [projectFiles, setProjectFiles] = useState<readonly string[]>([]);
   // A height the user dragged the input to; null means auto-grow.
   const [userHeight, setUserHeight] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -158,13 +179,33 @@ export function Composer({
     return token.startsWith("/") ? token : null;
   }, [draft]);
 
-  const paletteCommands = paletteVisible()
-    ? filterCommands(commands, commandToken ?? "")
+  const paletteCommands =
+    !menuDismissed && commandToken !== null
+      ? filterCommands(commands, commandToken ?? "")
+      : [];
+
+  // The "@..." word being typed, if any — the file menu's trigger.
+  const mention = useMemo(() => mentionToken(draft), [draft]);
+  const mentionOpen = !menuDismissed && mention !== null;
+  const mentionFiles = mentionOpen
+    ? filterFiles(projectFiles, mention ?? "", FILE_MENTION_LIMIT)
     : [];
 
-  function paletteVisible(): boolean {
-    return !paletteDismissed && commandToken !== null;
-  }
+  // The list is fetched on the first "@" rather than on mount: most
+  // messages never mention a file, and a repository's file list is the
+  // same for every keystroke that follows.
+  const filesFetchedAt = useRef(0);
+  useEffect(() => {
+    if (!mentionOpen || Date.now() - filesFetchedAt.current < FILE_LIST_TTL_MS) return;
+    filesFetchedAt.current = Date.now(); // stamped first: one fetch per burst
+    let cancelled = false;
+    void loadProjectFiles().then((files) => {
+      if (!cancelled) setProjectFiles(files);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mentionOpen, loadProjectFiles]);
 
   // Auto-grow: fit the content, capped at MAX_INPUT_LINES — unless the
   // user dragged the input to a height of their own, which then wins.
@@ -218,6 +259,14 @@ export function Composer({
     inputRef.current?.focus();
   };
 
+  // A picked file goes into the prompt as its path — the agent reads it
+  // itself, so there is nothing to attach.
+  const pickFile = (path: string) => {
+    onDraftChange(replaceMention(draft, mention ?? "", path), attachments);
+    setSelectedIndex(0);
+    inputRef.current?.focus();
+  };
+
   const attach = async () => {
     const picked = await onPickFiles();
     if (picked.length === 0) return;
@@ -262,24 +311,34 @@ export function Composer({
     }
   };
 
+  // Whichever menu is open owns the arrows, Enter, Tab and Escape — the
+  // keys mean the same thing in both, so they are handled once.
+  const openMenu =
+    paletteCommands.length > 0
+      ? {
+          count: paletteCommands.length,
+          pick: (i: number) => pickCommand(paletteCommands[i]),
+        }
+      : mentionFiles.length > 0
+        ? { count: mentionFiles.length, pick: (i: number) => pickFile(mentionFiles[i]) }
+        : null;
+
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (paletteCommands.length > 0) {
+    if (openMenu) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const delta = e.key === "ArrowDown" ? 1 : -1;
-        setSelectedIndex(
-          (selectedIndex + delta + paletteCommands.length) % paletteCommands.length,
-        );
+        setSelectedIndex((selectedIndex + delta + openMenu.count) % openMenu.count);
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        pickCommand(paletteCommands[Math.min(selectedIndex, paletteCommands.length - 1)]);
+        openMenu.pick(Math.min(selectedIndex, openMenu.count - 1));
         return;
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        setPaletteDismissed(true);
+        setMenuDismissed(true);
         return;
       }
     }
@@ -300,6 +359,11 @@ export function Composer({
         commands={paletteCommands}
         selectedIndex={Math.min(selectedIndex, Math.max(paletteCommands.length - 1, 0))}
         onPick={pickCommand}
+      />
+      <FileMentionMenu
+        files={mentionFiles}
+        selectedIndex={Math.min(selectedIndex, Math.max(mentionFiles.length - 1, 0))}
+        onPick={pickFile}
       />
       {queued.length > 0 && (
         <div className="queued-list" aria-label="Queued messages">
@@ -373,7 +437,7 @@ export function Composer({
             rows={1}
             onChange={(e) => {
               onDraftChange(e.target.value, attachments);
-              setPaletteDismissed(false);
+              setMenuDismissed(false);
               setSelectedIndex(0);
             }}
             onScroll={syncHighlightScroll}

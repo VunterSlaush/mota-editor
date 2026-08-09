@@ -164,6 +164,7 @@ export type Action =
   | { type: "tab/opened"; project: Project }
   | { type: "tab/closed"; tabId: string }
   | { type: "tab/activated"; tabId: string }
+  | { type: "tab/moved"; tabId: string; toIndex: number }
   | { type: "tab/attentionRequested"; tabId: string }
   | { type: "tab/providerChanged"; tabId: string; provider: ProviderId }
   | { type: "tab/modeChanged"; tabId: string; mode: AgentMode }
@@ -313,6 +314,19 @@ export function reduce(state: AppState, action: Action): AppState {
         ...mapTab(state, action.tabId, (tab) => ({ ...tab, attention: false })),
         activeTabId: action.tabId,
       };
+
+    case "tab/moved": {
+      // Reordering is purely cosmetic: which tab you are looking at never
+      // changes because you dragged another one past it.
+      const from = state.tabs.findIndex((t) => t.project.id === action.tabId);
+      if (from === -1) return state;
+      const to = Math.min(state.tabs.length - 1, Math.max(0, action.toIndex));
+      if (to === from) return state;
+      const tabs = [...state.tabs];
+      const [moved] = tabs.splice(from, 1);
+      tabs.splice(to, 0, moved);
+      return { ...state, tabs };
+    }
 
     case "tab/attentionRequested":
       // Never flag the tab the user is already looking at.

@@ -1213,9 +1213,10 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
             // plan approval, and nothing at all while in plan mode. When
             // the agent offers no allow option, bypass_choice is None and
             // the request falls through to the user.
+            let is_plan = acp::is_plan_approval(&title, &options, tool_kind.as_deref());
             let may_auto_approve = session.bypass.load(Ordering::SeqCst)
                 && !session.plan_mode.load(Ordering::SeqCst)
-                && !acp::is_plan_approval(&title, &options, tool_kind.as_deref());
+                && !is_plan;
             if may_auto_approve {
                 if let Some(choice) = acp::bypass_choice(&options) {
                     let response = acp::permission_selected_response(id, &choice.option_id);
@@ -1234,6 +1235,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                     plan_markdown,
                     plan_file_path,
                     tool_call_id,
+                    is_plan,
                 },
             );
         }

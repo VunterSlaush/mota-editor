@@ -435,6 +435,13 @@ const ApprovalCard = memo(function ApprovalCard({
           );
         })}
       </div>
+      {/* The agent has stopped here, so typing is a third answer — say so
+          rather than leaving it to be discovered. */}
+      {approval.isPlan && !answered && (
+        <div className="approval__aside">
+          Or just tell the agent what to change — sending a message turns this plan down.
+        </div>
+      )}
       {chosen && <div className="approval__status">You chose: {chosen.name}</div>}
       {approval.cancelled && !chosen && (
         <div className="approval__status">The turn ended before you answered.</div>

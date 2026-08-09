@@ -23,6 +23,7 @@ import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import type { ApplyCommandConfig } from "./applyCommandConfig";
 import { persistWorkspace } from "./persistWorkspace";
+import { declineParkedPlan } from "./planApproval";
 
 export type IdGenerator = () => string;
 
@@ -77,6 +78,11 @@ export class SendPrompt {
       return;
     }
 
+    // Parked on a plan? The message IS the answer to it. Turn the plan
+    // down and stop the turn first, so this prompt starts a fresh one
+    // instead of racing the turn still open on the agent's side.
+    await declineParkedPlan(this.store, this.agentGateway, tabId);
+
     // A slash command may carry its own mode/permission/effort. Apply it
     // first, then read the tab back: the request below must describe the
     // tab as the command leaves it, not as it was when the user typed.
@@ -114,6 +120,9 @@ export class SendPrompt {
     // The clock comes from here, not the reducer, which stays pure.
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: sentAt });
 
+    const turn = (this.generation.get(tabId) ?? 0) + 1;
+    this.generation.set(tabId, turn);
+
     try {
       await this.agentGateway.startTurn(
         {
@@ -133,7 +142,7 @@ export class SendPrompt {
             configured.project.mcpOverrides,
           ),
         },
-        (event) => this.onEvent(tabId, event),
+        (event) => this.onEvent(tabId, event, turn),
       );
     } catch (e) {
       // A turn that never started has no outcome to stamp.
@@ -161,7 +170,16 @@ export class SendPrompt {
     }
   >();
 
-  private onEvent(tabId: string, event: AgentTurnEvent): void {
+  /**
+   * Which turn a tab is on. A cancelled turn's `completed` can arrive
+   * after the next one has started — declining a plan makes that the
+   * normal case, not a rarity — and it would report the old turn's
+   * outcome as the new one's, and mark a running tab idle.
+   */
+  private readonly generation = new Map<string, number>();
+
+  private onEvent(tabId: string, event: AgentTurnEvent, turn: number): void {
+    if (turn !== this.generation.get(tabId)) return; // a superseded turn's tail
     // Deltas coalesce; everything else flushes first so ordering holds
     // (a tool row must land after the text that preceded it).
     if (event.kind === "assistantDelta" || event.kind === "thoughtDelta") {
@@ -226,14 +244,21 @@ export class SendPrompt {
         this.store.dispatch({
           type: "chat/messageAppended",
           tabId,
-          message: approvalMessage(
-            event.title,
-            event.requestId,
-            event.options,
-            event.planMarkdown,
-            event.toolCallId,
-          ),
+          message: approvalMessage(event.title, {
+            requestId: event.requestId,
+            options: event.options,
+            planMarkdown: event.planMarkdown,
+            toolCallId: event.toolCallId,
+            isPlan: event.isPlan,
+          }),
         });
+        // A plan parks the turn. The agent is blocked on the user either
+        // way, but only a plan is a place to say something back, so the
+        // composer must be free rather than queueing behind a turn that
+        // is going nowhere until it is answered.
+        if (event.isPlan) {
+          this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
+        }
         break;
 
       case "question":

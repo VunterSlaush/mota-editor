@@ -11,6 +11,11 @@ interface Props {
   pendingValue?: string;
   disabled: boolean;
   onChange: (model: string) => void;
+  /** Passed through to the picker. The defaults suit the composer
+   *  toolbar, which sits at the bottom-right of the window. */
+  placement?: "top" | "bottom";
+  align?: "start" | "end";
+  className?: string;
 }
 
 /**
@@ -27,6 +32,9 @@ export function ModelPicker({
   pendingValue,
   disabled,
   onChange,
+  placement = "top",
+  align = "end",
+  className = "picker__trigger--dim",
 }: Props) {
   const shown = pendingValue ?? value;
   const suggestions = MODEL_SUGGESTIONS[provider];
@@ -47,11 +55,13 @@ export function ModelPicker({
       options={options}
       value={shown}
       disabled={disabled}
-      align="end"
+      placement={placement}
+      align={align}
+      // The pending marker is added to whatever the caller asked for,
+      // never instead of it: a deferred value must read as unsettled
+      // wherever the picker is used.
       className={
-        pendingValue !== undefined
-          ? "picker__trigger--dim picker__trigger--pending"
-          : "picker__trigger--dim"
+        pendingValue !== undefined ? `${className} picker__trigger--pending` : className
       }
       onChange={onChange}
     />

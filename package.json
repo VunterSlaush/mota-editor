@@ -5,6 +5,7 @@
   "description": "Lightweight multi-project AI agent workbench: one tab per project, one chat per tab.",
   "type": "module",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",

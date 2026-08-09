@@ -17,9 +17,10 @@ const tab = (messages: readonly ChatMessage[], busy = false, attention = false) 
 });
 
 const pending = () =>
-  approvalMessage("Run npm test", "r1", [
-    { optionId: "allow", name: "Allow", kind: "allow_once" },
-  ]);
+  approvalMessage("Run npm test", {
+    requestId: "r1",
+    options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+  });
 
 const answered = () => {
   const m = pending();

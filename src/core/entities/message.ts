@@ -26,6 +26,12 @@ export interface ApprovalState {
   readonly planMarkdown?: string;
   /** The tool call this request guards, when the agent named it. */
   readonly toolCallId?: string;
+  /**
+   * True when the agent is presenting its plan rather than asking about
+   * one tool call. A plan is a stopping point: the turn parks on it, and
+   * declining ends the turn instead of letting the agent carry on.
+   */
+  readonly isPlan?: boolean;
   /** Set once the user picked an option. */
   readonly resolvedOptionId?: string;
   /** True when the turn ended before the user answered. */
@@ -257,17 +263,6 @@ export function questionMessage(
   };
 }
 
-export function approvalMessage(
-  title: string,
-  requestId: string,
-  options: readonly ApprovalOption[],
-  planMarkdown?: string,
-  toolCallId?: string,
-): ChatMessage {
-  return {
-    id: nextMessageId(),
-    role: "approval",
-    text: title,
-    approval: { requestId, options, planMarkdown, toolCallId },
-  };
+export function approvalMessage(title: string, approval: ApprovalState): ChatMessage {
+  return { id: nextMessageId(), role: "approval", text: title, approval };
 }

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Repository gate. `npm install` points core.hooksPath here — see the
+# `prepare` script in package.json. No hook runner, no dependency.
+#
+# Rust is deliberately absent: `cargo clippy --workspace` is too slow for
+# every commit. Run it yourself before pushing src-tauri/ changes — see
+# AGENTS.md § Commands.
+
+set -e
+
+changed() {
+  git diff --cached --name-only --diff-filter=ACMR -- "$@"
+}
+
+# Format and re-stage. -z/-0 so paths containing spaces survive the pipe.
+if [ -n "$(changed '*.ts' '*.tsx' '*.json')" ]; then
+  git diff --cached --name-only --diff-filter=ACMR -z -- '*.ts' '*.tsx' '*.json' |
+    xargs -0 npx biome check --write --no-errors-on-unmatched --colors=off
+  git diff --cached --name-only --diff-filter=ACMR -z -- '*.ts' '*.tsx' '*.json' |
+    xargs -0 git add
+fi
+
+# The suites run only when the code they cover actually moved, so a
+# docs-only commit stays instant. `npm test` includes the boundary rules,
+# which is why a Rust change triggers it too.
+if [ -n "$(changed '*.ts' '*.tsx' '*.mjs' '*.rs' '*Cargo.toml')" ]; then
+  npm test
+fi
+
+if [ -n "$(changed '*.ts' '*.tsx')" ]; then
+  npm run typecheck
+fi

@@ -4,13 +4,9 @@ import {
   matchingCostPreset,
   PERMISSIONS,
 } from "../../core/entities/agentSettings";
-import {
-  EFFORT_OPTIONS,
-  MODEL_SUGGESTIONS,
-  PROVIDERS,
-  type ProviderId,
-} from "../../core/entities/provider";
+import { EFFORT_OPTIONS, PROVIDERS, type ProviderId } from "../../core/entities/provider";
 import type { AppSettings } from "../../core/state/appState";
+import { ModelPicker } from "./ModelPicker";
 import { OptionPicker } from "./OptionPicker";
 
 interface Props {
@@ -130,24 +126,21 @@ export function SettingsDefaults({ settings, onChange }: Props) {
 
       <Field
         label="Model"
-        hint={`Sent to ${providerName(provider)}. Empty = its own default.`}
+        hint={`Sent to ${providerName(provider)}. "Default model" leaves the choice to it.`}
       >
-        <input
-          className="settings-input"
-          list="settings-model-suggestions"
-          placeholder="Provider default"
+        <ModelPicker
+          provider={provider}
           value={settings.defaultModel[provider] ?? UNSET}
-          onChange={(e) =>
+          disabled={false}
+          placement="bottom"
+          align="start"
+          className=""
+          onChange={(model) =>
             onChange({
-              defaultModel: withProvider(settings.defaultModel, provider, e.target.value),
+              defaultModel: withProvider(settings.defaultModel, provider, model),
             })
           }
         />
-        <datalist id="settings-model-suggestions">
-          {MODEL_SUGGESTIONS[provider].map((model) => (
-            <option key={model} value={model} />
-          ))}
-        </datalist>
       </Field>
 
       {efforts.length > 0 && (

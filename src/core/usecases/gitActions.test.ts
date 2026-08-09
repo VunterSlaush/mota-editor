@@ -23,6 +23,9 @@ class FakeGit implements GitPort {
     if (this.failRemoteWith) throw new Error(this.failRemoteWith);
     return this.remote;
   }
+  async listFiles(): Promise<string[]> {
+    return this.files.map((f) => f.path);
+  }
   async diff(
     _p: string,
     path: string,

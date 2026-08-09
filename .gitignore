@@ -1,5 +1,11 @@
 node_modules/
 dist/
+
+# This repo uses npm (see AGENTS.md). A stray pnpm/yarn lockfile means two
+# dependency graphs and a lockfile that nobody updates.
+pnpm-lock.yaml
+yarn.lock
+
 src-tauri/target/
 src-tauri/gen/schemas/
 *.log

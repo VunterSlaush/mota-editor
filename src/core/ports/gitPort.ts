@@ -35,6 +35,12 @@ export interface GitPort {
   /** The `origin` remote's URL, or "" when the repo has none. */
   remoteUrl(projectPath: string): Promise<string>;
   /**
+   * Every file git knows about — tracked plus untracked-and-not-ignored
+   * — as project-relative paths. Empty for a folder that is not a
+   * repository: a normal state, not an error.
+   */
+  listFiles(projectPath: string): Promise<string[]>;
+  /**
    * A unified diff for one file. `untracked` files have no index entry
    * to diff against and come back rendered wholly as additions.
    */

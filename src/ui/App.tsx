@@ -76,6 +76,7 @@ export function App({ context }: { context: AppContext }) {
         activeTabId={state.activeTabId}
         onSelect={(tabId) => void context.switchTab.execute(tabId)}
         onClose={(tabId) => void context.closeProject.execute(tabId)}
+        onReorder={(tabId, toIndex) => void context.reorderTabs.execute(tabId, toIndex)}
         onOpenProject={() => void context.openProject.execute()}
       />
       {tab ? (
@@ -151,6 +152,7 @@ export function App({ context }: { context: AppContext }) {
           onPasteImage={(bytes, mimeType) =>
             context.pastedImages.saveImage(bytes, mimeType)
           }
+          loadProjectFiles={() => context.listProjectFiles.execute(tab.project.id)}
         />
       ) : (
         <EmptyState onOpenProject={() => void context.openProject.execute()} />

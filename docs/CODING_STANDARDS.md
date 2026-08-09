@@ -60,7 +60,10 @@ are reviewed against them.
 - One concept per test; the test name states the behavior, not the method
   (`re-activates the existing tab when the same folder is opened twice`).
 
-## Boundaries (the architectural rules, enforced in review)
+## Boundaries (the architectural rules, enforced by `npm test`)
+
+These four are checked mechanically by `scripts/architecture.mjs`; breaking
+one fails the suite and the pre-commit hook, not just the review.
 
 - `src/core/**` imports nothing from `react`, `@tauri-apps/*`, or
   `src/adapters/**`. Ever.
