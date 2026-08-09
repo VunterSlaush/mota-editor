@@ -18,6 +18,7 @@ import type {
 import type {
   FilePicker,
   FolderPicker,
+  PastedImageStore,
   PersistedWorkspace,
   WorkspaceStore,
 } from "../../core/ports/workspacePort";
@@ -223,6 +224,12 @@ export class DemoFolderPicker implements FolderPicker {
 export class DemoFilePicker implements FilePicker {
   async pickFiles(): Promise<string[]> {
     return ["/demo/docs/spec.pdf"];
+  }
+}
+
+export class DemoPastedImageStore implements PastedImageStore {
+  async saveImage(): Promise<string> {
+    return "/demo/pasted/screenshot.png";
   }
 }
 

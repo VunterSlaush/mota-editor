@@ -58,6 +58,7 @@ pub fn run() {
             commands::list_custom_commands,
             commands::open_external,
             commands::open_path,
+            commands::save_pasted_image,
             provider_probe::probe_provider,
             git::git_status,
             git::git_log,

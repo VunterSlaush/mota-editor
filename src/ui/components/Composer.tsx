@@ -82,6 +82,8 @@ interface Props {
   onSend: (prompt: string, attachments: readonly string[]) => void;
   onCancel: () => void;
   onPickFiles: () => Promise<string[]>;
+  /** Save an image pasted into the composer; returns its file path. */
+  onPasteImage: (bytes: Uint8Array, mimeType: string) => Promise<string>;
   onSelectMode: (mode: AgentMode) => void;
   onSelectPermission: (permission: PermissionPolicy) => void;
   onSelectModel: (model: string) => void;
@@ -114,6 +116,7 @@ export function Composer({
   onSend,
   onCancel,
   onPickFiles,
+  onPasteImage,
   onSelectMode,
   onSelectPermission,
   onSelectModel,
@@ -217,6 +220,41 @@ export function Composer({
       ...attachments,
       ...picked.filter((p) => !attachments.includes(p)),
     ]);
+  };
+
+  // Saving a paste is async; the user may keep typing meanwhile. The ref
+  // always holds this render's draft and attachments, so the update that
+  // lands after the save cannot revert what was typed in between.
+  const latest = useRef({ draft, attachments });
+  latest.current = { draft, attachments };
+
+  // Pasting an image (a screenshot, a copied picture) attaches it: the
+  // bytes are saved to a file and the path joins the attachments exactly
+  // as if it had been picked. Plain text pastes pass through untouched.
+  const onPaste = (e: React.ClipboardEvent) => {
+    const images = Array.from(e.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (images.length === 0) return;
+    e.preventDefault();
+    void attachPasted(images);
+  };
+
+  const attachPasted = async (images: File[]) => {
+    const saved: string[] = [];
+    for (const image of images) {
+      const bytes = new Uint8Array(await image.arrayBuffer());
+      // Best-effort, like every attachment affordance: a failed save
+      // drops that image rather than breaking the composer.
+      const path = await onPasteImage(bytes, image.type).catch(() => null);
+      if (path) saved.push(path);
+    }
+    const current = latest.current;
+    const fresh = saved.filter((p) => !current.attachments.includes(p));
+    if (fresh.length > 0) {
+      onDraftChange(current.draft, [...current.attachments, ...fresh]);
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -335,6 +373,7 @@ export function Composer({
             }}
             onScroll={syncHighlightScroll}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
           />
         </div>
         <div className="composer-card__toolbar">

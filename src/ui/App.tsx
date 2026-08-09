@@ -142,6 +142,9 @@ export function App({ context }: { context: AppContext }) {
           onReadTerminal={readTerminal}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
           onPickFiles={() => context.filePicker.pickFiles()}
+          onPasteImage={(bytes, mimeType) =>
+            context.pastedImages.saveImage(bytes, mimeType)
+          }
         />
       ) : (
         <EmptyState onOpenProject={() => void context.openProject.execute()} />

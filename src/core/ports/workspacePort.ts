@@ -57,3 +57,12 @@ export interface FilePicker {
   /** Returns the chosen file paths; empty if the user cancelled. */
   pickFiles(): Promise<string[]>;
 }
+
+export interface PastedImageStore {
+  /**
+   * Persist image bytes pasted into the composer and return the saved
+   * file's full path. Attachments travel as paths everywhere (chips,
+   * queue, transcript, agent prompt), so a paste becomes a file first.
+   */
+  saveImage(bytes: Uint8Array, mimeType: string): Promise<string>;
+}

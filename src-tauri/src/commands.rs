@@ -488,10 +488,84 @@ fn open_with_default_app(url: &str) -> std::io::Result<()> {
     std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 
+/// A pasted image arrives as bytes with no path of its own. Give it one
+/// under the system temp folder so it can travel with the prompt exactly
+/// like a picked file — attachments are paths everywhere, never blobs.
+#[tauri::command]
+pub fn save_pasted_image(data: String, mime_type: String) -> Result<String, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.as_bytes())
+        .map_err(|e| format!("Could not decode the pasted image: {e}"))?;
+    if bytes.is_empty() {
+        return Err("The pasted image is empty.".to_owned());
+    }
+
+    let dir = std::env::temp_dir().join("mota-editor").join("pasted");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create the paste folder: {e}"))?;
+
+    // Millis + a process-wide counter: unique even for pastes that land
+    // within the same clock tick.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let seq = PASTE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = dir.join(format!("pasted-{stamp}-{seq}.{}", image_extension(&mime_type)));
+
+    std::fs::write(&path, bytes)
+        .map_err(|e| format!("Could not save the pasted image: {e}"))?;
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "The temp folder has a name this platform cannot pass on.".to_owned())
+}
+
+static PASTE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn image_extension(mime_type: &str) -> &'static str {
+    match mime_type {
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        "image/svg+xml" => "svg",
+        _ => "png",
+    }
+}
+
 fn spawn_error(provider_id: &str, error: &std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::NotFound {
         format!("The `{provider_id}` CLI was not found on your PATH.")
     } else {
         format!("Could not start `{provider_id}`: {error}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pasted_image_lands_on_disk_with_the_mime_extension() {
+        use base64::Engine as _;
+        let bytes = [137u8, 80, 78, 71];
+        let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+        let path = save_pasted_image(data, "image/jpeg".to_owned()).unwrap();
+        assert!(path.ends_with(".jpg"), "unexpected path: {path}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn garbage_base64_is_rejected() {
+        assert!(save_pasted_image("not base64!!".into(), "image/png".into()).is_err());
+    }
+
+    #[test]
+    fn unknown_mime_types_fall_back_to_png() {
+        assert_eq!(image_extension("image/png"), "png");
+        assert_eq!(image_extension("image/webp"), "webp");
+        assert_eq!(image_extension("application/octet-stream"), "png");
     }
 }

@@ -83,6 +83,8 @@ interface Props {
   ) => Promise<GitActionResult>;
   onOpenFile: (path: string) => Promise<string | null>;
   onPickFiles: () => Promise<string[]>;
+  /** Save an image pasted into the composer; returns its file path. */
+  onPasteImage: (bytes: Uint8Array, mimeType: string) => Promise<string>;
   /** Read an agent-owned terminal's live output. Stable identity. */
   onReadTerminal: (
     terminalId: string,
@@ -125,6 +127,7 @@ export function ChatPanel({
   onGitDiff,
   onOpenFile,
   onPickFiles,
+  onPasteImage,
   onReadTerminal,
 }: Props) {
   const providerName = providerById(tab.project.provider).displayName;
@@ -391,6 +394,7 @@ export function ChatPanel({
             onSend={onSend}
             onCancel={onCancel}
             onPickFiles={onPickFiles}
+            onPasteImage={onPasteImage}
             onSelectMode={onSelectMode}
             onSelectPermission={onSelectPermission}
             onSelectModel={onSelectModel}

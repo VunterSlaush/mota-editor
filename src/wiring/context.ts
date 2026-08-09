@@ -5,6 +5,7 @@ import {
   DemoFolderPicker,
   DemoGit,
   DemoNotifications,
+  DemoPastedImageStore,
   DemoProviderProbe,
   DemoTranscriptStore,
   DemoWorkspaceStore,
@@ -16,12 +17,13 @@ import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
 import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
 import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
 import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
+import { TauriPastedImageStore } from "../adapters/tauri/tauriPastedImageStore";
 import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
 import type { ProviderProbe } from "../core/ports/providerProbe";
-import type { FilePicker } from "../core/ports/workspacePort";
+import type { FilePicker, PastedImageStore } from "../core/ports/workspacePort";
 import { Store } from "../core/state/store";
 import { ApplyCommandConfig } from "../core/usecases/applyCommandConfig";
 import { CancelTurn } from "../core/usecases/cancelTurn";
@@ -79,6 +81,7 @@ export interface AppContext {
   readonly loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   readonly providerProbe: ProviderProbe;
   readonly filePicker: FilePicker;
+  readonly pastedImages: PastedImageStore;
   /** Live output of an agent-owned terminal, for the tool-call cards. */
   readonly readTerminalOutput: (
     tabId: string,
@@ -154,6 +157,7 @@ export function createAppContext(): AppContext {
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),
     filePicker,
+    pastedImages: inTauri ? new TauriPastedImageStore() : new DemoPastedImageStore(),
     readTerminalOutput: (tabId, terminalId) =>
       agentGateway.readTerminalOutput(tabId, terminalId),
     newId,
