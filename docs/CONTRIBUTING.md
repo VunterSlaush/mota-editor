@@ -15,9 +15,21 @@ npm run tauri dev     # run the app with hot reload
 
 ## Before every commit
 
+`npm install` points `core.hooksPath` at `.githooks/`, so the TypeScript
+gates run themselves on commit: biome over the staged files, then
+
 ```
+npm test              # vitest — frontend core + the boundary rules
 npm run typecheck     # tsc --noEmit, strict
-npm test              # vitest — frontend core
+```
+
+The hook skips both when no code moved, so a docs-only commit is instant.
+
+Rust is **not** in the hook — `cargo clippy --workspace` is too slow to pay
+for on every commit. Run it yourself before pushing anything under
+`src-tauri/`:
+
+```
 cd src-tauri && cargo test -p agent-core && cargo clippy --workspace && cd ..
 ```
 
