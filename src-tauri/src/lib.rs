@@ -9,6 +9,8 @@ mod git;
 mod history_file;
 mod provider_probe;
 mod runner;
+mod shell_env;
+mod sign_in;
 mod terminal;
 mod workspace_file;
 
@@ -16,6 +18,11 @@ use acp_session::AcpSessions;
 use commands::RunningTurns;
 
 pub fn run() {
+    // Before anything resolves a program name: a Finder-launched macOS
+    // app would otherwise search launchd's bare PATH and conclude the
+    // user's agent CLIs aren't installed.
+    shell_env::import_login_shell_env();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -60,6 +67,7 @@ pub fn run() {
             commands::open_path,
             commands::save_pasted_image,
             provider_probe::probe_provider,
+            sign_in::open_provider_login,
             git::git_status,
             git::git_log,
             git::git_remote_url,
