@@ -14,6 +14,7 @@ import { ActivityBar, type SidebarView } from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
 import { Composer } from "./Composer";
+import { ContextFullBar } from "./ContextFullBar";
 import { DiffModal } from "./DiffModal";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
@@ -67,6 +68,9 @@ interface Props {
   /** Respawn the agent now to apply the deferred model/effort change. */
   onApplyPendingSpec: () => void;
   onDiscardPendingSpec: () => void;
+  /** Compact the conversation now, when the user was asked and chose to. */
+  onCompactNow: () => void;
+  onDismissContextFull: () => void;
   onToggleVerbose: (verbose: boolean) => void;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
@@ -117,6 +121,8 @@ export function ChatPanel({
   onSelectEffort,
   onApplyPendingSpec,
   onDiscardPendingSpec,
+  onCompactNow,
+  onDismissContextFull,
   onToggleVerbose,
   onRespondPermission,
   onAnswerQuestion,
@@ -381,6 +387,14 @@ export function ChatPanel({
             onAnswerQuestion={onAnswerQuestion}
             onShowPlan={showPlan}
           />
+          {tab.contextFullPercent !== undefined && (
+            <ContextFullBar
+              percent={tab.contextFullPercent}
+              onCompact={onCompactNow}
+              onNewChat={onNewChat}
+              onDismiss={onDismissContextFull}
+            />
+          )}
           {tab.pendingSpec && (
             <PendingSpecBar
               pending={tab.pendingSpec}

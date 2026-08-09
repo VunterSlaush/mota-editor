@@ -121,6 +121,10 @@ export function App({ context }: { context: AppContext }) {
           }
           onApplyPendingSpec={() => void context.applyPendingSpec.execute(tab.project.id)}
           onDiscardPendingSpec={() => context.discardPendingSpec.execute(tab.project.id)}
+          onCompactNow={() => void context.sendPrompt.compactNow(tab.project.id)}
+          onDismissContextFull={() =>
+            context.sendPrompt.dismissContextFull(tab.project.id)
+          }
           onToggleVerbose={(verbose) =>
             void context.selectVerbose.execute(tab.project.id, verbose)
           }

@@ -48,6 +48,26 @@ export const PERMISSIONS: readonly OptionDescriptor<PermissionPolicy>[] = [
 export const DEFAULT_MODE: AgentMode = "agent";
 export const DEFAULT_PERMISSION: PermissionPolicy = "manual";
 
+export type AutoCompactPolicy = "compact" | "ask" | "off";
+
+export const AUTO_COMPACT_POLICIES: readonly OptionDescriptor<AutoCompactPolicy>[] = [
+  {
+    id: "compact",
+    label: "Compact automatically",
+    description: "Mota asks the agent to summarize. Costs a full pass over the context.",
+  },
+  {
+    id: "ask",
+    label: "Ask me",
+    description: "Offers compaction or a new chat, which costs nothing.",
+  },
+  {
+    id: "off",
+    label: "Do nothing",
+    description: "Never compact. The agent handles a full context its own way.",
+  },
+];
+
 export type CostPresetId = "economy" | "balanced" | "max";
 
 /** The model and effort a preset sets, per provider. */

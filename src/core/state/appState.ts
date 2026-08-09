@@ -1,4 +1,8 @@
-import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
+import type {
+  AgentMode,
+  AutoCompactPolicy,
+  PermissionPolicy,
+} from "../entities/agentSettings";
 import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
@@ -76,6 +80,13 @@ export interface TabState {
     readonly model?: string;
     readonly effort?: string;
   };
+  /**
+   * How full the context was when it crossed the auto-compact ceiling
+   * under the "ask" policy, as a percentage. Present means the user owes
+   * a decision — compact (a full pass over the context) or start a new
+   * chat (free). Absent under every other policy.
+   */
+  readonly contextFullPercent?: number;
   /** Where session startup stands (installing|booting|creating|recovering);
    *  undefined once ready or failed. */
   readonly sessionStage?: string;
@@ -101,6 +112,15 @@ export interface AppSettings {
   readonly mcpServers: readonly McpServerConfig[];
   /** Fraction of the context window at which sessions auto-compact. */
   readonly autoCompactThreshold: number;
+  /**
+   * What happens when a session reaches that ceiling.
+   *
+   * Compaction is not free: it costs a full pass over the context plus a
+   * cache re-write on the next turn. Starting a new chat costs nothing at
+   * all. "ask" exists because which of those is right depends on whether
+   * the conversation still matters — a question only the user can answer.
+   */
+  readonly autoCompact: AutoCompactPolicy;
   /** Color theme id, from `entities/theme`. */
   readonly theme: string;
 }
@@ -119,7 +139,11 @@ export const defaultSettings: AppSettings = {
   defaultEffort: {},
   commandConfigs: {},
   mcpServers: [],
-  autoCompactThreshold: 0.85,
+  // 0.90, not 0.85: compacting costs a full pass over the context and a
+  // cache re-write on the turn after, so firing early spends money to
+  // save money. Matches the default Zed ships.
+  autoCompactThreshold: 0.9,
+  autoCompact: "compact",
   theme: "mota-dark",
 };
 
@@ -149,6 +173,7 @@ export type Action =
   | { type: "tab/specDeferred"; tabId: string; model?: string; effort?: string }
   | { type: "tab/pendingSpecApplied"; tabId: string }
   | { type: "tab/pendingSpecDiscarded"; tabId: string }
+  | { type: "tab/contextFullChanged"; tabId: string; percent: number | undefined }
   | {
       type: "tab/mcpOverrideChanged";
       tabId: string;
@@ -335,6 +360,13 @@ export function reduce(state: AppState, action: Action): AppState {
 
     case "tab/pendingSpecDiscarded":
       return mapTab(state, action.tabId, ({ pendingSpec: _, ...tab }) => tab);
+
+    case "tab/contextFullChanged":
+      return mapTab(state, action.tabId, ({ contextFullPercent: _, ...tab }) =>
+        action.percent === undefined
+          ? tab
+          : { ...tab, contextFullPercent: action.percent },
+      );
 
     case "tab/mcpOverrideChanged":
       return mapTab(state, action.tabId, (tab) => {

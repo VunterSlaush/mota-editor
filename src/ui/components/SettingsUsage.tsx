@@ -1,5 +1,7 @@
+import { AUTO_COMPACT_POLICIES } from "../../core/entities/agentSettings";
 import { formatTokens } from "../../core/entities/tokens";
 import type { AppSettings, TabState } from "../../core/state/appState";
+import { OptionPicker } from "./OptionPicker";
 
 interface Props {
   settings: AppSettings;
@@ -28,6 +30,30 @@ export function SettingsUsage({ settings, onChange, tabs }: Props) {
         Each session's context window is set by its model. What you can choose is how full
         a session may get before Mota asks the agent to compact the conversation.
       </p>
+
+      <div className="settings-field">
+        <div className="settings-field__text">
+          <span className="settings-field__label">When the context fills up</span>
+          <span className="settings-field__hint">
+            Compacting costs a full pass over the conversation and a fresh cache on the
+            next turn; a new chat costs nothing but starts the agent empty.
+          </span>
+        </div>
+        <div className="settings-field__control">
+          <OptionPicker
+            ariaLabel="What happens when a session's context fills up"
+            placement="bottom"
+            disabled={false}
+            value={settings.autoCompact}
+            options={AUTO_COMPACT_POLICIES.map((p) => ({
+              id: p.id,
+              label: p.label,
+              description: p.description,
+            }))}
+            onChange={(autoCompact) => onChange({ autoCompact })}
+          />
+        </div>
+      </div>
 
       <div className="settings-field">
         <div className="settings-field__text">

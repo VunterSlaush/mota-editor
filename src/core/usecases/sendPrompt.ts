@@ -485,22 +485,59 @@ export class SendPrompt {
     });
   }
 
+  /** Compact now — the user was asked and chose to spend it. */
+  async compactNow(tabId: string): Promise<void> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return;
+    this.store.dispatch({ type: "tab/contextFullChanged", tabId, percent: undefined });
+    await this.execute(tabId, COMPACT_COMMAND[tab.project.provider]);
+  }
+
+  /** Keep going as is. The question returns on the next turn if the
+   *  context is still over the ceiling — it is not silenced for good. */
+  dismissContextFull(tabId: string): void {
+    this.store.dispatch({ type: "tab/contextFullChanged", tabId, percent: undefined });
+  }
+
   /**
-   * When the session's context window is nearly full, automatically ask
-   * the agent to compact the conversation. Guarded against loops: never
-   * triggered by the compact turn itself.
+   * Act on a nearly-full context window, per the user's policy.
+   *
+   * Compacting is not the obvious win it looks like: it costs a full pass
+   * over the context plus a cache re-write on the turn after. Starting a
+   * new chat costs nothing. Which is right depends on whether the
+   * conversation still matters, so "ask" hands that back to the user
+   * rather than spending on their behalf.
+   *
+   * Guarded against loops: never triggered by the compact turn itself.
    */
   private autoCompactIfNeeded(tabId: string): void {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
     if (!tab?.usage) return;
-    if (tab.usage.used / tab.usage.size < state.settings.autoCompactThreshold) return;
+    const policy = state.settings.autoCompact;
+    if (policy === "off") return;
+    if (tab.usage.used / tab.usage.size < state.settings.autoCompactThreshold) {
+      // Dropped back under the ceiling (a compaction, or a new session):
+      // the question no longer stands.
+      if (tab.contextFullPercent !== undefined) {
+        this.store.dispatch({
+          type: "tab/contextFullChanged",
+          tabId,
+          percent: undefined,
+        });
+      }
+      return;
+    }
 
     const compactCommand = COMPACT_COMMAND[tab.project.provider];
     const lastUserMessage = [...tab.messages].reverse().find((m) => m.role === "user");
     if (lastUserMessage?.text === compactCommand) return; // that WAS the compact turn
 
     const percent = Math.round((tab.usage.used / tab.usage.size) * 100);
+    if (policy === "ask") {
+      this.store.dispatch({ type: "tab/contextFullChanged", tabId, percent });
+      return;
+    }
     this.store.dispatch({
       type: "chat/messageAppended",
       tabId,

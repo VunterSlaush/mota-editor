@@ -70,6 +70,7 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     mcpServers: persisted?.mcpServers ?? defaultSettings.mcpServers,
     autoCompactThreshold:
       persisted?.autoCompactThreshold ?? defaultSettings.autoCompactThreshold,
+    autoCompact: persisted?.autoCompact ?? defaultSettings.autoCompact,
     theme: persisted?.theme ?? defaultSettings.theme,
   };
 }

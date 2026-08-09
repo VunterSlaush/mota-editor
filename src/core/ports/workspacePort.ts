@@ -1,4 +1,8 @@
-import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
+import type {
+  AgentMode,
+  AutoCompactPolicy,
+  PermissionPolicy,
+} from "../entities/agentSettings";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { McpServerConfig, ProjectMcpOverrides } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
@@ -36,6 +40,7 @@ export interface PersistedSettings {
   readonly commandConfigs?: Readonly<Record<string, CommandConfig>>;
   readonly mcpServers?: readonly McpServerConfig[];
   readonly autoCompactThreshold?: number;
+  readonly autoCompact?: AutoCompactPolicy;
   readonly theme?: string;
 }
 

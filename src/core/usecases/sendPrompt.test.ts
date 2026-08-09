@@ -291,6 +291,80 @@ describe("SendPrompt with per-command settings", () => {
   });
 });
 
+describe("SendPrompt auto-compaction", () => {
+  /** Script a turn that reports the context over the ceiling. */
+  const nearlyFull = (): AgentTurnEvent[] => [
+    { kind: "usage", used: 95_000, size: 100_000 },
+    { kind: "completed", isError: false },
+  ];
+
+  it("compacts on its own under the default policy", async () => {
+    const { gateway, store, useCase } = setup(nearlyFull());
+
+    await useCase.execute("t1", "Hello");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello", "/compact"]);
+    expect(store.getState().tabs[0].contextFullPercent).toBeUndefined();
+  });
+
+  it("asks instead of spending when the user wants the choice", async () => {
+    // Compaction costs a full pass over the context; a new chat costs
+    // nothing. Which is right is the user's call, so nothing is sent.
+    const { gateway, store, useCase } = setup(nearlyFull());
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "ask" } });
+
+    await useCase.execute("t1", "Hello");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello"]);
+    expect(store.getState().tabs[0].contextFullPercent).toBe(95);
+  });
+
+  it("does nothing at all when switched off", async () => {
+    const { gateway, store, useCase } = setup(nearlyFull());
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "off" } });
+
+    await useCase.execute("t1", "Hello");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello"]);
+    expect(store.getState().tabs[0].contextFullPercent).toBeUndefined();
+  });
+
+  it("compacts when the user answers the question", async () => {
+    const { gateway, store, useCase } = setup(nearlyFull());
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "ask" } });
+    await useCase.execute("t1", "Hello");
+
+    await useCase.compactNow("t1");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello", "/compact"]);
+    expect(store.getState().tabs[0].contextFullPercent).toBeUndefined();
+  });
+
+  it("drops the question when the context comes back down", async () => {
+    // A compaction or a new session answers it implicitly; leaving the
+    // bar up would ask about a problem that no longer exists.
+    const { store, useCase } = setup([
+      { kind: "usage", used: 20_000, size: 100_000 },
+      { kind: "completed", isError: false },
+    ]);
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "ask" } });
+    store.dispatch({ type: "tab/contextFullChanged", tabId: "t1", percent: 95 });
+
+    await useCase.execute("t1", "Hello");
+
+    expect(store.getState().tabs[0].contextFullPercent).toBeUndefined();
+  });
+
+  it("never asks about the compact turn it just ran", async () => {
+    const { store, useCase } = setup(nearlyFull());
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "ask" } });
+
+    await useCase.execute("t1", "/compact");
+
+    expect(store.getState().tabs[0].contextFullPercent).toBeUndefined();
+  });
+});
+
 describe("SendPrompt notices", () => {
   it("shows a session notice as an info row in the transcript", async () => {
     // An agent restart re-sends the whole conversation. Saying so where
