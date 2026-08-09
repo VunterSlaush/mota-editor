@@ -149,6 +149,37 @@ export interface ColdStartRow {
   readonly estimated: boolean;
 }
 
+/** Turns grouped by how deep into their conversation they were. */
+export interface GrowthBand {
+  /** Display label for the range of turn positions, e.g. "11-25". */
+  readonly band: string;
+  readonly turns: number;
+  readonly tokens: number;
+  readonly avgTokens: number;
+}
+
+/**
+ * How a conversation's cost grows as it runs on.
+ *
+ * Every turn re-sends the whole conversation, so length compounds: the
+ * hundredth turn pays for the ninety-nine before it. This is the shape
+ * behind most of the bill, and the only thing that resets it is starting
+ * a new chat — which is why it is worth showing rather than inferring.
+ */
+export interface ConversationGrowth {
+  readonly byPosition: readonly GrowthBand[];
+  readonly avgTurnsPerConversation: number;
+  /** Turn position past which spend is counted as "late". */
+  readonly lateTurn: number;
+  /** Share of all tokens spent in turns past `lateTurn`, 0..1. */
+  readonly lateShare: number;
+  /** A late turn's average cost over an early one; null when either
+   *  end of the curve has no turns to compare. */
+  readonly lateMultiple: number | null;
+  /** True when any contributing turn fell back to the estimate. */
+  readonly estimated: boolean;
+}
+
 export interface BilledModelRow {
   readonly model: string;
   readonly provider: string;
@@ -224,6 +255,8 @@ export interface InsightsReport {
     /** Projects by what starting a conversation there costs. */
     readonly coldStarts: readonly ColdStartRow[];
   };
+  /** What conversation length does to the bill. */
+  readonly growth: ConversationGrowth;
   /**
    * Exact spend from the vendors' own logs. Absent when no session in
    * range has a readable one — the UI then shows only the estimate.
@@ -256,6 +289,22 @@ const RANGE_MS: Readonly<Record<InsightsRange, number>> = {
 };
 /** The "all" heatmap covers at most a year of day buckets. */
 const MAX_ALL_DAYS = 365;
+
+/**
+ * Turn-position buckets for the growth curve, by zero-based index.
+ * Widening bands: what matters is the shape, and a long conversation has
+ * far more late turns than early ones.
+ */
+const GROWTH_BANDS: readonly { readonly label: string; readonly upTo: number }[] = [
+  { label: "1-10", upTo: 10 },
+  { label: "11-25", upTo: 25 },
+  { label: "26-50", upTo: 50 },
+  { label: "51-100", upTo: 100 },
+  { label: "100+", upTo: Number.POSITIVE_INFINITY },
+];
+
+/** Turns from here on are "late" — where re-sent history dominates. */
+const LATE_TURN = 25;
 const COMPACT_COMMANDS = new Set<string>(Object.values(COMPACT_COMMAND));
 
 function localDayKey(epochMs: number): string {
@@ -618,6 +667,50 @@ export function buildInsights(
     coldStarts.set(key, row);
   }
 
+  // --- Conversation growth ----------------------------------------------
+  // Position is the turn's place in its OWN conversation, not in the
+  // filtered slice: a turn is the fortieth of its chat whether or not the
+  // first thirty-nine fall inside the range. Only in-range turns are
+  // counted, so this stays a picture of the selected period.
+  const bands = GROWTH_BANDS.map((b) => ({ band: b.label, turns: 0, tokens: 0 }));
+  let growthEstimated = false;
+  let countedTurns = 0;
+  let lateTokens = 0;
+  let allTokens = 0;
+
+  for (const { session, turns } of included) {
+    const measured = tokensPerTurn(session, billedRequests);
+    const order = new Map(
+      [...session.turns].sort((a, b) => a.sentAt - b.sentAt).map((t, i) => [t, i]),
+    );
+    const inRangeTurns = new Set(turns);
+    for (const [turn, position] of order) {
+      if (!inRangeTurns.has(turn)) continue;
+      const cost = measured.get(turn) ?? { tokens: turn.tokens ?? 0, estimated: true };
+      const band = bands[GROWTH_BANDS.findIndex((b) => position < b.upTo)];
+      band.turns += 1;
+      band.tokens += cost.tokens;
+      growthEstimated = growthEstimated || cost.estimated;
+      countedTurns += 1;
+      allTokens += cost.tokens;
+      if (position >= LATE_TURN) lateTokens += cost.tokens;
+    }
+  }
+
+  const populated = bands.filter((b) => b.turns > 0);
+  const perTurn = (b: (typeof bands)[number]) => b.tokens / b.turns;
+  const first = populated[0];
+  const last = populated[populated.length - 1];
+  const growth: ConversationGrowth = {
+    byPosition: populated.map((b) => ({ ...b, avgTokens: perTurn(b) })),
+    avgTurnsPerConversation: included.length > 0 ? countedTurns / included.length : 0,
+    lateTurn: LATE_TURN,
+    lateShare: allTokens > 0 ? lateTokens / allTokens : 0,
+    lateMultiple:
+      populated.length > 1 && perTurn(first) > 0 ? perTurn(last) / perTurn(first) : null,
+    estimated: growthEstimated,
+  };
+
   const byCommand: CommandTokenRow[] = [...commandTokens.entries()]
     .map(([command, row]) => ({ command, ...row }))
     .sort((a, b) => b.tokens - a.tokens || a.command.localeCompare(b.command));
@@ -722,6 +815,7 @@ export function buildInsights(
       byCommand,
       coldStarts: coldStartRows,
     },
+    growth,
     billed: buildBilledSpend(sessions, options.billed ?? [], cutoff, dayKey),
     habits: {
       commands: [...commands.entries()]

@@ -447,6 +447,102 @@ describe("buildInsights token rankings", () => {
   });
 });
 
+describe("buildInsights conversation growth", () => {
+  /** A session of `count` turns, one per hour, each costing `tokens`. */
+  const longChat = (count: number, tokens: (i: number) => number, extra = {}) =>
+    session({
+      turns: Array.from({ length: count }, (_, i) =>
+        turn({ sentAt: NOW - DAY + i * 3_600_000, tokens: tokens(i) }),
+      ),
+      ...extra,
+    });
+
+  it("buckets turns by how deep into the conversation they were", () => {
+    const report = build([longChat(30, () => 1_000)], { range: "all" });
+    expect(report.growth.byPosition.map((b) => b.band)).toEqual([
+      "1-10",
+      "11-25",
+      "26-50",
+    ]);
+    expect(report.growth.byPosition.map((b) => b.turns)).toEqual([10, 15, 5]);
+  });
+
+  it("shows the curve: a late turn costs more than an early one", () => {
+    // The whole point — every turn re-sends the conversation so far.
+    const report = build([longChat(30, (i) => 1_000 * (i + 1))], { range: "all" });
+    const [early, , late] = report.growth.byPosition;
+    expect(late.avgTokens).toBeGreaterThan(early.avgTokens);
+    expect(report.growth.lateMultiple).toBeCloseTo(late.avgTokens / early.avgTokens);
+  });
+
+  it("takes position from the whole conversation, not the filtered slice", () => {
+    // A turn is the 40th of its chat whether or not the first 39 fall in
+    // range. Counting position within the range would report a long
+    // conversation's late turns as if they were fresh ones.
+    const s = session({
+      turns: [
+        ...Array.from({ length: 30 }, (_, i) =>
+          turn({ sentAt: NOW - 40 * DAY + i * 1_000, tokens: 100 }),
+        ),
+        turn({ sentAt: NOW - DAY, tokens: 9_000 }),
+      ],
+    });
+    const report = build([s], { range: "7d" });
+    // Only the last turn is in range, and it sits in the 26-50 band.
+    expect(report.growth.byPosition).toHaveLength(1);
+    expect(report.growth.byPosition[0]).toMatchObject({ band: "26-50", turns: 1 });
+  });
+
+  it("reports the share of tokens spent late in conversations", () => {
+    // 10 early turns at 100, 15 late turns at 900.
+    const report = build([longChat(25, (i) => (i < 10 ? 100 : 900))], { range: "all" });
+    expect(report.growth.lateTurn).toBe(25);
+    expect(report.growth.lateShare).toBe(0); // nothing past position 25 yet
+    const longer = build([longChat(40, (i) => (i < 25 ? 100 : 900))], { range: "all" });
+    expect(longer.growth.lateShare).toBeCloseTo((15 * 900) / (25 * 100 + 15 * 900));
+  });
+
+  it("has no multiple to report from a single band", () => {
+    // One band means no early-to-late comparison exists; inventing a
+    // 1.0x would read as "length is free", which is the opposite.
+    const report = build([longChat(5, () => 1_000)], { range: "all" });
+    expect(report.growth.byPosition).toHaveLength(1);
+    expect(report.growth.lateMultiple).toBeNull();
+  });
+
+  it("averages conversation length over the sessions in range", () => {
+    const report = build(
+      [longChat(10, () => 1), session({ sessionId: "s2", turns: [turn()] })],
+      {
+        range: "all",
+      },
+    );
+    expect(report.growth.avgTurnsPerConversation).toBeCloseTo(5.5);
+  });
+
+  it("prefers billed tokens and marks the curve when it falls back", () => {
+    const logged = session({
+      providerSessionId: "provider-1",
+      turns: [turn({ sentAt: NOW - DAY })],
+    });
+    const billedReport = build([logged], {
+      billed: [billed({ timestampMs: NOW - DAY + 1_000, inputTokens: 70_000 })],
+    });
+    expect(billedReport.growth.byPosition[0].tokens).toBe(70_000);
+    expect(billedReport.growth.estimated).toBe(false);
+
+    expect(build([longChat(3, () => 500)]).growth.estimated).toBe(true);
+  });
+
+  it("is empty rather than broken when nothing is in range", () => {
+    const report = build([]);
+    expect(report.growth.byPosition).toEqual([]);
+    expect(report.growth.lateMultiple).toBeNull();
+    expect(report.growth.lateShare).toBe(0);
+    expect(report.growth.avgTurnsPerConversation).toBe(0);
+  });
+});
+
 describe("buildInsights billed spend", () => {
   it("is absent when no vendor log covers the range", () => {
     expect(build([logged]).billed).toBeUndefined();

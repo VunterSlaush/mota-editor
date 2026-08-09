@@ -444,6 +444,26 @@ export class DemoTranscriptStore implements TranscriptStore {
         ],
         touchedFiles: { "src/queue.ts": 3 },
       },
+      {
+        // A conversation that ran long, so the growth curve has a shape
+        // to show: each turn re-sends the ones before it, so the cost
+        // climbs with depth. Without this the demo's Growth section is a
+        // single bar, which is exactly the story it exists to disprove.
+        sessionId: "demo-3",
+        title: "Port the importer to the new API",
+        projectPath: "/demo/project",
+        projectDirHash: "demo1",
+        provider: "claude",
+        savedAt: now - 2 * day,
+        turns: Array.from({ length: 38 }, (_, i) =>
+          turn(
+            5 - (i * 4) / 38,
+            9_000 + i * 1_800,
+            i === 12 ? { command: "/review" } : {},
+          ),
+        ),
+        touchedFiles: { "src/importer.ts": 14, "src/api/client.ts": 6 },
+      },
     ];
   }
 }

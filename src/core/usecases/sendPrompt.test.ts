@@ -164,6 +164,9 @@ const TOOL_APPROVAL: AgentTurnEvent = {
 
 const tabOf = (store: Store) => store.getState().tabs[0];
 
+/** Let fire-and-forget follow-up work (startNewChat, its `.then`) settle. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe("a plan approval parks the turn", () => {
   it("leaves the tab idle so the user can answer in words", async () => {
     const { store, useCase } = setup([PLAN_APPROVAL]);
@@ -406,6 +409,56 @@ describe("SendPrompt auto-compaction", () => {
 
     expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello"]);
     expect(store.getState().tabs[0].contextFullPercent).toBe(95);
+  });
+
+  it("starts a new chat instead of compacting when asked to", async () => {
+    // Length is what drives the bill, and only a new chat resets it.
+    const { gateway, store, useCase } = setup(nearlyFull());
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "newChat" } });
+
+    await useCase.execute("t1", "Hello");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello"]); // no /compact
+    // The conversation is gone from the screen; only the notice remains.
+    const tab = store.getState().tabs[0];
+    expect(tab.messages.every((m) => m.role === "info")).toBe(true);
+    expect(tab.project.providerSessions.claude).toBeUndefined();
+  });
+
+  it("saves the conversation to history BEFORE clearing the screen", async () => {
+    // The safety property of the newChat policy: the one option that
+    // wipes the screen must never be the one that loses the work.
+    //
+    // Two things protect it — the save is started before the policy runs,
+    // and it reads the store synchronously, so the messages are captured
+    // before anything clears them. Either alone is enough, which is why
+    // this asserts the OUTCOME rather than the ordering: it fails only
+    // when both have been undone, which is exactly when chats go missing.
+    const { store, transcripts, useCase } = setup(nearlyFull());
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "newChat" } });
+
+    await useCase.execute("t1", "Hello");
+    await flush();
+
+    const saved = transcripts.saved.at(-1);
+    expect(saved?.messages.some((m) => m.text === "Hello")).toBe(true);
+  });
+
+  it("leaves the explanation IN the new chat, where it survives the reset", async () => {
+    // The notice must outlive the clear it is explaining. Said before the
+    // reset it would be wiped by the very action it describes, and the
+    // user would meet an empty chat with no reason for it.
+    const { store, useCase } = setup(nearlyFull());
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "newChat" } });
+
+    await useCase.execute("t1", "Hello");
+    await flush();
+
+    const messages = store.getState().tabs[0].messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe("info");
+    expect(messages[0].text).toContain("saved in History");
   });
 
   it("does nothing at all when switched off", async () => {

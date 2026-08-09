@@ -48,23 +48,41 @@ export const PERMISSIONS: readonly OptionDescriptor<PermissionPolicy>[] = [
 export const DEFAULT_MODE: AgentMode = "agent";
 export const DEFAULT_PERMISSION: PermissionPolicy = "manual";
 
-export type AutoCompactPolicy = "compact" | "ask" | "off";
+export type AutoCompactPolicy = "compact" | "newChat" | "ask" | "off";
 
+/**
+ * What to do when a session's context window fills up.
+ *
+ * Every description says what actually happens, because the cheapest
+ * option is also the one that loses something: a new chat costs no tokens
+ * precisely because the agent forgets. Measured on real logs, compaction
+ * saves about as much as it costs, while conversation LENGTH is what
+ * drives the bill — a turn past the hundredth costs ~2.7x an early one,
+ * because every turn re-sends the whole conversation.
+ */
 export const AUTO_COMPACT_POLICIES: readonly OptionDescriptor<AutoCompactPolicy>[] = [
+  {
+    id: "newChat",
+    label: "Start a new chat",
+    description:
+      "The agent forgets and the screen clears; the conversation stays in History. Cheapest — a fresh chat re-sends nothing.",
+  },
   {
     id: "compact",
     label: "Compact automatically",
-    description: "Mota asks the agent to summarize. Costs a full pass over the context.",
+    description:
+      "The agent summarizes the conversation and keeps working. Costs a full pass over the context, and saves about as much.",
   },
   {
     id: "ask",
     label: "Ask me",
-    description: "Offers compaction or a new chat, which costs nothing.",
+    description:
+      "Offers both, with what each one costs, and does nothing until you pick.",
   },
   {
     id: "off",
     label: "Do nothing",
-    description: "Never compact. The agent handles a full context its own way.",
+    description: "Never intervene. The agent handles a full context its own way.",
   },
 ];
 

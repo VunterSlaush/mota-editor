@@ -12,6 +12,7 @@ import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { startNewChat } from "./startNewChat";
 
 /** One history row: a transcript's metadata plus how it opens. */
 export interface HistoryItem extends TranscriptMeta {
@@ -370,38 +371,10 @@ export class SessionHistory {
     }
   }
 
-  /**
-   * A new conversation means a NEW AGENT CONTEXT, not just an empty
-   * screen: the backend session is ended (so the agent forgets), the
-   * resume id/usage/commands are dropped, and a fresh session pre-warms
-   * so the first message stays fast.
-   */
+  /** Start a fresh conversation in this tab. See `startNewChat` — the
+   *  same step the context-full bar and the auto-compact policy use. */
   async startNew(tabId: string): Promise<void> {
-    const before = tabById(this.store.getState(), tabId);
-    if (!before || before.busy) return;
-    const provider = before.project.provider;
-
-    await this.agentGateway.endSession(tabId).catch(() => undefined);
-    this.store.dispatch({ type: "chat/cleared", tabId });
-    this.store.dispatch({ type: "chat/sessionReset", tabId, provider });
-
-    // Read the tab back: the reset folds in any model/effort change that
-    // was deferred during the last conversation, and the fresh session
-    // must boot with it — that deferral was made for this moment.
-    const state = this.store.getState();
-    const tab = tabById(state, tabId);
-    if (!tab) return;
-    const { path, model, effort, mcpOverrides } = tab.project;
-    void this.agentGateway
-      .warmSession(
-        tabId,
-        provider,
-        path,
-        model,
-        effort,
-        serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
-      )
-      .catch(() => undefined); // warm-up is best-effort
+    await startNewChat(this.store, this.agentGateway, tabId);
   }
 
   async remove(tabId: string, sessionId: string): Promise<void> {

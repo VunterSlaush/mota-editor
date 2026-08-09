@@ -25,6 +25,7 @@ import type { Store } from "../state/store";
 import type { ApplyCommandConfig } from "./applyCommandConfig";
 import { persistWorkspace } from "./persistWorkspace";
 import { declineParkedPlan } from "./planApproval";
+import { startNewChat } from "./startNewChat";
 
 export type IdGenerator = () => string;
 
@@ -535,11 +536,14 @@ export class SendPrompt {
   /**
    * Act on a nearly-full context window, per the user's policy.
    *
-   * Compacting is not the obvious win it looks like: it costs a full pass
-   * over the context plus a cache re-write on the turn after. Starting a
-   * new chat costs nothing. Which is right depends on whether the
-   * conversation still matters, so "ask" hands that back to the user
-   * rather than spending on their behalf.
+   * Compacting is not the win it looks like: measured on real logs it
+   * costs about what it saves. What actually drives the bill is
+   * conversation LENGTH — every turn re-sends the whole conversation, so
+   * a late turn costs several times an early one. Only a new chat resets
+   * that, which is why it is offered as an automatic policy and not just
+   * a button. It is also the one option that loses something (the agent
+   * forgets), so "ask" hands the choice back rather than spending — or
+   * forgetting — on the user's behalf.
    *
    * Guarded against loops: never triggered by the compact turn itself.
    */
@@ -569,6 +573,25 @@ export class SendPrompt {
     const percent = Math.round((tab.usage.used / tab.usage.size) * 100);
     if (policy === "ask") {
       this.store.dispatch({ type: "tab/contextFullChanged", tabId, percent });
+      return;
+    }
+    if (policy === "newChat") {
+      // Safe because the transcript was already saved above: this clears
+      // the screen, but the conversation is in History either way.
+      //
+      // The notice goes in AFTER the reset, not before — starting the new
+      // chat clears the messages, so anything said first is wiped by the
+      // very action it was explaining. A chat that emptied itself with no
+      // reason given reads as a bug, not as the setting the user chose.
+      void startNewChat(this.store, this.agentGateway, tabId).then(() => {
+        this.store.dispatch({
+          type: "chat/messageAppended",
+          tabId,
+          message: infoMessage(
+            `The previous chat filled its context (${percent}%) and is saved in History. This one starts fresh.`,
+          ),
+        });
+      });
       return;
     }
     this.store.dispatch({

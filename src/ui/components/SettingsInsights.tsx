@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import { InsightsActivity } from "./InsightsActivity";
+import { InsightsGrowth } from "./InsightsGrowth";
 import { InsightsHabits } from "./InsightsHabits";
 import { InsightsTokens } from "./InsightsTokens";
 import { InsightsTools } from "./InsightsTools";
@@ -80,6 +81,7 @@ export function SettingsInsights({ loadInsights }: Props) {
         <>
           <InsightsActivity report={report} range={range} />
           <InsightsTokens report={report} />
+          <InsightsGrowth report={report} />
           <InsightsHabits report={report} />
           <InsightsTools report={report} />
         </>

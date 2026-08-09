@@ -1,3 +1,4 @@
+import { totalBilledTokens } from "../../core/entities/billing";
 import type { BilledSpend, InsightsReport } from "../../core/entities/insights";
 import { formatTokens } from "../../core/entities/tokens";
 import { BarList, DayBarChart, SplitBar, StatTile } from "./InsightsCharts";
@@ -15,6 +16,16 @@ function formatCost(usd: number | null): string {
 
 function formatPercent(fraction: number): string {
   return `${String(Math.round(fraction * 100))}%`;
+}
+
+/**
+ * Money, said as what it is: list-price arithmetic over the tokens the
+ * vendor reported. On a subscription nothing here is charged per token,
+ * so an unqualified dollar figure would be read as a bill that does not
+ * exist.
+ */
+function listPrice(usd: number): string {
+  return `${formatUsd(usd)} at list price`;
 }
 
 /** UI — what the sessions consume: tokens, models, and cost. */
@@ -35,17 +46,20 @@ export function InsightsTokens({ report }: { report: InsightsReport }) {
         {/* The exact figure displaces the estimate rather than sitting
             beside it: two cost numbers for one range invites adding them
             together, and they overlap. */}
+        {/* Tokens lead, money follows. On a subscription the dollars are
+            nobody's invoice, and tokens are what the limits are counted
+            in — so the figure people act on is the token count. */}
         {billed ? (
           <StatTile
-            label="Billed cost"
-            value={formatUsd(billed.costUsd)}
-            note={
+            label="Billed tokens"
+            value={formatTokens(totalBilledTokens(billed.tokens))}
+            note={`${listPrice(billed.costUsd)}${
               billed.estimatedSessions > 0
-                ? `${String(billed.billedSessions)} of ${String(
+                ? ` · ${String(billed.billedSessions)} of ${String(
                     billed.billedSessions + billed.estimatedSessions,
                   )} sessions`
-                : undefined
-            }
+                : ""
+            }`}
           />
         ) : (
           <StatTile label="Est. cost" value={formatCost(tokens.estimatedCostUsd)} />
@@ -135,8 +149,11 @@ export function InsightsTokens({ report }: { report: InsightsReport }) {
         </p>
       )}
       <p className="settings-section__hint">
-        Token figures are context-window growth per turn as reported by the agent, not
-        billed API tokens; any cost marked "≈" is a rough estimate at blended list rates.
+        Token figures without a "billed" label are context-window growth per turn as
+        reported by the agent, not tokens actually sent; any cost marked "≈" is a rough
+        estimate at blended list rates. Dollar figures are list-price arithmetic over the
+        tokens your provider reported — on a subscription plan nothing here is charged per
+        token, so treat them as a size, not an invoice.
       </p>
     </section>
   );
@@ -164,22 +181,27 @@ function BilledSpendView({ billed }: { billed: BilledSpend }) {
         />
         <StatTile
           label="Cache writes"
-          value={formatUsd(billed.costByKind.cacheWrite)}
-          note="cost of re-sending context"
+          value={formatTokens(
+            billed.tokens.cacheWrite5mTokens + billed.tokens.cacheWrite1hTokens,
+          )}
+          note={`context re-sent · ${listPrice(billed.costByKind.cacheWrite)}`}
         />
         <StatTile
           label="Subagents"
-          value={formatUsd(billed.sidechainCostUsd)}
-          note={
+          value={
             billed.costUsd > 0
-              ? `${formatPercent(billed.sidechainCostUsd / billed.costUsd)} of spend`
-              : undefined
+              ? formatPercent(billed.sidechainCostUsd / billed.costUsd)
+              : "—"
           }
+          note={`of spend · ${listPrice(billed.sidechainCostUsd)}`}
         />
       </div>
 
+      {/* Weighted by cost, not tokens, and labelled as such: cache reads
+          are ~98% of tokens but well under that of the cost, so a
+          token-weighted split would be one bar and say nothing. */}
       <SplitBar
-        label="Where the money went"
+        label="Where it went (weighted by list price)"
         parts={{
           input: billed.costByKind.input,
           output: billed.costByKind.output,
@@ -191,13 +213,13 @@ function BilledSpendView({ billed }: { billed: BilledSpend }) {
 
       {billed.bySession.length > 1 && (
         <>
-          <span className="insights-caption">Cost per session</span>
+          <span className="insights-caption">Dearest sessions</span>
           <BarList
             rows={billed.bySession.slice(0, 10).map((s) => ({
               key: s.sessionId,
               label: s.label,
               value: s.costUsd,
-              display: formatUsd(s.costUsd),
+              display: listPrice(s.costUsd),
             }))}
           />
         </>
@@ -212,7 +234,9 @@ function BilledSpendView({ billed }: { billed: BilledSpend }) {
               label: m.model,
               detail: `${String(m.requests)} requests`,
               value: m.costUsd,
-              display: formatUsd(m.costUsd),
+              display: `${formatTokens(totalBilledTokens(m.tokens))} tok · ${formatUsd(
+                m.costUsd,
+              )}`,
             }))}
           />
         </>

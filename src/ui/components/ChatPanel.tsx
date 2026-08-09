@@ -397,6 +397,7 @@ export function ChatPanel({
           {tab.contextFullPercent !== undefined && (
             <ContextFullBar
               percent={tab.contextFullPercent}
+              contextTokens={tab.usage?.used}
               onCompact={onCompactNow}
               onNewChat={onNewChat}
               onDismiss={onDismissContextFull}
