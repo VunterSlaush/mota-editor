@@ -60,6 +60,9 @@ export type AgentTurnEvent =
       planFilePath?: string;
       /** The tool call this request guards, when the agent named it. */
       toolCallId?: string;
+      /** True when the agent is presenting its plan rather than asking
+       *  about one tool call — a stopping point, not a speed bump. */
+      isPlan?: boolean;
     }
   | {
       kind: "question";

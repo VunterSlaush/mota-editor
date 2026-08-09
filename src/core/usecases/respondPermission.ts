@@ -1,11 +1,20 @@
+import { isDecline } from "../entities/approval";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { PLAN_DECLINED } from "./planApproval";
+import { stopTurn } from "./stopTurn";
 
 /**
  * Use case — deliver the user's Allow/Deny choice for a pending
  * permission request back to the agent, and mark the approval card
  * answered so it can't be clicked twice.
+ *
+ * A plan approval is the exception: the turn parked on it when it
+ * appeared, so answering has to say where the turn goes next. Approving
+ * sets it running again; declining stops the agent outright, because an
+ * agent that keeps researching after "no" is not waiting for the
+ * instructions the user is trying to give it.
  */
 export class RespondPermission {
   constructor(
@@ -22,6 +31,18 @@ export class RespondPermission {
 
     this.store.dispatch({ type: "chat/approvalResolved", tabId, requestId, optionId });
     await this.agentGateway.respondPermission(tabId, requestId, optionId);
+
+    if (!approval.isPlan) return;
+    if (isDecline(approval.options, optionId)) {
+      await stopTurn(this.store, this.agentGateway, tabId, PLAN_DECLINED);
+    } else {
+      this.store.dispatch({
+        type: "chat/busyChanged",
+        tabId,
+        busy: true,
+        at: Date.now(),
+      });
+    }
   }
 }
 

@@ -21,7 +21,10 @@ class RecordingGateway implements AgentGateway {
   async readTerminalOutput(): Promise<null> {
     return null;
   }
-  async cancelTurn(): Promise<void> {}
+  cancelled: string[] = [];
+  async cancelTurn(tabId: string): Promise<void> {
+    this.cancelled.push(tabId);
+  }
   async endSession(): Promise<void> {}
   async warmSession(): Promise<void> {}
   async listNativeSessions(): Promise<{ sessionId: string }[] | null> {
@@ -50,15 +53,93 @@ function setup() {
   store.dispatch({
     type: "chat/messageAppended",
     tabId: "t1",
-    message: approvalMessage("Run npm test", "9", [
-      { optionId: "allow", name: "Allow", kind: "allow_once" },
-    ]),
+    message: approvalMessage("Run npm test", {
+      requestId: "9",
+      options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+    }),
   });
   const gateway = new RecordingGateway();
   return { store, gateway, useCase: new RespondPermission(store, gateway) };
 }
 
 const DEFAULTS = projectDefaults(defaultSettings);
+
+const PLAN_OPTIONS = [
+  { optionId: "acceptEdits", name: "Yes, auto-accept edits", kind: "allow_always" },
+  { optionId: "plan", name: "No, keep planning", kind: "reject_once" },
+];
+
+/** A tab parked on a plan approval, as sendPrompt leaves it: the card is
+ *  unanswered and the turn is not busy, because the agent is waiting. */
+function planSetup() {
+  const store = new Store();
+  store.dispatch({ type: "tab/opened", project: newProject("t1", "/a", DEFAULTS) });
+  store.dispatch({
+    type: "chat/messageAppended",
+    tabId: "t1",
+    message: approvalMessage("Ready to code?", {
+      requestId: "p1",
+      options: PLAN_OPTIONS,
+      isPlan: true,
+    }),
+  });
+  const gateway = new RecordingGateway();
+  return { store, gateway, useCase: new RespondPermission(store, gateway) };
+}
+
+const tabOf = (store: Store) => store.getState().tabs[0];
+
+describe("answering a plan approval", () => {
+  it("stops the agent when the plan is declined", async () => {
+    const { store, gateway, useCase } = planSetup();
+    await useCase.execute("t1", "p1", "plan");
+
+    expect(gateway.responses).toEqual([
+      { tabId: "t1", requestId: "p1", optionId: "plan" },
+    ]);
+    expect(gateway.cancelled).toEqual(["t1"]);
+    expect(tabOf(store).busy).toBe(false);
+  });
+
+  it("says in the transcript that the agent stopped and is waiting", async () => {
+    const { store, useCase } = planSetup();
+    await useCase.execute("t1", "p1", "plan");
+
+    const last = tabOf(store).messages.at(-1);
+    expect(last?.role).toBe("info");
+    expect(last?.text).toContain("waiting");
+  });
+
+  it("discards messages queued behind a plan that is then declined", async () => {
+    const { store, useCase } = planSetup();
+    store.dispatch({
+      type: "chat/promptQueued",
+      tabId: "t1",
+      prompt: "and also this",
+      attachments: [],
+    });
+    await useCase.execute("t1", "p1", "plan");
+
+    expect(tabOf(store).queued).toEqual([]);
+  });
+
+  it("sets the agent working again when the plan is approved", async () => {
+    const { store, gateway, useCase } = planSetup();
+    await useCase.execute("t1", "p1", "acceptEdits");
+
+    expect(gateway.cancelled).toEqual([]);
+    expect(tabOf(store).busy).toBe(true);
+  });
+
+  it("leaves an ordinary tool denial alone — only a plan ends the turn", async () => {
+    const { store, gateway, useCase } = setup();
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: true });
+    await useCase.execute("t1", "9", "allow");
+
+    expect(gateway.cancelled).toEqual([]);
+    expect(tabOf(store).busy).toBe(true);
+  });
+});
 
 describe("RespondPermission", () => {
   it("delivers the choice and marks the approval answered", async () => {

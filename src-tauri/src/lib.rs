@@ -63,6 +63,7 @@ pub fn run() {
             git::git_status,
             git::git_log,
             git::git_remote_url,
+            git::git_list_files,
             git::git_diff,
             git::git_stage,
             git::git_unstage,

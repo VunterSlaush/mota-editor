@@ -63,6 +63,10 @@ pub enum AgentEvent {
         /// The tool call this request guards, when the agent named it —
         /// lets the UI preview what is being approved.
         tool_call_id: Option<String>,
+        /// True when this is the agent presenting its plan rather than
+        /// asking about one tool call. The UI treats it as a stopping
+        /// point: the turn parks until the user answers.
+        is_plan: bool,
     },
     /// The agent asks the user a question (ACP form elicitation — Claude's
     /// `AskUserQuestion`). Unlike a permission request this is not about

@@ -85,6 +85,8 @@ interface Props {
   onPickFiles: () => Promise<string[]>;
   /** Save an image pasted into the composer; returns its file path. */
   onPasteImage: (bytes: Uint8Array, mimeType: string) => Promise<string>;
+  /** The project's files, for the composer's "@" menu. */
+  loadProjectFiles: () => Promise<string[]>;
   /** Read an agent-owned terminal's live output. Stable identity. */
   onReadTerminal: (
     terminalId: string,
@@ -128,6 +130,7 @@ export function ChatPanel({
   onOpenFile,
   onPickFiles,
   onPasteImage,
+  loadProjectFiles,
   onReadTerminal,
 }: Props) {
   const providerName = providerById(tab.project.provider).displayName;
@@ -382,7 +385,7 @@ export function ChatPanel({
             onDraftChange={onDraftChange}
             queued={tab.queued}
             onRemoveQueued={onRemoveQueued}
-            placeholder={`Ask ${providerName} about ${tab.project.name}… (type / for commands)`}
+            placeholder={`Ask ${providerName} about ${tab.project.name}… (/ for commands, @ for files)`}
             commands={commands}
             provider={tab.project.provider}
             mode={tab.project.mode}
@@ -395,6 +398,7 @@ export function ChatPanel({
             onCancel={onCancel}
             onPickFiles={onPickFiles}
             onPasteImage={onPasteImage}
+            loadProjectFiles={loadProjectFiles}
             onSelectMode={onSelectMode}
             onSelectPermission={onSelectPermission}
             onSelectModel={onSelectModel}

@@ -49,10 +49,12 @@ export function providerById(id: ProviderId): ProviderDescriptor {
 export const DEFAULT_PROVIDER: ProviderId = "claude";
 
 /**
- * Model suggestions per provider — shown in the model picker's dropdown
- * (verified against vendor docs 2026-08). Free text is always accepted
- * (any vendor model id works), so this list going stale never blocks
- * anyone; empty string means provider default. Claude aliases resolve to
+ * Model suggestions per provider — the model picker's whole dropdown
+ * (verified against vendor docs 2026-08). This is now the only way to
+ * choose a model, so a stale list blocks anyone needing a newer id:
+ * keep it current. Empty string means provider default. A model already
+ * stored from an earlier build is kept as its own option, so a value
+ * missing here is never silently dropped. Claude aliases resolve to
  * the newest of each line (fable → claude-fable-5, opus → claude-opus-5,
  * sonnet → claude-sonnet-5, haiku → claude-haiku-4-5).
  */

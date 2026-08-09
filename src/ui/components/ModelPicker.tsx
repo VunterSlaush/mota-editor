@@ -7,6 +7,11 @@ interface Props {
   value: string;
   disabled: boolean;
   onChange: (model: string) => void;
+  /** Passed through to the picker. The defaults suit the composer
+   *  toolbar, which sits at the bottom-right of the window. */
+  placement?: "top" | "bottom";
+  align?: "start" | "end";
+  className?: string;
 }
 
 /**
@@ -17,7 +22,15 @@ interface Props {
  * workspace) that isn't a suggestion is kept as its own option, so
  * opening the list can never silently drop it.
  */
-export function ModelPicker({ provider, value, disabled, onChange }: Props) {
+export function ModelPicker({
+  provider,
+  value,
+  disabled,
+  onChange,
+  placement = "top",
+  align = "end",
+  className = "picker__trigger--dim",
+}: Props) {
   const suggestions = MODEL_SUGGESTIONS[provider];
   const custom = value !== "" && !suggestions.includes(value) ? [value] : [];
   const options: readonly PickerOption<string>[] = [
@@ -32,8 +45,9 @@ export function ModelPicker({ provider, value, disabled, onChange }: Props) {
       options={options}
       value={value}
       disabled={disabled}
-      align="end"
-      className="picker__trigger--dim"
+      placement={placement}
+      align={align}
+      className={className}
       onChange={onChange}
     />
   );

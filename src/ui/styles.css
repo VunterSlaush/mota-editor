@@ -189,6 +189,12 @@ body {
   white-space: nowrap;
 }
 
+/* The tab under the pointer stays put while the others slide past it. */
+.tab--dragging {
+  opacity: 0.6;
+  cursor: grabbing;
+}
+
 .tab--active {
   background: var(--bg);
   color: var(--text);
@@ -2678,6 +2684,13 @@ body {
   background: transparent;
   border: 1px solid var(--error);
   color: var(--error);
+}
+
+.approval__aside {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
 }
 
 .approval__button:disabled {

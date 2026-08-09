@@ -19,6 +19,10 @@ export class TauriGitStatus implements GitPort {
     return invoke<string>("git_remote_url", { projectPath });
   }
 
+  async listFiles(projectPath: string): Promise<string[]> {
+    return invoke<string[]>("git_list_files", { projectPath });
+  }
+
   async diff(
     projectPath: string,
     path: string,

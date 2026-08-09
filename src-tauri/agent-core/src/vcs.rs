@@ -148,9 +148,56 @@ pub fn parse_branches(output: &str) -> Vec<Branch> {
     branches
 }
 
+/// A repository bigger than this is fine; the composer's "@" menu shows
+/// fifty rows, so the rest would only cost bandwidth crossing to the UI.
+pub const MAX_PROJECT_FILES: usize = 20_000;
+
+/// Parse `git ls-files -z` output: NUL-separated paths which, unlike the
+/// default output, are never quoted or octal-escaped. Deduped (a path can
+/// be listed twice during a merge) and capped.
+pub fn parse_ls_files(output: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    output
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .filter(|path| seen.insert(path.to_owned()))
+        .take(MAX_PROJECT_FILES)
+        .map(str::to_owned)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nul_separated_paths_become_entries() {
+        let files = parse_ls_files("README.md\0src/main.rs\0docs/a b.md\0");
+        assert_eq!(files, ["README.md", "src/main.rs", "docs/a b.md"]);
+    }
+
+    #[test]
+    fn a_trailing_nul_does_not_add_an_empty_path() {
+        assert_eq!(parse_ls_files("only.rs\0"), ["only.rs"]);
+    }
+
+    #[test]
+    fn a_repeated_path_is_listed_once() {
+        assert_eq!(parse_ls_files("a.rs\0a.rs\0b.rs\0"), ["a.rs", "b.rs"]);
+    }
+
+    #[test]
+    fn an_oversized_repository_is_capped() {
+        let out = (0..MAX_PROJECT_FILES + 10)
+            .map(|i| format!("f{i}.rs\0"))
+            .collect::<String>();
+        assert_eq!(parse_ls_files(&out).len(), MAX_PROJECT_FILES);
+    }
+
+    #[test]
+    fn empty_output_yields_no_paths() {
+        assert!(parse_ls_files("").is_empty());
+    }
 
     #[test]
     fn parses_staged_unstaged_and_untracked() {

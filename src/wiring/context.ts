@@ -32,9 +32,11 @@ import { EditDraft } from "../core/usecases/editDraft";
 import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
 import { ListCommands } from "../core/usecases/listCommands";
+import { ListProjectFiles } from "../core/usecases/listProjectFiles";
 import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { LoadInsights } from "../core/usecases/loadInsights";
 import { OpenProject } from "../core/usecases/openProject";
+import { ReorderTabs } from "../core/usecases/reorderTabs";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
 import { SendPrompt } from "../core/usecases/sendPrompt";
@@ -61,6 +63,7 @@ export interface AppContext {
   readonly openProject: OpenProject;
   readonly closeProject: CloseProject;
   readonly switchTab: SwitchTab;
+  readonly reorderTabs: ReorderTabs;
   readonly selectProvider: SelectProvider;
   readonly selectMode: SelectMode;
   readonly selectPermission: SelectPermission;
@@ -77,6 +80,7 @@ export interface AppContext {
   readonly respondPermission: RespondPermission;
   readonly respondQuestion: RespondQuestion;
   readonly listCommands: ListCommands;
+  readonly listProjectFiles: ListProjectFiles;
   /** Historical usage report for the settings Insights section. */
   readonly loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   readonly providerProbe: ProviderProbe;
@@ -130,6 +134,7 @@ export function createAppContext(): AppContext {
     ),
     closeProject: new CloseProject(store, agentGateway, workspaceStore),
     switchTab: new SwitchTab(store, workspaceStore),
+    reorderTabs: new ReorderTabs(store, workspaceStore),
     selectProvider: new SelectProvider(store, workspaceStore, agentGateway),
     selectMode,
     selectPermission,
@@ -152,6 +157,7 @@ export function createAppContext(): AppContext {
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
+    listProjectFiles: new ListProjectFiles(store, gitPort),
     loadInsights: (range) => new LoadInsights(store, transcriptStore).execute(range),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),
     updateSettings: new UpdateSettings(store, workspaceStore),

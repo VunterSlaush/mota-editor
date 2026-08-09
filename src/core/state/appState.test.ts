@@ -15,6 +15,8 @@ const DEFAULTS = projectDefaults(defaultSettings);
 const open = (state: AppState, id: string, path: string) =>
   reduce(state, { type: "tab/opened", project: newProject(id, path, DEFAULTS) });
 
+const ids = (state: AppState) => state.tabs.map((t) => t.project.id);
+
 describe("appState reducer", () => {
   it("opens a project as the active tab", () => {
     const state = open(initialState, "t1", "C:\\work\\alpha");
@@ -44,6 +46,42 @@ describe("appState reducer", () => {
     state = open(state, "t2", "/b");
     state = reduce(state, { type: "tab/closed", tabId: "t1" });
     expect(state.activeTabId).toBe("t2");
+  });
+
+  it("moving a tab to the front reorders the list", () => {
+    let state = open(initialState, "t1", "/a");
+    state = open(state, "t2", "/b");
+    state = open(state, "t3", "/c");
+    state = reduce(state, { type: "tab/moved", tabId: "t3", toIndex: 0 });
+    expect(ids(state)).toEqual(["t3", "t1", "t2"]);
+  });
+
+  it("moving a tab past the end lands it in the last position", () => {
+    let state = open(initialState, "t1", "/a");
+    state = open(state, "t2", "/b");
+    state = reduce(state, { type: "tab/moved", tabId: "t1", toIndex: 9 });
+    expect(ids(state)).toEqual(["t2", "t1"]);
+  });
+
+  it("moving a tab onto its own position changes nothing", () => {
+    let state = open(initialState, "t1", "/a");
+    state = open(state, "t2", "/b");
+    const moved = reduce(state, { type: "tab/moved", tabId: "t2", toIndex: 1 });
+    expect(moved).toBe(state);
+  });
+
+  it("moving an unknown tab is ignored", () => {
+    const state = open(initialState, "t1", "/a");
+    const moved = reduce(state, { type: "tab/moved", tabId: "nope", toIndex: 0 });
+    expect(moved).toBe(state);
+  });
+
+  it("reordering keeps the active tab active", () => {
+    let state = open(initialState, "t1", "/a");
+    state = open(state, "t2", "/b");
+    state = reduce(state, { type: "tab/activated", tabId: "t1" });
+    state = reduce(state, { type: "tab/moved", tabId: "t2", toIndex: 0 });
+    expect(state.activeTabId).toBe("t1");
   });
 
   it("closing the last tab leaves no active tab", () => {

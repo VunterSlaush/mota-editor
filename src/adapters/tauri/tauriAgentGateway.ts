@@ -48,6 +48,7 @@ interface WireEvent {
         planMarkdown: string | null;
         planFilePath: string | null;
         toolCallId: string | null;
+        isPlan: boolean;
       }
     | {
         type: "questionAsked";
@@ -310,6 +311,7 @@ function toDomainEvent(wire: WireEvent["event"]): AgentTurnEvent {
         planMarkdown: wire.planMarkdown ?? undefined,
         planFilePath: wire.planFilePath ?? undefined,
         toolCallId: wire.toolCallId ?? undefined,
+        isPlan: wire.isPlan,
       };
     case "questionAsked":
       // Rust serializes absent values as null; the core models them as

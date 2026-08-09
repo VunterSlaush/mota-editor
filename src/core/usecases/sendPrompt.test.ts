@@ -23,6 +23,8 @@ class FakeAgentGateway implements AgentGateway {
   script: AgentTurnEvent[] = [];
   failWith: string | null = null;
   permissionResponses: Array<{ requestId: string; optionId: string }> = [];
+  /** The last turn's event sink, kept so a test can deliver a late event. */
+  lastOnEvent: ((event: AgentTurnEvent) => void) | null = null;
 
   async startTurn(
     request: AgentTurnRequest,
@@ -30,6 +32,7 @@ class FakeAgentGateway implements AgentGateway {
   ): Promise<void> {
     if (this.failWith) throw new Error(this.failWith);
     this.requests.push(request);
+    this.lastOnEvent = onEvent;
     this.script.forEach(onEvent);
   }
 
@@ -39,7 +42,10 @@ class FakeAgentGateway implements AgentGateway {
     return null;
   }
 
-  async cancelTurn(): Promise<void> {}
+  cancelled: string[] = [];
+  async cancelTurn(tabId: string): Promise<void> {
+    this.cancelled.push(tabId);
+  }
 
   async respondQuestion(): Promise<void> {}
 
@@ -132,6 +138,89 @@ function setup(script: AgentTurnEvent[] = []) {
 }
 
 const DEFAULTS = projectDefaults(defaultSettings);
+
+const PLAN_APPROVAL: AgentTurnEvent = {
+  kind: "permission",
+  requestId: "p1",
+  title: "Ready to code?",
+  isPlan: true,
+  planMarkdown: "# Plan\n\n1. Do the thing",
+  options: [
+    { optionId: "acceptEdits", name: "Yes", kind: "allow_always" },
+    { optionId: "plan", name: "No, keep planning", kind: "reject_once" },
+  ],
+};
+
+const TOOL_APPROVAL: AgentTurnEvent = {
+  kind: "permission",
+  requestId: "r1",
+  title: "Run npm test",
+  options: [
+    { optionId: "allow", name: "Allow", kind: "allow_once" },
+    { optionId: "reject", name: "Deny", kind: "reject_once" },
+  ],
+};
+
+const tabOf = (store: Store) => store.getState().tabs[0];
+
+describe("a plan approval parks the turn", () => {
+  it("leaves the tab idle so the user can answer in words", async () => {
+    const { store, useCase } = setup([PLAN_APPROVAL]);
+    await useCase.execute("t1", "plan it");
+
+    expect(tabOf(store).busy).toBe(false);
+  });
+
+  it("keeps the tab busy for an ordinary tool approval", async () => {
+    const { store, useCase } = setup([TOOL_APPROVAL]);
+    await useCase.execute("t1", "run the tests");
+
+    expect(tabOf(store).busy).toBe(true);
+  });
+
+  it("sending a message declines the plan and stops the agent", async () => {
+    const { gateway, useCase } = setup([PLAN_APPROVAL]);
+    await useCase.execute("t1", "plan it");
+    gateway.script = [{ kind: "completed", isError: false }];
+    await useCase.execute("t1", "actually, use Postgres");
+
+    expect(gateway.permissionResponses).toEqual([{ requestId: "p1", optionId: "plan" }]);
+    expect(gateway.cancelled).toEqual(["t1"]);
+  });
+
+  it("sends the message as a new prompt rather than queueing it", async () => {
+    const { gateway, useCase } = setup([PLAN_APPROVAL]);
+    await useCase.execute("t1", "plan it");
+    gateway.script = [{ kind: "completed", isError: false }];
+    await useCase.execute("t1", "actually, use Postgres");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual([
+      "plan it",
+      "actually, use Postgres",
+    ]);
+  });
+
+  it("marks the plan card answered, so it stops looking clickable", async () => {
+    const { store, useCase } = setup([PLAN_APPROVAL]);
+    await useCase.execute("t1", "plan it");
+    await useCase.execute("t1", "actually, use Postgres");
+
+    const card = tabOf(store).messages.find((m) => m.approval?.requestId === "p1");
+    expect(card?.approval?.resolvedOptionId).toBe("plan");
+  });
+
+  it("ignores the cancelled turn's completion instead of ending the new one", async () => {
+    const { store, gateway, useCase } = setup([PLAN_APPROVAL]);
+    await useCase.execute("t1", "plan it");
+    // The stale turn's tail: captured while turn 1 ran, delivered late.
+    const stale = gateway.lastOnEvent;
+    gateway.script = [];
+    await useCase.execute("t1", "actually, use Postgres");
+    stale?.({ kind: "completed", isError: false, stopReason: "cancelled" });
+
+    expect(tabOf(store).busy).toBe(true); // turn 2 is still running
+  });
+});
 
 describe("SendPrompt with MCP servers", () => {
   it("hands the agent the servers switched on for its provider", async () => {

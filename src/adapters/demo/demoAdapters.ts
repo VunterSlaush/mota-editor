@@ -38,6 +38,7 @@ export class DemoAgentGateway implements AgentGateway {
   private pendingPermissions = new Map<string, (optionId: string) => void>();
   private pendingQuestions = new Map<string, (answers: Record<string, string>) => void>();
   private questionSeq = 1;
+  private planSeq = 1;
 
   async startTurn(
     request: AgentTurnRequest,
@@ -137,6 +138,35 @@ export class DemoAgentGateway implements AgentGateway {
       });
       const chosen = Object.values(answers)[0] ?? "nothing (skipped)";
       emit({ kind: "tool", name: "note", detail: `You chose ${chosen}` });
+    }
+
+    // Plan mode ends by presenting the plan for approval — the demo's
+    // way to exercise the parked-turn behaviour without a real agent.
+    if (request.mode === "plan") {
+      await delay(200);
+      const requestId = `demo-plan-${this.planSeq++}`;
+      emit({
+        kind: "permission",
+        requestId,
+        title: "Ready to code?",
+        isPlan: true,
+        planMarkdown:
+          "# Plan\n\n1. Add the port\n2. Wire the adapter\n3. Cover it with tests",
+        options: [
+          {
+            optionId: "acceptEdits",
+            name: "Yes, auto-accept edits",
+            kind: "allow_always",
+          },
+          { optionId: "default", name: "Yes, approve each edit", kind: "allow_once" },
+          { optionId: "plan", name: "No, keep planning", kind: "reject_once" },
+        ],
+      });
+      const choice = await new Promise<string>((resolve) => {
+        this.pendingPermissions.set(requestId, resolve);
+      });
+      if (choice === "plan") return; // declined: the turn is over
+      emit({ kind: "tool", name: "note", detail: "Plan approved — starting work." });
     }
 
     if (wantsPermission && request.permission !== "bypass") {
@@ -283,6 +313,17 @@ export class DemoGit implements GitPort {
   }
   async remoteUrl(): Promise<string> {
     return "git@github.com:mota/mota-editor.git";
+  }
+  async listFiles(): Promise<string[]> {
+    return [
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "src/ui/App.tsx",
+      "src/ui/components/Composer.tsx",
+      "src/core/entities/fileMention.ts",
+      "src/core/state/appState.ts",
+      "src-tauri/src/git.rs",
+    ];
   }
   async diff(_p: string, path: string): Promise<string> {
     return [
