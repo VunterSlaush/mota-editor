@@ -21,6 +21,10 @@ export interface PermissionOption {
 /** Events an agent emits while working on one turn. */
 export type AgentTurnEvent =
   | { kind: "session"; providerSessionId: string }
+  /** Something costly but not wrong happened to the session — shown as an
+   *  info row, so silent work (an agent restart re-sending the whole
+   *  conversation) becomes visible where it is incurred. */
+  | { kind: "notice"; message: string }
   | { kind: "assistant"; text: string }
   | { kind: "assistantDelta"; text: string }
   | { kind: "userDelta"; text: string }

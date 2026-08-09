@@ -373,14 +373,21 @@ export class SessionHistory {
    * so the first message stays fast.
    */
   async startNew(tabId: string): Promise<void> {
-    const state = this.store.getState();
-    const tab = tabById(state, tabId);
-    if (!tab || tab.busy) return;
-    const { provider, path, model, effort } = tab.project;
+    const before = tabById(this.store.getState(), tabId);
+    if (!before || before.busy) return;
+    const provider = before.project.provider;
 
     await this.agentGateway.endSession(tabId).catch(() => undefined);
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/sessionReset", tabId, provider });
+
+    // Read the tab back: the reset folds in any model/effort change that
+    // was deferred during the last conversation, and the fresh session
+    // must boot with it — that deferral was made for this moment.
+    const state = this.store.getState();
+    const tab = tabById(state, tabId);
+    if (!tab) return;
+    const { path, model, effort } = tab.project;
     void this.agentGateway
       .warmSession(
         tabId,

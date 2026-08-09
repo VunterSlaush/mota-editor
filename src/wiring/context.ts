@@ -28,6 +28,7 @@ import type { ProviderProbe } from "../core/ports/providerProbe";
 import type { FilePicker, PastedImageStore } from "../core/ports/workspacePort";
 import { Store } from "../core/state/store";
 import { ApplyCommandConfig } from "../core/usecases/applyCommandConfig";
+import { ApplyPendingSpec, DiscardPendingSpec } from "../core/usecases/applyPendingSpec";
 import { CancelTurn } from "../core/usecases/cancelTurn";
 import { CloseProject } from "../core/usecases/closeProject";
 import { EditDraft } from "../core/usecases/editDraft";
@@ -68,6 +69,8 @@ export interface AppContext {
   readonly selectPermission: SelectPermission;
   readonly selectModel: SelectModel;
   readonly selectEffort: SelectEffort;
+  readonly applyPendingSpec: ApplyPendingSpec;
+  readonly discardPendingSpec: DiscardPendingSpec;
   readonly selectVerbose: SelectVerbose;
   readonly loadGitChanges: LoadGitChanges;
   readonly gitActions: GitActions;
@@ -137,6 +140,8 @@ export function createAppContext(): AppContext {
     selectMode,
     selectPermission,
     selectModel: new SelectModel(store, workspaceStore, agentGateway),
+    applyPendingSpec: new ApplyPendingSpec(store, workspaceStore, agentGateway),
+    discardPendingSpec: new DiscardPendingSpec(store),
     selectEffort,
     selectVerbose: new SelectVerbose(store, workspaceStore),
     loadGitChanges: new LoadGitChanges(store, gitPort),

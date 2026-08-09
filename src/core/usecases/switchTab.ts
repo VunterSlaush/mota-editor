@@ -2,7 +2,7 @@ import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { ProviderId } from "../entities/provider";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { WorkspaceStore } from "../ports/workspacePort";
-import type { AppSettings } from "../state/appState";
+import { type AppSettings, type TabState, tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import { persistWorkspace } from "./persistWorkspace";
 import { warmTab } from "./warmSessions";
@@ -92,9 +92,27 @@ export class SelectVerbose {
 }
 
 /**
+ * Whether applying a spec change to this tab would cost the user money.
+ *
+ * Model and effort are both spawn-time over ACP, so changing either
+ * respawns the agent — and the respawned agent re-ingests the whole
+ * conversation. Before the first turn there is nothing to re-ingest and
+ * the change is free; once a provider session exists it is not.
+ */
+function conversationIsLive(tab: TabState): boolean {
+  return tab.project.providerSessions[tab.project.provider] !== undefined;
+}
+
+/**
  * Use case — choose the model for a tab's agent (empty = provider
- * default). Takes effect on the next turn; over ACP a model change
- * restarts that tab's agent session.
+ * default).
+ *
+ * Free before the conversation starts, so it applies at once. Mid
+ * conversation it is DEFERRED instead: respawning re-sends the whole
+ * context, and because the prompt cache is keyed per model, a model
+ * change pays for all of it at cache-write rates. The user is shown the
+ * pending change and can still force it (see ApplyPendingSpec) — this
+ * makes the cost a decision instead of a silent charge.
  */
 export class SelectModel {
   constructor(
@@ -104,6 +122,12 @@ export class SelectModel {
   ) {}
 
   async execute(tabId: string, model: string): Promise<void> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return;
+    if (conversationIsLive(tab)) {
+      this.store.dispatch({ type: "tab/specDeferred", tabId, model });
+      return;
+    }
     this.store.dispatch({ type: "tab/modelChanged", tabId, model });
     warmTab(this.store, this.agentGateway, tabId); // restart with the new model
     await persistWorkspace(this.store.getState(), this.workspaceStore);
@@ -112,8 +136,8 @@ export class SelectModel {
 
 /**
  * Use case — choose the reasoning effort for a tab's agent (empty =
- * provider default). Env-based over ACP, so a change restarts the
- * tab's session in the background.
+ * provider default). Env-based over ACP, so it carries the same respawn
+ * cost as the model and is deferred on the same terms.
  */
 export class SelectEffort {
   constructor(
@@ -123,6 +147,12 @@ export class SelectEffort {
   ) {}
 
   async execute(tabId: string, effort: string): Promise<void> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return;
+    if (conversationIsLive(tab)) {
+      this.store.dispatch({ type: "tab/specDeferred", tabId, effort });
+      return;
+    }
     this.store.dispatch({ type: "tab/effortChanged", tabId, effort });
     warmTab(this.store, this.agentGateway, tabId); // restart with the new effort
     await persistWorkspace(this.store.getState(), this.workspaceStore);

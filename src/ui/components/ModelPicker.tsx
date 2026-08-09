@@ -5,6 +5,10 @@ import { OptionPicker, type PickerOption } from "./OptionPicker";
 interface Props {
   provider: ProviderId;
   value: string;
+  /** A model chosen mid-conversation and held back until the next chat.
+   *  Shown in place of `value` — the user picked it and must see it —
+   *  but labelled, so it never passes for what the agent is running. */
+  pendingValue?: string;
   disabled: boolean;
   onChange: (model: string) => void;
 }
@@ -17,23 +21,38 @@ interface Props {
  * workspace) that isn't a suggestion is kept as its own option, so
  * opening the list can never silently drop it.
  */
-export function ModelPicker({ provider, value, disabled, onChange }: Props) {
+export function ModelPicker({
+  provider,
+  value,
+  pendingValue,
+  disabled,
+  onChange,
+}: Props) {
+  const shown = pendingValue ?? value;
   const suggestions = MODEL_SUGGESTIONS[provider];
-  const custom = value !== "" && !suggestions.includes(value) ? [value] : [];
+  const custom = shown !== "" && !suggestions.includes(shown) ? [shown] : [];
+  const label = (model: string) => {
+    const base = model === "" ? "Default model" : model;
+    return model === pendingValue ? `${base} · next chat` : base;
+  };
   const options: readonly PickerOption<string>[] = [
-    { id: "", label: "Default model", icon: <Cpu /> },
-    ...custom.map((model) => ({ id: model, label: model, icon: <Cpu /> })),
-    ...suggestions.map((model) => ({ id: model, label: model, icon: <Cpu /> })),
+    { id: "", label: label(""), icon: <Cpu /> },
+    ...custom.map((model) => ({ id: model, label: label(model), icon: <Cpu /> })),
+    ...suggestions.map((model) => ({ id: model, label: label(model), icon: <Cpu /> })),
   ];
 
   return (
     <OptionPicker
       ariaLabel="Model"
       options={options}
-      value={value}
+      value={shown}
       disabled={disabled}
       align="end"
-      className="picker__trigger--dim"
+      className={
+        pendingValue !== undefined
+          ? "picker__trigger--dim picker__trigger--pending"
+          : "picker__trigger--dim"
+      }
       onChange={onChange}
     />
   );

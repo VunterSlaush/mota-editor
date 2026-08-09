@@ -119,6 +119,8 @@ export function App({ context }: { context: AppContext }) {
           onSelectEffort={(effort) =>
             void context.selectEffort.execute(tab.project.id, effort)
           }
+          onApplyPendingSpec={() => void context.applyPendingSpec.execute(tab.project.id)}
+          onDiscardPendingSpec={() => context.discardPendingSpec.execute(tab.project.id)}
           onToggleVerbose={(verbose) =>
             void context.selectVerbose.execute(tab.project.id, verbose)
           }

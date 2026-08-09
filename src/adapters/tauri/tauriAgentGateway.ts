@@ -18,6 +18,7 @@ interface WireEvent {
   tabId: string;
   event:
     | { type: "sessionStarted"; providerSessionId: string }
+    | { type: "notice"; message: string }
     | { type: "assistantMessage"; text: string }
     | { type: "assistantDelta"; text: string }
     | { type: "userDelta"; text: string }
@@ -104,8 +105,14 @@ export class TauriAgentGateway implements AgentGateway {
         return;
       }
       // No turn in flight: session-level events (warm-up stages, mode
-      // switches) still matter; everything else is a stray and drops.
-      if (event.kind === "sessionStage" || event.kind === "modeChanged") {
+      // switches, notices) still matter — a respawn notice in particular
+      // is emitted by warm-up, which is exactly when no turn is running.
+      // Everything else is a stray and drops.
+      if (
+        event.kind === "sessionStage" ||
+        event.kind === "modeChanged" ||
+        event.kind === "notice"
+      ) {
         this.sessionHandler?.(payload.tabId, event);
       }
     });
@@ -289,6 +296,8 @@ function toDomainEvent(wire: WireEvent["event"]): AgentTurnEvent {
   switch (wire.type) {
     case "sessionStarted":
       return { kind: "session", providerSessionId: wire.providerSessionId };
+    case "notice":
+      return { kind: "notice", message: wire.message };
     case "assistantMessage":
       return { kind: "assistant", text: wire.text };
     case "assistantDelta":

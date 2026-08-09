@@ -856,6 +856,53 @@ body {
   cursor: default;
 }
 
+/* ---- Pending model/effort change (above the composer) ---- */
+.pending-spec {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 8px;
+  padding: 7px 12px;
+  background: var(--bg-raised);
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.pending-spec__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-spec__text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pending-spec__action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pending-spec__action:hover {
+  border-color: var(--accent);
+}
+
+.pending-spec__action--dim {
+  color: var(--text-dim);
+}
+
 /* ---- Plan bar (top of the chat) + viewer modal ---- */
 .plan-bar {
   flex: none;
@@ -3026,6 +3073,13 @@ body {
 
 .picker__trigger--dim {
   color: var(--text-dim);
+}
+
+/* A value the user picked that is NOT what the agent is running yet —
+   dashed, so the toolbar never reads as settled when it isn't. */
+.picker__trigger--pending {
+  color: var(--text);
+  border: 1px dashed var(--accent);
 }
 
 .picker__label {

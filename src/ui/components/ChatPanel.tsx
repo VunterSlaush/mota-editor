@@ -17,6 +17,7 @@ import { Composer } from "./Composer";
 import { DiffModal } from "./DiffModal";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
+import { PendingSpecBar } from "./PendingSpecBar";
 import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
 
@@ -63,6 +64,9 @@ interface Props {
   onSelectPermission: (permission: PermissionPolicy) => void;
   onSelectModel: (model: string) => void;
   onSelectEffort: (effort: string) => void;
+  /** Respawn the agent now to apply the deferred model/effort change. */
+  onApplyPendingSpec: () => void;
+  onDiscardPendingSpec: () => void;
   onToggleVerbose: (verbose: boolean) => void;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
@@ -111,6 +115,8 @@ export function ChatPanel({
   onSelectPermission,
   onSelectModel,
   onSelectEffort,
+  onApplyPendingSpec,
+  onDiscardPendingSpec,
   onToggleVerbose,
   onRespondPermission,
   onAnswerQuestion,
@@ -375,6 +381,14 @@ export function ChatPanel({
             onAnswerQuestion={onAnswerQuestion}
             onShowPlan={showPlan}
           />
+          {tab.pendingSpec && (
+            <PendingSpecBar
+              pending={tab.pendingSpec}
+              contextTokens={tab.usage?.used}
+              onApplyNow={onApplyPendingSpec}
+              onDiscard={onDiscardPendingSpec}
+            />
+          )}
           <Composer
             busy={tab.busy}
             draft={tab.draft ?? ""}
@@ -399,6 +413,7 @@ export function ChatPanel({
             onSelectPermission={onSelectPermission}
             onSelectModel={onSelectModel}
             onSelectEffort={onSelectEffort}
+            pendingSpec={tab.pendingSpec}
           />
         </div>
         {planOpen && (

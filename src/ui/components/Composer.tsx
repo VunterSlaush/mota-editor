@@ -88,6 +88,10 @@ interface Props {
   onSelectPermission: (permission: PermissionPolicy) => void;
   onSelectModel: (model: string) => void;
   onSelectEffort: (effort: string) => void;
+  /** A model/effort change queued for the next chat, when any. The
+   *  pickers show it so the toolbar reflects what the user picked, and
+   *  mark it so they never mistake it for what is running. */
+  pendingSpec?: { readonly model?: string; readonly effort?: string };
 }
 
 /**
@@ -121,6 +125,7 @@ export function Composer({
   onSelectPermission,
   onSelectModel,
   onSelectEffort,
+  pendingSpec,
 }: Props) {
   const [paletteDismissed, setPaletteDismissed] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -407,6 +412,7 @@ export function Composer({
             <ModelPicker
               provider={provider}
               value={model}
+              pendingValue={pendingSpec?.model}
               disabled={busy}
               onChange={onSelectModel}
             />
@@ -414,11 +420,15 @@ export function Composer({
               <OptionPicker
                 ariaLabel="Reasoning effort"
                 options={effortPickerOptions}
-                value={effort}
+                value={pendingSpec?.effort ?? effort}
                 disabled={busy}
                 placeholder="effort"
                 align="end"
-                className="picker__trigger--dim"
+                className={
+                  pendingSpec?.effort !== undefined
+                    ? "picker__trigger--dim picker__trigger--pending"
+                    : "picker__trigger--dim"
+                }
                 onChange={onSelectEffort}
               />
             )}

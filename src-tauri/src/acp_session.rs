@@ -519,6 +519,10 @@ async fn ensure_session(
     let boot_lock = sessions.boot_lock(tab_id);
     let _booting = boot_lock.lock().await;
 
+    // Set only when a LIVE conversation is retired to apply a settings
+    // change — the one respawn the user caused and pays for.
+    let mut reconfigured: Option<&'static str> = None;
+
     if let Some(existing) = sessions.get(tab_id) {
         let matches = existing.provider_id == provider_id
             && existing.model == model
@@ -541,6 +545,11 @@ async fn ensure_session(
             let sid = existing.sid();
             if !sid.is_empty() {
                 sessions.record_recovery(tab_id, &existing.provider_id, &sid);
+                // A LIVE conversation deliberately retired — not a crash.
+                // The user is about to pay for the re-send, so the
+                // recovery path below says so. A crash already reports
+                // itself and is nobody's decision to second-guess.
+                reconfigured = Some(respawn_reason(&existing, provider_id, spec));
             }
         }
         sessions.retire_session(tab_id);
@@ -586,6 +595,18 @@ async fn ensure_session(
             match restored {
                 Ok(()) => {
                     adopt_session(app, tab_id, &session, old_id.clone());
+                    if let Some(reason) = reconfigured {
+                        runner::emit(
+                            app,
+                            tab_id,
+                            &AgentEvent::Notice {
+                                message: format!(
+                                    "Agent restarted to apply {reason} — the conversation \
+                                     was re-sent to it."
+                                ),
+                            },
+                        );
+                    }
                     sessions
                         .map
                         .lock()
@@ -732,6 +753,24 @@ async fn boot_agent(
         }
     }
     Ok(session)
+}
+
+/// Which spec field forced a respawn, phrased for the transcript notice.
+/// Checked in the order the user is most likely to have just changed.
+fn respawn_reason(
+    existing: &AcpSession,
+    provider_id: &str,
+    spec: &SessionSpec,
+) -> &'static str {
+    if existing.provider_id != provider_id {
+        "a provider change"
+    } else if existing.model != spec.model {
+        "a model change"
+    } else if existing.effort != spec.effort {
+        "an effort change"
+    } else {
+        "a tool-server change"
+    }
 }
 
 /// One startup-stage breadcrumb for the UI's progress chip.

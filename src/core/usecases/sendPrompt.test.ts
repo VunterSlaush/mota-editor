@@ -252,6 +252,22 @@ describe("SendPrompt with per-command settings", () => {
   });
 });
 
+describe("SendPrompt notices", () => {
+  it("shows a session notice as an info row in the transcript", async () => {
+    // An agent restart re-sends the whole conversation. Saying so where
+    // it happens is what makes the charge in Insights explicable.
+    const { store, useCase } = setup([
+      { kind: "notice", message: "Agent restarted to apply a model change." },
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "Hello");
+
+    const info = store.getState().tabs[0].messages.filter((m) => m.role === "info");
+    expect(info.map((m) => m.text)).toEqual(["Agent restarted to apply a model change."]);
+  });
+});
+
 describe("SendPrompt transcript identity", () => {
   it("saves the provider's session id alongside the local one", async () => {
     // Without this the transcript cannot be matched to the vendor's own

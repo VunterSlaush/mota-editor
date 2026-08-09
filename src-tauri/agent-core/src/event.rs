@@ -50,6 +50,12 @@ pub enum AgentEvent {
     /// Where session startup currently stands (installing|booting|
     /// creating|recovering|ready). Purely informational for the UI.
     SessionStage { stage: String },
+    /// Something worth telling the user happened to their session, but
+    /// nothing went wrong — rendered as an `info` row in the transcript,
+    /// not an error. Used to make silent, costly work visible: an agent
+    /// restarted to apply a setting re-sends the whole conversation, and
+    /// a charge the user cannot see is a charge they cannot avoid.
+    Notice { message: String },
     /// The agent asks the user to approve a tool action (ACP).
     /// `plan_markdown` carries the full plan text when this request is a
     /// plan approval (Claude's plan mode attaches it to the request).

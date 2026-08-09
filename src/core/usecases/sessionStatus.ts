@@ -1,4 +1,5 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
+import { infoMessage } from "../entities/message";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
@@ -26,6 +27,15 @@ export class SessionStatus {
         type: "tab/sessionStageChanged",
         tabId,
         stage: event.stage === "ready" ? undefined : event.stage,
+      });
+    }
+    // Warm-up is where a reconfigure respawn happens, so this notice
+    // usually arrives with no turn running.
+    if (event.kind === "notice") {
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: infoMessage(event.message),
       });
     }
     if (event.kind === "modeChanged") {

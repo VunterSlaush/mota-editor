@@ -58,6 +58,24 @@ export interface TabState {
     readonly size: number;
     readonly estimated?: boolean;
   };
+  /**
+   * A model/effort change the user made mid-conversation, held back
+   * rather than applied.
+   *
+   * Applying either one respawns the tab's agent (both are spawn-time,
+   * env-based over ACP), and the respawned agent re-sends the whole
+   * conversation — at cache-WRITE rates for a model change, since the
+   * prompt cache is keyed per model. Deferring to the next chat makes
+   * that cost zero. Lives on the tab, not the Project, deliberately: it
+   * is transient, and restoring it into a stale session would apply a
+   * change to a conversation that no longer exists.
+   *
+   * `""` means the provider default, matching the pickers' sentinel.
+   */
+  readonly pendingSpec?: {
+    readonly model?: string;
+    readonly effort?: string;
+  };
   /** Where session startup stands (installing|booting|creating|recovering);
    *  undefined once ready or failed. */
   readonly sessionStage?: string;
@@ -128,6 +146,9 @@ export type Action =
   | { type: "tab/permissionChanged"; tabId: string; permission: PermissionPolicy }
   | { type: "tab/modelChanged"; tabId: string; model: string }
   | { type: "tab/effortChanged"; tabId: string; effort: string }
+  | { type: "tab/specDeferred"; tabId: string; model?: string; effort?: string }
+  | { type: "tab/pendingSpecApplied"; tabId: string }
+  | { type: "tab/pendingSpecDiscarded"; tabId: string }
   | { type: "tab/verboseChanged"; tabId: string; verbose: boolean }
   | { type: "tab/commandsUpdated"; tabId: string; commands: readonly CommandInfo[] }
   | { type: "tab/planUpdated"; tabId: string; plan: readonly PlanEntry[] }
@@ -296,6 +317,18 @@ export function reduce(state: AppState, action: Action): AppState {
         project: { ...tab.project, effort: action.effort.trim() || undefined },
       }));
 
+    case "tab/specDeferred":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        pendingSpec: deferredSpec(tab, action),
+      }));
+
+    case "tab/pendingSpecApplied":
+      return mapTab(state, action.tabId, applyPendingSpec);
+
+    case "tab/pendingSpecDiscarded":
+      return mapTab(state, action.tabId, ({ pendingSpec: _, ...tab }) => tab);
+
     case "tab/verboseChanged":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
@@ -335,13 +368,17 @@ export function reduce(state: AppState, action: Action): AppState {
 
     case "chat/sessionReset":
       return mapTab(state, action.tabId, (tab) => {
-        const sessions = { ...tab.project.providerSessions };
+        // A change was only ever deferred because a conversation was
+        // live. Ending it is the moment the change becomes free, so this
+        // is where a deferral resolves — the next session boots with it.
+        const applied = applyPendingSpec(tab);
+        const sessions = { ...applied.project.providerSessions };
         delete sessions[action.provider];
         return {
-          ...tab,
+          ...applied,
           usage: undefined,
           agentCommands: [],
-          project: { ...tab.project, providerSessions: sessions },
+          project: { ...applied.project, providerSessions: sessions },
         };
       });
 
@@ -549,6 +586,47 @@ function mapTab(
   return {
     ...state,
     tabs: state.tabs.map((t) => (t.project.id === tabId ? update(t) : t)),
+  };
+}
+
+/**
+ * The pending spec after one deferred change, or undefined when nothing
+ * is left pending.
+ *
+ * Only genuine differences survive. Picking the value the session is
+ * already running is not a pending change, and neither is picking a new
+ * value and then picking the old one back — either would leave the
+ * toolbar promising a restart that would do nothing.
+ */
+function deferredSpec(
+  tab: TabState,
+  change: { readonly model?: string; readonly effort?: string },
+): TabState["pendingSpec"] {
+  const merged = { ...tab.pendingSpec, ...change };
+  const differs = (value: string | undefined, current: string | undefined) =>
+    value !== undefined && value !== (current ?? "");
+  const pending = {
+    ...(differs(merged.model, tab.project.model) ? { model: merged.model } : {}),
+    ...(differs(merged.effort, tab.project.effort) ? { effort: merged.effort } : {}),
+  };
+  return "model" in pending || "effort" in pending ? pending : undefined;
+}
+
+/** Fold a pending model/effort into the project and clear it. */
+function applyPendingSpec(tab: TabState): TabState {
+  const { pendingSpec, ...rest } = tab;
+  if (!pendingSpec) return tab;
+  return {
+    ...rest,
+    project: {
+      ...tab.project,
+      ...(pendingSpec.model !== undefined
+        ? { model: pendingSpec.model.trim() || undefined }
+        : {}),
+      ...(pendingSpec.effort !== undefined
+        ? { effort: pendingSpec.effort.trim() || undefined }
+        : {}),
+    },
   };
 }
 

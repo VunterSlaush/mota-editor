@@ -175,6 +175,14 @@ export class SendPrompt {
     const provider = tab.project.provider;
 
     switch (event.kind) {
+      case "notice":
+        this.store.dispatch({
+          type: "chat/messageAppended",
+          tabId,
+          message: infoMessage(event.message),
+        });
+        break;
+
       case "session":
         this.store.dispatch({
           type: "chat/sessionRecorded",
