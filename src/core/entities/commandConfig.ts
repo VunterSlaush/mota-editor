@@ -13,6 +13,15 @@ export interface CommandConfig {
   readonly mode?: AgentMode;
   readonly permission?: PermissionPolicy;
   readonly effort?: string;
+  /**
+   * Model to run this command under (empty means the provider default).
+   *
+   * The cost lever: mechanical commands — a commit message, a changelog,
+   * a rename — do not need the model a hard debugging session needs, and
+   * pinning a cheap one here is the difference between choosing that once
+   * and remembering to choose it every time.
+   */
+  readonly model?: string;
 }
 
 /**
@@ -35,5 +44,5 @@ export function leadingCommand(prompt: string): string | null {
 
 /** Whether a config would actually change anything. */
 export function isEmptyCommandConfig(config: CommandConfig | undefined): boolean {
-  return !config?.mode && !config?.permission && !config?.effort;
+  return !config?.mode && !config?.permission && !config?.effort && !config?.model;
 }

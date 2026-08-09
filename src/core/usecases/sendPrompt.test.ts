@@ -15,7 +15,7 @@ import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { ApplyCommandConfig } from "./applyCommandConfig";
 import { SendPrompt } from "./sendPrompt";
-import { SelectEffort, SelectMode, SelectPermission } from "./switchTab";
+import { SelectEffort, SelectMode, SelectModel, SelectPermission } from "./switchTab";
 
 /** Test double — a scripted agent, per the case study's in-memory gateways. */
 class FakeAgentGateway implements AgentGateway {
@@ -118,6 +118,7 @@ function setup(script: AgentTurnEvent[] = []) {
     new SelectMode(store, workspace),
     new SelectPermission(store, workspace),
     new SelectEffort(store, workspace, gateway),
+    new SelectModel(store, workspace, gateway),
   );
   const useCase = new SendPrompt(
     store,
@@ -236,6 +237,44 @@ describe("SendPrompt with per-command settings", () => {
 
     expect(store.getState().tabs[0].project.effort).not.toBe("high");
     expect(gateway.warms).toBe(0);
+  });
+
+  it("runs a command under the cheap model it pins", async () => {
+    // The point of per-command routing: mechanical commands shouldn't
+    // cost what a debugging session costs.
+    const { gateway, store, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandConfigs: { "claude:/commit": { model: "haiku" } } },
+    });
+
+    await useCase.execute("t1", "/commit");
+
+    expect(gateway.requests[0].model).toBe("haiku");
+    expect(store.getState().tabs[0].project.model).toBe("haiku");
+  });
+
+  it("keeps the session's model once a conversation exists", async () => {
+    // Same reasoning as effort: switching model mid-conversation
+    // respawns the agent and re-sends everything at cache-write rates.
+    // The command runs under the running model instead — and must NOT
+    // leave a deferred change the user never asked for.
+    const { gateway, store, useCase } = setup([
+      { kind: "session", providerSessionId: "native-1" },
+      { kind: "completed", isError: false },
+    ]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandConfigs: { "claude:/commit": { model: "haiku" } } },
+    });
+
+    await useCase.execute("t1", "hello there");
+    const warmsBefore = gateway.warms;
+    await useCase.execute("t1", "/commit");
+
+    expect(store.getState().tabs[0].project.model).toBeUndefined();
+    expect(store.getState().tabs[0].pendingSpec).toBeUndefined();
+    expect(gateway.warms).toBe(warmsBefore);
   });
 
   it("leaves an unconfigured prompt alone", async () => {

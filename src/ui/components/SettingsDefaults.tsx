@@ -1,4 +1,9 @@
-import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
+import {
+  COST_PRESETS,
+  MODES,
+  matchingCostPreset,
+  PERMISSIONS,
+} from "../../core/entities/agentSettings";
 import {
   EFFORT_OPTIONS,
   MODEL_SUGGESTIONS,
@@ -75,6 +80,51 @@ export function SettingsDefaults({ settings, onChange }: Props) {
             description: p.description,
           }))}
           onChange={(defaultPermission) => onChange({ defaultPermission })}
+        />
+      </Field>
+
+      <Field
+        label="Cost preset"
+        hint="Sets the model and effort below together — the pair is what decides the bill."
+      >
+        <OptionPicker
+          ariaLabel="Cost preset"
+          placement="bottom"
+          disabled={false}
+          placeholder="Custom"
+          value={
+            matchingCostPreset(
+              provider,
+              settings.defaultModel[provider],
+              settings.defaultEffort[provider],
+            ) ?? UNSET
+          }
+          options={[
+            { id: UNSET, label: "Custom", description: "Whatever you set below." },
+            ...COST_PRESETS.map((preset) => ({
+              id: preset.id,
+              label: preset.label,
+              description: preset.description,
+            })),
+          ]}
+          onChange={(id) => {
+            // "Custom" is what the pickers below produce, not something
+            // to apply — selecting it should change nothing.
+            const preset = COST_PRESETS.find((p) => p.id === id);
+            if (!preset) return;
+            onChange({
+              defaultModel: withProvider(
+                settings.defaultModel,
+                provider,
+                preset.model[provider],
+              ),
+              defaultEffort: withProvider(
+                settings.defaultEffort,
+                provider,
+                preset.effort[provider],
+              ),
+            });
+          }}
         />
       </Field>
 

@@ -6,7 +6,12 @@ import {
   commandConfigKey,
   isEmptyCommandConfig,
 } from "../../core/entities/commandConfig";
-import { EFFORT_OPTIONS, PROVIDERS, type ProviderId } from "../../core/entities/provider";
+import {
+  EFFORT_OPTIONS,
+  MODEL_SUGGESTIONS,
+  PROVIDERS,
+  type ProviderId,
+} from "../../core/entities/provider";
 import type { AppSettings } from "../../core/state/appState";
 import { OptionPicker } from "./OptionPicker";
 
@@ -42,6 +47,7 @@ export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
   const [provider, setProvider] = useState<ProviderId>(settings.defaultProvider);
   const [commands, setCommands] = useState<readonly CommandInfo[]>([]);
   const efforts = EFFORT_OPTIONS[provider];
+  const models = MODEL_SUGGESTIONS[provider];
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +78,11 @@ export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
       <p className="settings-section__hint">
         Give a command the setup it needs. Running it switches the tab to these and leaves
         it there — the toolbar under the message box will move to match.
+      </p>
+      <p className="settings-section__hint">
+        Model and effort only apply before a conversation starts: changing either restarts
+        the agent, which re-sends the whole conversation. Pin a cheap model on mechanical
+        commands to spend less on them.
       </p>
 
       <div className="settings-field">
@@ -139,6 +150,21 @@ export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
                     ]}
                     onChange={(permission) =>
                       update(command.name, { permission: permission || undefined })
+                    }
+                  />
+                  <OptionPicker
+                    ariaLabel={`Model for ${command.name}`}
+                    placement="bottom"
+                    className="command-row__picker"
+                    disabled={false}
+                    placeholder="Model"
+                    value={configFor(command.name).model ?? INHERIT}
+                    options={[
+                      { id: INHERIT, label: "Leave as is" },
+                      ...models.map((model) => ({ id: model, label: model })),
+                    ]}
+                    onChange={(model) =>
+                      update(command.name, { model: model || undefined })
                     }
                   />
                   {efforts.length > 0 && (

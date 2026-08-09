@@ -123,6 +123,7 @@ export function createAppContext(): AppContext {
   const selectMode = new SelectMode(store, workspaceStore);
   const selectPermission = new SelectPermission(store, workspaceStore);
   const selectEffort = new SelectEffort(store, workspaceStore, agentGateway);
+  const selectModel = new SelectModel(store, workspaceStore, agentGateway);
 
   return {
     store,
@@ -139,7 +140,7 @@ export function createAppContext(): AppContext {
     selectProvider: new SelectProvider(store, workspaceStore, agentGateway),
     selectMode,
     selectPermission,
-    selectModel: new SelectModel(store, workspaceStore, agentGateway),
+    selectModel,
     applyPendingSpec: new ApplyPendingSpec(store, workspaceStore, agentGateway),
     discardPendingSpec: new DiscardPendingSpec(store),
     selectEffort,
@@ -152,7 +153,13 @@ export function createAppContext(): AppContext {
       workspaceStore,
       transcriptStore,
       notifications,
-      new ApplyCommandConfig(store, selectMode, selectPermission, selectEffort),
+      new ApplyCommandConfig(
+        store,
+        selectMode,
+        selectPermission,
+        selectEffort,
+        selectModel,
+      ),
       newId,
     ),
     editDraft: new EditDraft(store),
