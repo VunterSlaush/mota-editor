@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { GitBranch, GitChange, GitCommit, GitPort } from "../../core/ports/gitPort";
+import type {
+  GitBranch,
+  GitChange,
+  GitCommit,
+  GitPort,
+  GitWorktree,
+  WorktreeAddMode,
+} from "../../core/ports/gitPort";
 
 /** Interface adapter — git operations via the Rust backend. */
 export class TauriGitStatus implements GitPort {
@@ -58,5 +65,23 @@ export class TauriGitStatus implements GitPort {
 
   async fetch(projectPath: string): Promise<string> {
     return invoke<string>("git_fetch", { projectPath });
+  }
+
+  async worktrees(projectPath: string): Promise<GitWorktree[]> {
+    return invoke<GitWorktree[]>("git_worktree_list", { projectPath });
+  }
+
+  async worktreeAdd(
+    projectPath: string,
+    worktreePath: string,
+    branch: string,
+    mode: WorktreeAddMode,
+  ): Promise<string> {
+    return invoke<string>("git_worktree_add", {
+      projectPath,
+      worktreePath,
+      branch,
+      mode,
+    });
   }
 }

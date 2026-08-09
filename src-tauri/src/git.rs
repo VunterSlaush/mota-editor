@@ -1,7 +1,7 @@
 //! Git command handlers — thin controllers over the `git` CLI.
 //! Output parsing is pure and lives in `agent_core::vcs`.
 
-use agent_core::vcs::{self, Branch, Commit, GitChange};
+use agent_core::vcs::{self, Branch, Commit, GitChange, Worktree};
 
 use crate::runner;
 
@@ -208,6 +208,44 @@ pub async fn git_fetch(project_path: String) -> Result<String, String> {
     // git writes fetch progress to stderr and leaves stdout empty, so a
     // successful no-op summarises as "Done." rather than staying blank.
     run_git(&project_path, &["fetch", "--prune"]).await.map(summary)
+}
+
+/// Every checkout of this repository, main first. Run from any of them —
+/// git resolves the shared `.git` either way.
+#[tauri::command]
+pub async fn git_worktree_list(project_path: String) -> Result<Vec<Worktree>, String> {
+    let out = run_git(&project_path, &["worktree", "list", "--porcelain"]).await?;
+    Ok(vcs::parse_worktrees(&out))
+}
+
+/// Create a worktree at `worktree_path` for `branch`. `mode` picks the
+/// shape: "existing" checks out a local branch, "new" creates the branch
+/// from HEAD, "remote" creates a local tracking branch from origin —
+/// `worktree add` does not DWIM remote branches the way `checkout` does.
+#[tauri::command]
+pub async fn git_worktree_add(
+    project_path: String,
+    worktree_path: String,
+    branch: String,
+    mode: String,
+) -> Result<String, String> {
+    // Same reasoning as git_checkout: refs and paths that start with `-`
+    // would be parsed as option flags. Legitimate branch names can never
+    // start with `-`, and the app always derives absolute paths.
+    if branch.starts_with('-') {
+        return Err(format!("Refusing to use suspicious ref name: {branch}"));
+    }
+    if worktree_path.starts_with('-') || !std::path::Path::new(&worktree_path).is_absolute() {
+        return Err(format!("Worktree path must be absolute: {worktree_path}"));
+    }
+    let origin_branch = format!("origin/{branch}");
+    let args: &[&str] = match mode.as_str() {
+        "existing" => &["worktree", "add", "--", &worktree_path, &branch],
+        "new" => &["worktree", "add", "-b", &branch, &worktree_path],
+        "remote" => &["worktree", "add", "--track", "-b", &branch, &worktree_path, &origin_branch],
+        other => return Err(format!("Unknown worktree mode: {other}")),
+    };
+    run_git(&project_path, args).await.map(summary)
 }
 
 fn summary(output: String) -> String {

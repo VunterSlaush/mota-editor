@@ -34,6 +34,7 @@ export class RestoreWorkspace {
         effort: p.effort,
         verbose: p.verbose ?? true,
         providerSessions: p.providerSessions,
+        worktreeOf: p.worktreeOf,
       },
       messages: [],
       busy: false,

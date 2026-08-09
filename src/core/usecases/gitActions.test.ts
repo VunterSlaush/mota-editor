@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { newProject } from "../entities/project";
-import type { GitBranch, GitChange, GitCommit, GitPort } from "../ports/gitPort";
+import type {
+  GitBranch,
+  GitChange,
+  GitCommit,
+  GitPort,
+  GitWorktree,
+  WorktreeAddMode,
+} from "../ports/gitPort";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { GitActions } from "./gitActions";
@@ -70,6 +77,22 @@ class FakeGit implements GitPort {
   async fetch(): Promise<string> {
     this.calls.push("fetch");
     return "Fetched origin.";
+  }
+  worktreeList: GitWorktree[] = [];
+  failWorktreeAddWith: string | null = null;
+  async worktrees(): Promise<GitWorktree[]> {
+    if (this.notARepo) throw new Error("not a repo");
+    return this.worktreeList;
+  }
+  async worktreeAdd(
+    _p: string,
+    worktreePath: string,
+    branch: string,
+    mode: WorktreeAddMode,
+  ): Promise<string> {
+    if (this.failWorktreeAddWith) throw new Error(this.failWorktreeAddWith);
+    this.calls.push(`worktreeAdd:${worktreePath}:${branch}:${mode}`);
+    return "Preparing worktree";
   }
 }
 

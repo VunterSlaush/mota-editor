@@ -19,6 +19,8 @@ export interface PersistedProject {
   readonly effort?: string;
   readonly verbose?: boolean;
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
+  /** Main-checkout path when this project is a linked git worktree. */
+  readonly worktreeOf?: string;
 }
 
 /**

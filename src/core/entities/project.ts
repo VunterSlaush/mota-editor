@@ -25,6 +25,11 @@ export interface Project {
    * resumed across turns (and across app restarts where supported).
    */
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
+  /**
+   * When this folder is a linked git worktree, the path of the main
+   * checkout it belongs to. Absent for ordinary folders.
+   */
+  readonly worktreeOf?: string;
 }
 
 export function projectNameFromPath(path: string): string {
@@ -46,7 +51,12 @@ export interface ProjectDefaults {
   readonly effort?: string;
 }
 
-export function newProject(id: string, path: string, defaults: ProjectDefaults): Project {
+export function newProject(
+  id: string,
+  path: string,
+  defaults: ProjectDefaults,
+  worktreeOf?: string,
+): Project {
   return {
     id,
     path,
@@ -58,5 +68,6 @@ export function newProject(id: string, path: string, defaults: ProjectDefaults):
     effort: defaults.effort,
     verbose: true,
     providerSessions: {},
+    worktreeOf,
   };
 }

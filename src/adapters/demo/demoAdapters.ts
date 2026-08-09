@@ -7,7 +7,14 @@ import type {
   AgentTurnRequest,
 } from "../../core/ports/agentGateway";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
-import type { GitBranch, GitChange, GitCommit, GitPort } from "../../core/ports/gitPort";
+import type {
+  GitBranch,
+  GitChange,
+  GitCommit,
+  GitPort,
+  GitWorktree,
+  WorktreeAddMode,
+} from "../../core/ports/gitPort";
 import type { NotificationPort } from "../../core/ports/notificationPort";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
 import type {
@@ -361,6 +368,62 @@ export class DemoGit implements GitPort {
   }
   async fetch(): Promise<string> {
     return "Fetched origin.";
+  }
+
+  // Linked worktrees only — the main entry is derived per call, echoing
+  // whichever demo folder asks, so plain demo tabs never look like
+  // worktrees. `worktreeOrigins` maps a linked worktree back to its main.
+  private readonly worktreeList: GitWorktree[] = [
+    {
+      path: "/demo/mota-editor-worktrees/feature-polish",
+      branch: "feature/polish",
+      head: "d4e5f6a",
+      main: false,
+      bare: false,
+      locked: false,
+      prunable: false,
+    },
+  ];
+  private readonly worktreeOrigins = new Map<string, string>([
+    ["/demo/mota-editor-worktrees/feature-polish", "/demo/mota-editor"],
+  ]);
+
+  async worktrees(projectPath: string): Promise<GitWorktree[]> {
+    const main = this.worktreeOrigins.get(projectPath) ?? projectPath;
+    return [
+      {
+        path: main,
+        branch: "main",
+        head: "a1b2c3d",
+        main: true,
+        bare: false,
+        locked: false,
+        prunable: false,
+      },
+      ...this.worktreeList,
+    ];
+  }
+
+  async worktreeAdd(
+    projectPath: string,
+    worktreePath: string,
+    branch: string,
+    _mode: WorktreeAddMode,
+  ): Promise<string> {
+    this.worktreeList.push({
+      path: worktreePath,
+      branch,
+      head: "a1b2c3d",
+      main: false,
+      bare: false,
+      locked: false,
+      prunable: false,
+    });
+    this.worktreeOrigins.set(
+      worktreePath,
+      this.worktreeOrigins.get(projectPath) ?? projectPath,
+    );
+    return `Preparing worktree (checking out '${branch}')`;
   }
 }
 

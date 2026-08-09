@@ -73,6 +73,8 @@ pub fn run() {
             git::git_push,
             git::git_pull,
             git::git_fetch,
+            git::git_worktree_list,
+            git::git_worktree_add,
             commands::load_workspace,
             commands::save_workspace,
             history_file::save_session,

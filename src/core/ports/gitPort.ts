@@ -25,6 +25,22 @@ export interface GitBranch {
   readonly remote?: boolean;
 }
 
+/** One checkout of the repository. `branch` is "" on a detached HEAD. */
+export interface GitWorktree {
+  readonly path: string;
+  readonly branch: string;
+  readonly head: string;
+  /** The main checkout — the one that owns the `.git` directory. */
+  readonly main: boolean;
+  readonly bare: boolean;
+  readonly locked: boolean;
+  readonly prunable: boolean;
+}
+
+/** How `worktreeAdd` gets its branch: check out an existing local one,
+ *  create a new one from HEAD, or track a remote-only one from origin. */
+export type WorktreeAddMode = "existing" | "new" | "remote";
+
 export interface GitPort {
   /** Changed files; throws when not a git repository. */
   changes(projectPath: string): Promise<GitChange[]>;
@@ -60,4 +76,14 @@ export interface GitPort {
   pull(projectPath: string): Promise<string>;
   /** Refresh remote-tracking refs without touching the working tree. */
   fetch(projectPath: string): Promise<string>;
+  /** Every checkout of this repository, main first; throws when the
+   *  folder is not a git repository. */
+  worktrees(projectPath: string): Promise<GitWorktree[]>;
+  /** Create a worktree at an absolute path. Resolves with a summary. */
+  worktreeAdd(
+    projectPath: string,
+    worktreePath: string,
+    branch: string,
+    mode: WorktreeAddMode,
+  ): Promise<string>;
 }

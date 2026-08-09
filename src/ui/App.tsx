@@ -136,6 +136,11 @@ export function App({ context }: { context: AppContext }) {
           onGitDiff={(path, staged, untracked) =>
             context.gitActions.diff(tab.project.id, path, staged, untracked)
           }
+          loadWorktrees={() => context.worktrees.list(tab.project.id)}
+          onOpenWorktree={(path, mainPath) => void context.worktrees.open(path, mainPath)}
+          onCreateWorktree={(branch, mode) =>
+            context.worktrees.create(tab.project.id, branch, mode)
+          }
           onOpenFile={(path) => openFileExternally(tab.project.path, path)}
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}

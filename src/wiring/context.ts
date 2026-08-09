@@ -51,6 +51,7 @@ import {
   SwitchTab,
   UpdateSettings,
 } from "../core/usecases/switchTab";
+import { Worktrees } from "../core/usecases/worktrees";
 
 /**
  * Composition root — the one place where concrete adapters are chosen and
@@ -72,6 +73,7 @@ export interface AppContext {
   readonly selectVerbose: SelectVerbose;
   readonly loadGitChanges: LoadGitChanges;
   readonly gitActions: GitActions;
+  readonly worktrees: Worktrees;
   readonly sessionHistory: SessionHistory;
   readonly updateSettings: UpdateSettings;
   readonly sendPrompt: SendPrompt;
@@ -131,6 +133,7 @@ export function createAppContext(): AppContext {
       workspaceStore,
       agentGateway,
       newId,
+      gitPort,
     ),
     closeProject: new CloseProject(store, agentGateway, workspaceStore),
     switchTab: new SwitchTab(store, workspaceStore),
@@ -143,6 +146,7 @@ export function createAppContext(): AppContext {
     selectVerbose: new SelectVerbose(store, workspaceStore),
     loadGitChanges: new LoadGitChanges(store, gitPort),
     gitActions: new GitActions(store, gitPort),
+    worktrees: new Worktrees(store, gitPort, workspaceStore, agentGateway, newId),
     sendPrompt: new SendPrompt(
       store,
       agentGateway,
