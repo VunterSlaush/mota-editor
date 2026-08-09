@@ -252,6 +252,30 @@ describe("SendPrompt with per-command settings", () => {
   });
 });
 
+describe("SendPrompt transcript identity", () => {
+  it("saves the provider's session id alongside the local one", async () => {
+    // Without this the transcript cannot be matched to the vendor's own
+    // records: `id` is a local UUID the provider has never heard of.
+    const { transcripts, useCase } = setup([
+      { kind: "session", providerSessionId: "claude-abc" },
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "Hello");
+
+    expect(transcripts.saved[0].providerSessionId).toBe("claude-abc");
+    expect(transcripts.saved[0].id).not.toBe("claude-abc");
+  });
+
+  it("leaves it absent when the provider never reported one", async () => {
+    const { transcripts, useCase } = setup([{ kind: "completed", isError: false }]);
+
+    await useCase.execute("t1", "Hello");
+
+    expect(transcripts.saved[0].providerSessionId).toBeUndefined();
+  });
+});
+
 describe("SendPrompt", () => {
   it("appends the user message and the assistant reply", async () => {
     const { store, useCase } = setup([

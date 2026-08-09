@@ -7,6 +7,7 @@
 //! depends on it, never the other way around.
 
 pub mod acp;
+pub mod billing;
 pub mod commands;
 pub mod event;
 pub mod provider;

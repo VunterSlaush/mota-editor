@@ -148,6 +148,14 @@ pub struct TurnStat {
 #[serde(rename_all = "camelCase")]
 pub struct SessionStats {
     pub session_id: String,
+    /// The provider's own conversation id, when the transcript recorded
+    /// one. `session_id` above is local, so only this can be matched
+    /// against the vendor's session log to read billed token usage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_session_id: Option<String>,
+    /// First prompt, truncated — the only human-readable handle on a
+    /// session, so cost-per-session lists can name what they are ranking.
+    pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_path: Option<String>,
     pub project_dir_hash: String,
@@ -217,7 +225,7 @@ fn extract_stats(dir_hash: &str, value: &Value) -> Option<SessionStats> {
     for message in value.get("messages").and_then(Value::as_array).unwrap_or(&Vec::new()) {
         let role = message.get("role").and_then(Value::as_str);
         if role == Some("user") {
-            if let Some(turn) = message.get("turn").and_then(|t| extract_turn(t)) {
+            if let Some(turn) = message.get("turn").and_then(extract_turn) {
                 turns.push(turn);
             }
             continue;
@@ -245,6 +253,11 @@ fn extract_stats(dir_hash: &str, value: &Value) -> Option<SessionStats> {
 
     Some(SessionStats {
         session_id,
+        provider_session_id: value
+            .get("providerSessionId")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        title: value.get("title").and_then(Value::as_str).unwrap_or("Untitled").to_owned(),
         project_path: value
             .get("projectPath")
             .and_then(Value::as_str)

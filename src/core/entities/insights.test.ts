@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BilledRequest } from "./billing";
 import {
   buildInsights,
   type InsightsOptions,
@@ -27,6 +28,7 @@ function turn(overrides: Partial<TurnStat> = {}): TurnStat {
 function session(overrides: Partial<SessionStats> = {}): SessionStats {
   return {
     sessionId: "s1",
+    title: "A session",
     projectDirHash: "hash1",
     provider: "claude",
     savedAt: NOW,
@@ -275,5 +277,130 @@ describe("buildInsights", () => {
     expect(report.tools.topFiles[0]).toEqual({ path: "hot.ts", touches: 7 });
     // Equal counts tie-break alphabetically.
     expect(report.tools.topFiles[1].path).toBe("file00.ts");
+  });
+});
+
+/** A million input tokens on opus — $5 exactly, which keeps sums legible. */
+function billed(overrides: Partial<BilledRequest> = {}): BilledRequest {
+  return {
+    requestId: "r1",
+    sessionId: "provider-1",
+    timestampMs: NOW - DAY,
+    model: "claude-opus-5",
+    isSidechain: false,
+    inputTokens: 1_000_000,
+    outputTokens: 0,
+    cacheWrite5mTokens: 0,
+    cacheWrite1hTokens: 0,
+    cacheReadTokens: 0,
+    ...overrides,
+  };
+}
+
+const logged = session({ providerSessionId: "provider-1", turns: [turn()] });
+
+describe("buildInsights billed spend", () => {
+  it("is absent when no vendor log covers the range", () => {
+    expect(build([logged]).billed).toBeUndefined();
+  });
+
+  it("keeps the estimate alongside the exact figure, never replacing it", () => {
+    // Both must survive: a range can hold sessions of both kinds, and
+    // collapsing them would hide which numbers are real.
+    const report = build(
+      [session({ providerSessionId: "provider-1", turns: [turn({ tokens: 500 })] })],
+      {
+        billed: [billed()],
+      },
+    );
+    expect(report.billed?.costUsd).toBeCloseTo(5);
+    expect(report.tokens.total).toBe(500);
+  });
+
+  it("ignores requests belonging to sessions it was not given", () => {
+    const report = build([logged], { billed: [billed({ sessionId: "someone-else" })] });
+    expect(report.billed).toBeUndefined();
+  });
+
+  it("ignores requests older than the range", () => {
+    const report = build([logged], {
+      range: "7d",
+      billed: [billed({ timestampMs: NOW - 30 * DAY })],
+    });
+    expect(report.billed).toBeUndefined();
+  });
+
+  it("counts sessions with no vendor log as estimated", () => {
+    const report = build([logged, session({ sessionId: "s2", turns: [turn()] })], {
+      billed: [billed()],
+    });
+    expect(report.billed?.billedSessions).toBe(1);
+    expect(report.billed?.estimatedSessions).toBe(1);
+  });
+
+  it("prices cache writes separately so respawn waste is legible", () => {
+    const report = build([logged], {
+      billed: [billed({ inputTokens: 0, cacheWrite1hTokens: 1_000_000 })],
+    });
+    // 1M cache-write-1h on opus = $5 input rate x 2.0.
+    expect(report.billed?.costByKind.cacheWrite).toBeCloseTo(10);
+    expect(report.billed?.costUsd).toBeCloseTo(10);
+  });
+
+  it("reports the cache hit rate over the input side only", () => {
+    const report = build([logged], {
+      billed: [
+        billed({
+          inputTokens: 0,
+          outputTokens: 500_000, // never cacheable, must not count
+          cacheReadTokens: 750_000,
+          cacheWrite5mTokens: 250_000,
+        }),
+      ],
+    });
+    expect(report.billed?.cacheHitRate).toBeCloseTo(0.75);
+  });
+
+  it("separates subagent spend from the total", () => {
+    const report = build([logged], {
+      billed: [billed(), billed({ requestId: "r2", isSidechain: true })],
+    });
+    expect(report.billed?.costUsd).toBeCloseTo(10);
+    expect(report.billed?.sidechainCostUsd).toBeCloseTo(5);
+  });
+
+  it("ranks sessions by cost, named by their titles", () => {
+    const cheap = session({
+      sessionId: "s2",
+      title: "A quick question",
+      providerSessionId: "provider-2",
+      turns: [turn()],
+    });
+    const report = build([logged, cheap], {
+      billed: [
+        billed({ requestId: "r1" }),
+        billed({ requestId: "r2" }),
+        billed({ requestId: "r3", sessionId: "provider-2" }),
+      ],
+    });
+    expect(report.billed?.bySession.map((s) => s.label)).toEqual([
+      "A session",
+      "A quick question",
+    ]);
+    expect(report.billed?.bySession[0].costUsd).toBeCloseTo(10);
+  });
+
+  it("groups by the full model ids the vendor reports", () => {
+    const report = build([logged], {
+      billed: [
+        billed({ requestId: "r1" }),
+        billed({ requestId: "r2", model: "claude-haiku-4-5-20251001" }),
+      ],
+    });
+    expect(report.billed?.byModel.map((m) => m.model)).toEqual([
+      "claude-opus-5",
+      "claude-haiku-4-5-20251001",
+    ]);
+    expect(report.billed?.byModel[1].costUsd).toBeCloseTo(1); // haiku $1/M
   });
 });

@@ -3,6 +3,7 @@
 //! process runner, and workspace persistence.
 
 mod acp_session;
+mod billing_log;
 mod command_discovery;
 mod commands;
 mod git;
@@ -24,22 +25,18 @@ pub fn run() {
         // the webview must never navigate to a remote origin (agent
         // markdown links open in the system browser instead).
         .setup(|app| {
-            tauri::WebviewWindowBuilder::new(
-                app,
-                "main",
-                tauri::WebviewUrl::default(),
-            )
-            .title("Mota Editor")
-            .inner_size(1100.0, 750.0)
-            .min_inner_size(640.0, 480.0)
-            .on_navigation(|url| {
-                matches!(url.scheme(), "tauri" | "asset" | "about")
-                    || matches!(
-                        url.host_str(),
-                        Some("localhost") | Some("tauri.localhost") | Some("asset.localhost")
-                    )
-            })
-            .build()?;
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                .title("Mota Editor")
+                .inner_size(1100.0, 750.0)
+                .min_inner_size(640.0, 480.0)
+                .on_navigation(|url| {
+                    matches!(url.scheme(), "tauri" | "asset" | "about")
+                        || matches!(
+                            url.host_str(),
+                            Some("localhost") | Some("tauri.localhost") | Some("asset.localhost")
+                        )
+                })
+                .build()?;
             Ok(())
         })
         .manage(RunningTurns::default())
@@ -79,6 +76,7 @@ pub fn run() {
             history_file::load_session,
             history_file::delete_session,
             history_file::list_session_stats,
+            billing_log::read_billed_usage,
         ])
         .build(tauri::generate_context!())
         .expect("error while running mota-editor")

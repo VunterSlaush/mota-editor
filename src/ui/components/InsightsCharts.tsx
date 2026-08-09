@@ -188,9 +188,13 @@ const SPLIT_TONES = 5;
 export function SplitBar({
   label,
   parts,
+  formatValue = String,
 }: {
   label: string;
   parts: Readonly<Record<string, number>>;
+  /** Renders each segment's reading; defaults to the bare number. Costs
+   *  pass a currency formatter so "0.42" reads as "$0.42". */
+  formatValue?: (value: number) => string;
 }) {
   const entries = Object.entries(parts).sort(
     (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
@@ -212,7 +216,7 @@ export function SplitBar({
             key={name}
             className={`insights-split__seg insights-split__seg--${String(i)}`}
             style={{ flexGrow: count }}
-            title={`${name}: ${String(count)}`}
+            title={`${name}: ${formatValue(count)}`}
           />
         ))}
       </div>
@@ -222,7 +226,7 @@ export function SplitBar({
             <span
               className={`insights-split__swatch insights-split__seg--${String(i)}`}
             />
-            {name} <span className="insights-split__count">{count}</span>
+            {name} <span className="insights-split__count">{formatValue(count)}</span>
             <span className="insights-split__count">
               ({total > 0 ? Math.round((count / total) * 100) : 0}%)
             </span>

@@ -16,6 +16,16 @@ export interface PersistedTranscript {
    *  saved before this field existed — those fall back to dir-hash
    *  matching against known projects. */
   readonly projectPath?: string;
+  /**
+   * The PROVIDER's own id for this conversation (Claude's session id, not
+   * our local one). `id` above is a local UUID for sessions we started,
+   * so it cannot be used to find the vendor's records; this can. Insights
+   * joins on it to read billed token usage from the vendor's session log.
+   * Absent on transcripts saved before this field existed, and on
+   * providers that never report a session id — both fall back to the
+   * estimated-cost path.
+   */
+  readonly providerSessionId?: string;
   readonly messages: readonly ChatMessage[];
   /** The agent's structured plan at save time, when any (small). */
   readonly plan?: readonly PlanEntry[];

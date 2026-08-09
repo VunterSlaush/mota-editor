@@ -546,9 +546,8 @@ async fn ensure_session(
         sessions.retire_session(tab_id);
     }
 
-    let session = boot_agent(app, tab_id, provider_id, spec, true).await.map_err(|e| {
+    let session = boot_agent(app, tab_id, provider_id, spec, true).await.inspect_err(|_| {
         emit_stage(app, tab_id, "ready"); // never leave the chip stuck
-        e
     })?;
 
     // Recovery: when the previous process died — or was retired by a
@@ -586,7 +585,7 @@ async fn ensure_session(
             };
             match restored {
                 Ok(()) => {
-                    session.set_sid(old_id.clone());
+                    adopt_session(app, tab_id, &session, old_id.clone());
                     sessions
                         .map
                         .lock()
@@ -642,7 +641,7 @@ async fn ensure_session(
     };
 
     sessions.record_recovery(tab_id, provider_id, &session_id);
-    session.set_sid(session_id);
+    adopt_session(app, tab_id, &session, session_id);
     // Kept for validating `session/set_mode` requests — NOT emitted as a
     // ModeChanged: the user's picker choice is applied right after this
     // (apply_mode), and stomping it with the agent's default would be
@@ -738,6 +737,19 @@ async fn boot_agent(
 /// One startup-stage breadcrumb for the UI's progress chip.
 fn emit_stage(app: &AppHandle, tab_id: &str, stage: &str) {
     runner::emit(app, tab_id, &AgentEvent::SessionStage { stage: stage.to_owned() });
+}
+
+/// Take ownership of the agent's session id AND tell the frontend.
+///
+/// Both halves, always — a sid held only in this process is invisible to
+/// everything that outlives it. The frontend persists what we emit here
+/// (`providerSessions`, and the transcript's `providerSessionId`), which
+/// is what lets a restarted app resume the conversation and what lets
+/// Insights join a transcript to the vendor's own billing log. Setting
+/// the sid without emitting is the bug this function exists to prevent.
+fn adopt_session(app: &AppHandle, tab_id: &str, session: &AcpSession, session_id: String) {
+    session.set_sid(session_id.clone());
+    runner::emit(app, tab_id, &AgentEvent::SessionStarted { provider_session_id: session_id });
 }
 
 /// Drain the agent's stderr forever: every line goes into the session's
@@ -877,7 +889,7 @@ pub async fn load_native_session(
     // its own to show — resume skips the replay, so without one the
     // conversation would come back as a blank screen.
     if prefer_resume && try_resume(&session, session_id, spec).await {
-        session.set_sid(session_id.to_owned());
+        adopt_session(&app, tab_id, &session, session_id.to_owned());
         sessions.record_recovery(tab_id, provider_id, session_id);
         return Ok(false);
     }
@@ -892,7 +904,7 @@ pub async fn load_native_session(
             LOAD_TIMEOUT,
         )
         .await?;
-    session.set_sid(session_id.to_owned());
+    adopt_session(&app, tab_id, &session, session_id.to_owned());
     sessions.record_recovery(tab_id, provider_id, session_id);
     Ok(true)
 }

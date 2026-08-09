@@ -1,3 +1,4 @@
+import type { BilledRequest } from "../../core/entities/billing";
 import type { CommandInfo } from "../../core/entities/command";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
@@ -6,6 +7,7 @@ import type {
   AgentTurnEvent,
   AgentTurnRequest,
 } from "../../core/ports/agentGateway";
+import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
 import type { GitBranch, GitChange, GitCommit, GitPort } from "../../core/ports/gitPort";
 import type { NotificationPort } from "../../core/ports/notificationPort";
@@ -369,6 +371,9 @@ export class DemoTranscriptStore implements TranscriptStore {
     return [
       {
         sessionId: "demo-1",
+        // Matches DemoBillingStore, so this one shows EXACT cost.
+        providerSessionId: "demo-provider-1",
+        title: "Refactor the settings panel",
         projectPath: "/demo/project",
         projectDirHash: "demo1",
         provider: "claude",
@@ -381,6 +386,53 @@ export class DemoTranscriptStore implements TranscriptStore {
         ],
         touchedFiles: { "src/app.ts": 5, "src/ui/view.tsx": 2 },
       },
+      {
+        // No provider session id: the estimate path, so the demo also
+        // shows the mixed-provenance "≈" marker the real app relies on.
+        sessionId: "demo-2",
+        title: "Debug the flaky test",
+        projectPath: "/demo/other",
+        projectDirHash: "demo2",
+        provider: "codex",
+        savedAt: now - day,
+        turns: [turn(4, 15_000), turn(2, 7_000, { effort: "high" })],
+        touchedFiles: { "src/queue.ts": 3 },
+      },
+    ];
+  }
+}
+
+/**
+ * Browser demo — one session's worth of billed usage, shaped like a real
+ * conversation: a big first cache write, then mostly cache reads.
+ */
+export class DemoBillingStore implements BillingStore {
+  async readBilledUsage(sessionIds: readonly string[]): Promise<BilledRequest[]> {
+    if (!sessionIds.includes("demo-provider-1")) return [];
+    const hour = 3_600_000;
+    const now = Date.now();
+    const request = (
+      index: number,
+      patch: Partial<BilledRequest> = {},
+    ): BilledRequest => ({
+      requestId: `demo-req-${index}`,
+      sessionId: "demo-provider-1",
+      timestampMs: now - index * hour,
+      model: "claude-opus-5",
+      isSidechain: false,
+      inputTokens: 120,
+      outputTokens: 1_400,
+      cacheWrite5mTokens: 0,
+      cacheWrite1hTokens: 0,
+      cacheReadTokens: 48_000,
+      ...patch,
+    });
+    return [
+      request(0, { cacheWrite1hTokens: 32_000, cacheReadTokens: 0 }),
+      request(1),
+      request(2, { cacheWrite5mTokens: 6_500 }),
+      request(3, { isSidechain: true, model: "claude-haiku-4-5-20251001" }),
+      request(4),
     ];
   }
 }

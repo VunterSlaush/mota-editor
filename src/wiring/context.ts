@@ -1,5 +1,6 @@
 import {
   DemoAgentGateway,
+  DemoBillingStore,
   DemoCommandCatalog,
   DemoFilePicker,
   DemoFolderPicker,
@@ -12,6 +13,7 @@ import {
 } from "../adapters/demo/demoAdapters";
 import { isTauriRuntime } from "../adapters/tauri/runtime";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
+import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
 import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
 import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
@@ -105,6 +107,7 @@ export function createAppContext(): AppContext {
   const transcriptStore = inTauri
     ? new TauriTranscriptStore()
     : new DemoTranscriptStore();
+  const billingStore = inTauri ? new TauriBillingStore() : new DemoBillingStore();
   const notifications = inTauri ? new TauriNotifications() : new DemoNotifications();
   const newId = () => crypto.randomUUID();
 
@@ -152,7 +155,8 @@ export function createAppContext(): AppContext {
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
-    loadInsights: (range) => new LoadInsights(store, transcriptStore).execute(range),
+    loadInsights: (range) =>
+      new LoadInsights(store, transcriptStore, billingStore).execute(range),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),

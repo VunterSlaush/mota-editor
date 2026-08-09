@@ -1,4 +1,12 @@
-import { estimateCostUsd } from "./modelPricing";
+import {
+  addBilled,
+  type BilledRequest,
+  type BilledTokens,
+  cacheHitRate,
+  NO_BILLED_TOKENS,
+  sumBilled,
+} from "./billing";
+import { billedCostUsd, estimateCostUsd } from "./modelPricing";
 import { COMPACT_COMMAND, PROVIDERS } from "./provider";
 
 /**
@@ -34,6 +42,12 @@ export interface TurnStat {
  *  Mirrors `SessionStats` in src-tauri/src/history_file.rs. */
 export interface SessionStats {
   readonly sessionId: string;
+  /** The provider's own conversation id, when the transcript recorded
+   *  one. `sessionId` is local to us; only this can be matched against
+   *  the vendor's session log to read billed token usage. */
+  readonly providerSessionId?: string;
+  /** First prompt, truncated — names the session in cost rankings. */
+  readonly title: string;
   /** Known project path — embedded in the transcript or recovered by
    *  hashing the open tabs' paths. Absent for closed projects. */
   readonly projectPath?: string;
@@ -54,6 +68,13 @@ export interface InsightsOptions {
   readonly now: number;
   /** 0..1 fraction from AppSettings.autoCompactThreshold. */
   readonly autoCompactThreshold: number;
+  /**
+   * Ground truth from the vendors' own logs, when available. Requests
+   * are matched to sessions by `SessionStats.providerSessionId` and
+   * filtered by their OWN timestamp — not by turn metadata, which older
+   * transcripts often lack entirely.
+   */
+  readonly billed?: readonly BilledRequest[];
   /** Local-date bucketing, injectable for timezone-stable tests. */
   readonly dayKey?: (epochMs: number) => string;
   readonly hourOf?: (epochMs: number) => number;
@@ -81,6 +102,51 @@ export interface ModelRow {
   readonly tokens: number;
   readonly turns: number;
   readonly costUsd: number | null;
+}
+
+export interface BilledSessionRow {
+  readonly sessionId: string;
+  readonly label: string;
+  readonly costUsd: number;
+}
+
+export interface BilledModelRow {
+  readonly model: string;
+  readonly provider: string;
+  readonly requests: number;
+  readonly tokens: BilledTokens;
+  readonly costUsd: number;
+}
+
+/** Exact spend, as reported by the vendors themselves. */
+export interface BilledSpend {
+  readonly costUsd: number;
+  readonly tokens: BilledTokens;
+  /** 0..1; null when nothing was billed on the input side. */
+  readonly cacheHitRate: number | null;
+  /**
+   * Where the money went. `cacheWrite` is the price of every broken
+   * prefix (agent restart, model switch, compaction) and is the segment
+   * worth minimising; `cacheRead` is what a healthy long session looks
+   * like. Split by COST, not tokens: cache reads dominate any token
+   * count while costing a tenth of the rate, so a token split would
+   * point at the wrong thing.
+   */
+  readonly costByKind: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheWrite: number;
+    readonly cacheRead: number;
+  };
+  /** Spend on subagent traffic, which no top-level turn accounts for. */
+  readonly sidechainCostUsd: number;
+  readonly bySession: readonly BilledSessionRow[];
+  readonly byModel: readonly BilledModelRow[];
+  readonly days: readonly { readonly day: string; readonly costUsd: number }[];
+  /** Sessions in range whose exact cost is known. */
+  readonly billedSessions: number;
+  /** Sessions in range still on the estimate — drives the "≈" marker. */
+  readonly estimatedSessions: number;
 }
 
 export interface InsightsReport {
@@ -115,6 +181,14 @@ export interface InsightsReport {
     /** Sessions whose cumulative delta crossed threshold × contextWindow. */
     readonly sessionsNearThreshold: number;
   };
+  /**
+   * Exact spend from the vendors' own logs. Absent when no session in
+   * range has a readable one — the UI then shows only the estimate.
+   * Never replaces `tokens` above: the two coexist because a range can
+   * hold both kinds of session, and conflating them would hide which
+   * numbers are real.
+   */
+  readonly billed?: BilledSpend;
   readonly habits: {
     readonly commands: readonly { readonly command: string; readonly count: number }[];
     readonly modeSplit: Readonly<Record<string, number>>;
@@ -154,6 +228,110 @@ function basename(path: string): string {
 
 function contextWindowOf(provider: string): number | undefined {
   return PROVIDERS.find((p) => p.id === provider)?.contextWindow;
+}
+
+/**
+ * Exact spend for the range, or undefined when no session in it has a
+ * vendor log to read.
+ *
+ * Deliberately independent of turn filtering: billed requests carry
+ * their own timestamps, and many older transcripts have no per-turn
+ * metadata at all. Filtering these by turns would drop real spend.
+ */
+function buildBilledSpend(
+  sessions: readonly SessionStats[],
+  requests: readonly BilledRequest[],
+  cutoff: number,
+  dayKey: (epochMs: number) => string,
+): BilledSpend | undefined {
+  const sessionOf = new Map<string, SessionStats>();
+  for (const session of sessions) {
+    if (session.providerSessionId) sessionOf.set(session.providerSessionId, session);
+  }
+  const inRange = requests.filter(
+    (r) => r.timestampMs >= cutoff && sessionOf.has(r.sessionId),
+  );
+  if (inRange.length === 0) return undefined;
+
+  const costOf = (request: BilledRequest): number => {
+    const session = sessionOf.get(request.sessionId);
+    return billedCostUsd(request, session?.provider ?? "claude", request.model) ?? 0;
+  };
+
+  const sessionRows = new Map<string, { label: string; costUsd: number }>();
+  const modelRows = new Map<
+    string,
+    { model: string; provider: string; requests: number; tokens: BilledTokens }
+  >();
+  const dayCost = new Map<string, number>();
+  const costByKind = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  let costUsd = 0;
+  let sidechainCostUsd = 0;
+
+  for (const request of inRange) {
+    const session = sessionOf.get(request.sessionId);
+    const provider = session?.provider ?? "claude";
+    const cost = costOf(request);
+    costUsd += cost;
+    if (request.isSidechain) sidechainCostUsd += cost;
+    // Each bucket priced on its own, so the waste is legible as money.
+    const bucket = (tokens: Partial<BilledTokens>) =>
+      billedCostUsd({ ...NO_BILLED_TOKENS, ...tokens }, provider, request.model) ?? 0;
+    costByKind.input += bucket({ inputTokens: request.inputTokens });
+    costByKind.output += bucket({ outputTokens: request.outputTokens });
+    costByKind.cacheWrite += bucket({
+      cacheWrite5mTokens: request.cacheWrite5mTokens,
+      cacheWrite1hTokens: request.cacheWrite1hTokens,
+    });
+    costByKind.cacheRead += bucket({ cacheReadTokens: request.cacheReadTokens });
+
+    const sessionRow = sessionRows.get(request.sessionId) ?? {
+      label: session?.title ?? "Untitled",
+      costUsd: 0,
+    };
+    sessionRow.costUsd += cost;
+    sessionRows.set(request.sessionId, sessionRow);
+
+    const modelKey = `${provider}|${request.model}`;
+    const modelRow = modelRows.get(modelKey) ?? {
+      model: request.model,
+      provider,
+      requests: 0,
+      tokens: NO_BILLED_TOKENS,
+    };
+    modelRow.requests += 1;
+    modelRow.tokens = addBilled(modelRow.tokens, request);
+    modelRows.set(modelKey, modelRow);
+
+    const day = dayKey(request.timestampMs);
+    dayCost.set(day, (dayCost.get(day) ?? 0) + cost);
+  }
+
+  const billedSessionIds = new Set(inRange.map((r) => r.sessionId));
+  const tokens = sumBilled(inRange);
+  return {
+    costUsd,
+    tokens,
+    cacheHitRate: cacheHitRate(tokens),
+    costByKind,
+    sidechainCostUsd,
+    bySession: [...sessionRows.entries()]
+      .map(([sessionId, row]) => ({ sessionId, ...row }))
+      .sort((a, b) => b.costUsd - a.costUsd),
+    byModel: [...modelRows.values()]
+      .map((row) => ({
+        ...row,
+        costUsd: billedCostUsd(row.tokens, row.provider, row.model) ?? 0,
+      }))
+      .sort((a, b) => b.costUsd - a.costUsd),
+    days: [...dayCost.entries()]
+      .map(([day, cost]) => ({ day, costUsd: cost }))
+      .sort((a, b) => a.day.localeCompare(b.day)),
+    billedSessions: billedSessionIds.size,
+    estimatedSessions: sessions.filter(
+      (s) => !s.providerSessionId || !billedSessionIds.has(s.providerSessionId),
+    ).length,
+  };
 }
 
 export function buildInsights(
@@ -371,6 +549,7 @@ export function buildInsights(
       compactionTurns,
       sessionsNearThreshold,
     },
+    billed: buildBilledSpend(sessions, options.billed ?? [], cutoff, dayKey),
     habits: {
       commands: [...commands.entries()]
         .map(([command, count]) => ({ command, count }))

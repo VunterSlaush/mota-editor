@@ -552,6 +552,9 @@ export class SendPrompt {
         savedAt: Date.now(),
         provider: tab.project.provider,
         projectPath: tab.project.path,
+        // Recorded by the "session" event earlier in this same turn, so
+        // it is already in the tab by the time the save runs.
+        providerSessionId: tab.project.providerSessions[tab.project.provider],
         messages: tab.messages,
         plan: tab.plan.length > 0 ? tab.plan : undefined,
         planFilePath: tab.planFilePath, // path only — content read on reopen
