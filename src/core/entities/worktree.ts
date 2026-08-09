@@ -30,6 +30,18 @@ function normalize(path: string): string {
 }
 
 /**
+ * A free name for a branch forked off `base`: `base-2`, `base-3`, … —
+ * the first not already taken. Case-insensitive, because Windows ref
+ * files collide case-insensitively.
+ */
+export function deriveBranchName(base: string, taken: readonly string[]): string {
+  const lower = taken.map((t) => t.toLowerCase());
+  let n = 2;
+  while (lower.includes(`${base.toLowerCase()}-${n}`)) n += 1;
+  return `${base}-${n}`;
+}
+
+/**
  * Where a new worktree for `branch` goes: a sibling container next to
  * the main checkout — `<parent>/<repo>-worktrees/<branch-slug>` — so
  * worktrees never land inside the repository and stay easy to find.

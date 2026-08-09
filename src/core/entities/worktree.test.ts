@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deriveWorktreePath, samePath, sanitizeBranchForPath } from "./worktree";
+import {
+  deriveBranchName,
+  deriveWorktreePath,
+  samePath,
+  sanitizeBranchForPath,
+} from "./worktree";
 
 describe("sanitizeBranchForPath", () => {
   it("turns branch separators into dashes", () => {
@@ -23,6 +28,17 @@ describe("samePath", () => {
     expect(samePath("C:\\repos\\app", "c:/repos/app/")).toBe(true);
     expect(samePath("/home/u/app", "/home/u/app")).toBe(true);
     expect(samePath("/home/u/app", "/home/u/other")).toBe(false);
+  });
+});
+
+describe("deriveBranchName", () => {
+  it("forks base-2 first, then counts up past taken names", () => {
+    expect(deriveBranchName("main", [])).toBe("main-2");
+    expect(deriveBranchName("main", ["main-2", "main-3"])).toBe("main-4");
+  });
+
+  it("compares taken names case-insensitively", () => {
+    expect(deriveBranchName("Fix", ["fix-2"])).toBe("Fix-3");
   });
 });
 

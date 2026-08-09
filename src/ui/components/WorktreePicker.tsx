@@ -1,5 +1,6 @@
 import { FolderSimple, GitFork } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { deriveBranchName } from "../../core/entities/worktree";
 import type { GitBranch, WorktreeAddMode } from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
@@ -9,6 +10,8 @@ interface Props {
   loadWorktrees: () => Promise<WorktreeItem[]>;
   /** Branches already known to the panel — candidates for new worktrees. */
   branches: readonly GitBranch[];
+  /** This tab's checked-out branch; "" on a detached HEAD. */
+  currentBranch: string;
   onOpen: (path: string, mainPath: string) => void;
   onCreate: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
   onClose: () => void;
@@ -18,6 +21,9 @@ interface Props {
 type Row =
   | { readonly kind: "worktree"; readonly worktree: WorktreeItem }
   | { readonly kind: "branch"; readonly branch: GitBranch }
+  // The branch this tab is on can't be checked out twice, so its row
+  // forks a fresh branch off it instead — the parallel-work gesture.
+  | { readonly kind: "fromCurrent"; readonly base: string; readonly name: string }
   | { readonly kind: "newBranch"; readonly name: string };
 
 /**
@@ -28,6 +34,7 @@ type Row =
 export function WorktreePicker({
   loadWorktrees,
   branches,
+  currentBranch,
   onOpen,
   onCreate,
   onClose,
@@ -53,7 +60,7 @@ export function WorktreePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rows = buildRows(worktrees ?? [], branches, query);
+  const rows = buildRows(worktrees ?? [], branches, currentBranch, query);
   const mainPath = worktrees?.find((w) => w.main)?.path ?? worktrees?.[0]?.path ?? "";
 
   const act = async (row: Row) => {
@@ -65,7 +72,7 @@ export function WorktreePicker({
     }
     const branch = row.kind === "branch" ? row.branch.name : row.name;
     const mode: WorktreeAddMode =
-      row.kind === "newBranch" ? "new" : row.branch.remote ? "remote" : "existing";
+      row.kind === "branch" ? (row.branch.remote ? "remote" : "existing") : "new";
     setBusy(true);
     setError(null);
     const result = await onCreate(branch, mode);
@@ -157,6 +164,7 @@ export function WorktreePicker({
 function buildRows(
   worktrees: readonly WorktreeItem[],
   branches: readonly GitBranch[],
+  currentBranch: string,
   query: string,
 ): Row[] {
   const q = query.trim().toLowerCase();
@@ -167,6 +175,17 @@ function buildRows(
   const rows: Row[] = checkouts
     .filter((w) => matches(w.branch) || matches(w.path))
     .map((worktree) => ({ kind: "worktree", worktree }) as Row);
+
+  // The current branch is always checked out here, so a second checkout
+  // of it is impossible — fork a fresh branch off it instead.
+  if (currentBranch && matches(currentBranch)) {
+    const taken = [...branches.map((b) => b.name), ...withWorktree];
+    rows.push({
+      kind: "fromCurrent",
+      base: currentBranch,
+      name: deriveBranchName(currentBranch, taken),
+    });
+  }
 
   rows.push(
     ...branches
@@ -200,6 +219,7 @@ function sectionTitle(kind: Row["kind"], previous: Row["kind"] | null): string |
 function rowKey(row: Row): string {
   if (row.kind === "worktree") return `w:${row.worktree.path}`;
   if (row.kind === "branch") return `b:${row.branch.name}`;
+  if (row.kind === "fromCurrent") return `c:${row.name}`;
   return "new";
 }
 
@@ -224,6 +244,14 @@ function RowLabel({ row }: { row: Row }) {
   if (row.kind === "branch") {
     return (
       <span className="branch-picker__name">＋ New worktree for {row.branch.name}</span>
+    );
+  }
+  if (row.kind === "fromCurrent") {
+    return (
+      <span className="worktree-picker__label">
+        <span className="branch-picker__name">＋ New worktree from {row.base}</span>
+        <span className="worktree-picker__path">as new branch '{row.name}'</span>
+      </span>
     );
   }
   return (

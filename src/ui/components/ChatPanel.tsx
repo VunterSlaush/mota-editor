@@ -273,18 +273,18 @@ export function ChatPanel({
             {currentBranch}
           </button>
         )}
-        {currentBranch && (
-          <button
-            type="button"
-            className="branch-chip"
-            title="Open or create a worktree"
-            onClick={() => setWorktreePickerOpen(true)}
-          >
-            <GitFork size={12} aria-hidden="true" />
-            Worktrees
-          </button>
-        )}
         <div className="chat-panel__controls">
+          {currentBranch && (
+            <button
+              type="button"
+              className="branch-chip"
+              title="Open or create a worktree"
+              onClick={() => setWorktreePickerOpen(true)}
+            >
+              <GitFork size={12} aria-hidden="true" />
+              Worktrees
+            </button>
+          )}
           <button
             type="button"
             className="new-chat-button"
@@ -491,6 +491,7 @@ export function ChatPanel({
         <WorktreePicker
           loadWorktrees={loadWorktrees}
           branches={changes?.branches ?? []}
+          currentBranch={currentBranch ?? ""}
           onOpen={onOpenWorktree}
           onCreate={onCreateWorktree}
           onClose={() => setWorktreePickerOpen(false)}
