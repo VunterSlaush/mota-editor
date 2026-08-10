@@ -3,6 +3,7 @@ import type { CommandInfo } from "../../core/entities/command";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type { ProviderId } from "../../core/entities/provider";
+import type { ProvisionEntry } from "../../core/entities/worktree";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -10,7 +11,15 @@ import type {
 } from "../../core/ports/agentGateway";
 import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
-import type { GitBranch, GitChange, GitCommit, GitPort } from "../../core/ports/gitPort";
+import type {
+  GitBranch,
+  GitChange,
+  GitCommit,
+  GitPort,
+  GitWorktree,
+  WorktreeAddMode,
+  WorktreeRemoveMode,
+} from "../../core/ports/gitPort";
 import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
 import type { NotificationPort } from "../../core/ports/notificationPort";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
@@ -26,6 +35,11 @@ import type {
   PersistedWorkspace,
   WorkspaceStore,
 } from "../../core/ports/workspacePort";
+import type {
+  DiskUsage,
+  ProvisionReport,
+  WorktreeProvisioning,
+} from "../../core/ports/worktreeProvisioning";
 
 /**
  * Demo adapters — in-memory implementations of every port, used when the
@@ -365,6 +379,128 @@ export class DemoGit implements GitPort {
   }
   async fetch(): Promise<string> {
     return "Fetched origin.";
+  }
+
+  // Linked worktrees only — the main entry is derived per call, echoing
+  // whichever demo folder asks, so plain demo tabs never look like
+  // worktrees. `worktreeOrigins` maps a linked worktree back to its main.
+  private readonly worktreeList: GitWorktree[] = [
+    {
+      path: "/demo/mota-editor-worktrees/feature-polish",
+      branch: "feature/polish",
+      head: "d4e5f6a",
+      main: false,
+      bare: false,
+      locked: false,
+      prunable: false,
+    },
+  ];
+  private readonly worktreeOrigins = new Map<string, string>([
+    ["/demo/mota-editor-worktrees/feature-polish", "/demo/mota-editor"],
+  ]);
+
+  async worktrees(projectPath: string): Promise<GitWorktree[]> {
+    const main = this.worktreeOrigins.get(projectPath) ?? projectPath;
+    return [
+      {
+        path: main,
+        branch: "main",
+        head: "a1b2c3d",
+        main: true,
+        bare: false,
+        locked: false,
+        prunable: false,
+      },
+      ...this.worktreeList,
+    ];
+  }
+
+  async worktreeAdd(
+    projectPath: string,
+    worktreePath: string,
+    branch: string,
+    _mode: WorktreeAddMode,
+    _remote: string,
+  ): Promise<string> {
+    this.worktreeList.push({
+      path: worktreePath,
+      branch,
+      head: "a1b2c3d",
+      main: false,
+      bare: false,
+      locked: false,
+      prunable: false,
+    });
+    this.worktreeOrigins.set(
+      worktreePath,
+      this.worktreeOrigins.get(projectPath) ?? projectPath,
+    );
+    return `Preparing worktree (checking out '${branch}')`;
+  }
+
+  async worktreeRemove(
+    _projectPath: string,
+    worktreePath: string,
+    _mode: WorktreeRemoveMode,
+  ): Promise<string> {
+    const at = this.worktreeList.findIndex((w) => w.path === worktreePath);
+    if (at !== -1) this.worktreeList.splice(at, 1);
+    this.worktreeOrigins.delete(worktreePath);
+    return `Removing worktree ${worktreePath}`;
+  }
+
+  async worktreePrune(): Promise<string> {
+    return "";
+  }
+
+  async branchesMerged(): Promise<GitBranch[]> {
+    return [{ name: "dev", current: false, remote: false }];
+  }
+}
+
+/**
+ * Provisioning without a disk: every folder reports as copied, and the
+ * sizes are plausible constants so the UI has something to lay out.
+ */
+export class DemoWorktreeProvisioning implements WorktreeProvisioning {
+  async provision(
+    _mainPath: string,
+    worktreePath: string,
+    entries: readonly ProvisionEntry[],
+  ): Promise<ProvisionReport> {
+    await delay(600);
+    return {
+      worktreePath,
+      entries: entries.map((entry) => ({
+        path: entry.path,
+        strategy: entry.strategy,
+        outcome: entry.strategy === "share" ? "linked" : "copied",
+        message: "",
+      })),
+      ok: true,
+    };
+  }
+
+  async unprovision(_worktreePath: string, paths: readonly string[]) {
+    return [...paths];
+  }
+
+  async supportsCow() {
+    return true;
+  }
+
+  async diskUsage(): Promise<DiskUsage> {
+    return {
+      ownBytes: 2_100_000,
+      sharedBytes: 5_140_000_000,
+      apparentBytes: 5_142_100_000,
+      entries: [
+        { path: "src-tauri", bytes: 4_900_000_000, shared: true },
+        { path: "node_modules", bytes: 240_000_000, shared: true },
+        { path: "src", bytes: 2_000_000, shared: false },
+      ],
+      truncated: false,
+    };
   }
 }
 

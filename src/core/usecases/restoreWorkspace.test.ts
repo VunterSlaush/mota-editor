@@ -7,20 +7,28 @@ import { toPersisted } from "./persistWorkspace";
 import { RestoreWorkspace } from "./restoreWorkspace";
 
 class FakeWorkspaceStore implements WorkspaceStore {
-  constructor(public saved: PersistedWorkspace | null = null) {}
+  constructor(private readonly workspace: PersistedWorkspace | null) {}
   async load() {
-    return this.saved;
+    return this.workspace;
   }
-  async save(workspace: PersistedWorkspace) {
-    this.saved = workspace;
-  }
+  async save() {}
 }
 
-class FakeAgentGateway implements Partial<AgentGateway> {
+class FakeAgentGateway {
   async warmSession(): Promise<void> {}
 }
 
-const gateway = new FakeAgentGateway() as unknown as AgentGateway;
+async function restore(workspace: PersistedWorkspace | null) {
+  const store = new Store();
+  await new RestoreWorkspace(
+    store,
+    new FakeWorkspaceStore(workspace),
+    new FakeAgentGateway() as unknown as AgentGateway,
+  ).execute();
+  return store.getState();
+}
+
+const EMPTY: PersistedWorkspace = { projects: [], activeTabId: null };
 
 /** Every setting moved off its default, so a dropped field is visible. */
 const CUSTOM_SETTINGS: AppSettings = {
@@ -42,21 +50,24 @@ const CUSTOM_SETTINGS: AppSettings = {
   ],
   autoCompactThreshold: 0.6,
   autoCompact: "ask",
+  worktrees: {
+    ...defaultSettings.worktrees,
+    remote: "upstream",
+    inheritFromSourceTab: !defaultSettings.worktrees.inheritFromSourceTab,
+  },
   theme: "mota-light",
 };
 
-async function restored(persisted: PersistedWorkspace): Promise<AppSettings> {
-  const store = new Store();
-  await new RestoreWorkspace(store, new FakeWorkspaceStore(persisted), gateway).execute();
-  return store.getState().settings;
-}
-
-describe("workspace settings round trip", () => {
+/**
+ * `restoredSettings` names every field instead of spreading, so a
+ * setting added later is only defaulted if someone remembered to add a
+ * line. These are the tests that notice when nobody did.
+ */
+describe("RestoreWorkspace settings", () => {
   it("brings every setting back exactly as it was saved", async () => {
-    // The guard against the classic bug: a new AppSettings field that is
-    // persisted but has no `??` line in restoredSettings saves fine and
-    // silently reverts on the next launch. Comparing the WHOLE object
-    // means any future field is covered without a test of its own.
+    // The whole-object guard: a new AppSettings field that persists but
+    // has no `??` line saves fine and silently reverts on next launch.
+    // Comparing the WHOLE object covers any future field for free.
     const store = new Store();
     store.dispatch({
       type: "workspace/restored",
@@ -65,31 +76,64 @@ describe("workspace settings round trip", () => {
       settings: CUSTOM_SETTINGS,
     });
 
-    expect(await restored(toPersisted(store.getState()))).toEqual(CUSTOM_SETTINGS);
+    const state = await restore(toPersisted(store.getState()));
+    expect(state.settings).toEqual(CUSTOM_SETTINGS);
   });
 
-  it("falls back to the defaults for a file written before a setting existed", async () => {
+  it("defaults every setting for a file written before they existed", async () => {
+    const state = await restore(EMPTY);
+    expect(state.settings).toEqual(defaultSettings);
+  });
+
+  it("defaults a single missing setting, keeping the ones that are there", async () => {
     // An older build's file has no autoCompact at all.
     const { autoCompact: _, ...older } = CUSTOM_SETTINGS;
 
-    const settings = await restored({
-      projects: [],
-      activeTabId: null,
-      settings: older,
-    });
+    const state = await restore({ ...EMPTY, settings: older });
 
-    expect(settings.autoCompact).toBe(defaultSettings.autoCompact);
-    expect(settings.theme).toBe(CUSTOM_SETTINGS.theme);
+    expect(state.settings.autoCompact).toBe(defaultSettings.autoCompact);
+    expect(state.settings.theme).toBe(CUSTOM_SETTINGS.theme);
   });
 
-  it("uses every default when there are no persisted settings at all", async () => {
-    expect(await restored({ projects: [], activeTabId: null })).toEqual(defaultSettings);
+  it("defaults the worktree group when the file has no worktree settings", async () => {
+    const state = await restore({ ...EMPTY, settings: { theme: "mota-light" } });
+    expect(state.settings.theme).toBe("mota-light");
+    expect(state.settings.worktrees).toEqual(defaultSettings.worktrees);
+  });
+
+  it("defaults worktree fields one by one, keeping the ones that are there", async () => {
+    const state = await restore({
+      ...EMPTY,
+      settings: { worktrees: { remote: "upstream" } },
+    });
+    expect(state.settings.worktrees.remote).toBe("upstream");
+    expect(state.settings.worktrees.container).toBe(defaultSettings.worktrees.container);
+    expect(state.settings.worktrees.provisioning).toEqual(
+      defaultSettings.worktrees.provisioning,
+    );
+    expect(state.settings.worktrees.inheritFromSourceTab).toBe(
+      defaultSettings.worktrees.inheritFromSourceTab,
+    );
+  });
+
+  it("keeps an empty provisioning list rather than defaulting it back", async () => {
+    const state = await restore({
+      ...EMPTY,
+      settings: { worktrees: { provisioning: [] } },
+    });
+    expect(state.settings.worktrees.provisioning).toEqual([]);
+  });
+
+  it("leaves the state alone when there is no workspace file at all", async () => {
+    const state = await restore(null);
+    expect(state.settings).toEqual(defaultSettings);
+    expect(state.tabs).toEqual([]);
   });
 });
 
-describe("workspace project round trip", () => {
+describe("RestoreWorkspace projects", () => {
   it("brings a project's per-project MCP overrides back", async () => {
-    const persisted: PersistedWorkspace = {
+    const state = await restore({
       projects: [
         {
           id: "t1",
@@ -100,17 +144,8 @@ describe("workspace project round trip", () => {
         },
       ],
       activeTabId: "t1",
-    };
-    const store = new Store();
-    await new RestoreWorkspace(
-      store,
-      new FakeWorkspaceStore(persisted),
-      gateway,
-    ).execute();
-
-    expect(store.getState().tabs[0].project.mcpOverrides).toEqual({
-      s1: false,
-      s2: true,
     });
+
+    expect(state.tabs[0].project.mcpOverrides).toEqual({ s1: false, s2: true });
   });
 });

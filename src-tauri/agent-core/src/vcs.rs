@@ -148,6 +148,56 @@ pub fn parse_branches(output: &str) -> Vec<Branch> {
     branches
 }
 
+/// One checkout of the repository, from `git worktree list --porcelain`.
+/// `branch` is empty when the worktree is on a detached HEAD.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktree {
+    pub path: String,
+    pub branch: String,
+    pub head: String,
+    /// The main checkout — always the first entry git prints.
+    pub main: bool,
+    pub bare: bool,
+    pub locked: bool,
+    pub prunable: bool,
+}
+
+/// Parse `git worktree list --porcelain` output: blank-line-separated
+/// entries of `worktree <path>`, `HEAD <sha>`, `branch <ref>`, plus the
+/// bare/detached/locked/prunable markers (the latter two may carry a
+/// reason after a space).
+pub fn parse_worktrees(porcelain: &str) -> Vec<Worktree> {
+    let mut worktrees: Vec<Worktree> = Vec::new();
+    for entry in porcelain.split("\n\n") {
+        let mut path = String::new();
+        let mut branch = String::new();
+        let mut head = String::new();
+        let (mut bare, mut locked, mut prunable) = (false, false, false);
+        for line in entry.lines() {
+            if let Some(rest) = line.strip_prefix("worktree ") {
+                path = rest.trim().to_owned();
+            } else if let Some(rest) = line.strip_prefix("HEAD ") {
+                head = rest.trim().to_owned();
+            } else if let Some(rest) = line.strip_prefix("branch ") {
+                branch = rest.trim().strip_prefix("refs/heads/").unwrap_or(rest.trim()).to_owned();
+            } else if line == "bare" {
+                bare = true;
+            } else if line == "locked" || line.starts_with("locked ") {
+                locked = true;
+            } else if line == "prunable" || line.starts_with("prunable ") {
+                prunable = true;
+            }
+        }
+        if path.is_empty() {
+            continue;
+        }
+        let main = worktrees.is_empty();
+        worktrees.push(Worktree { path, branch, head, main, bare, locked, prunable });
+    }
+    worktrees
+}
+
 /// A repository bigger than this is fine; the composer's "@" menu shows
 /// fifty rows, so the rest would only cost bandwidth crossing to the UI.
 pub const MAX_PROJECT_FILES: usize = 20_000;
@@ -277,6 +327,68 @@ mod tests {
         assert_eq!(commits[0].subject, "Fix the login bug");
         assert_eq!(commits[0].author, "Mota");
         assert_eq!(commits[0].when, "2 hours ago");
+    }
+
+    #[test]
+    fn parses_main_and_linked_worktrees() {
+        let out = "worktree /repos/mota editor\n\
+                   HEAD abc1234def\n\
+                   branch refs/heads/main\n\
+                   \n\
+                   worktree /repos/mota editor-worktrees/feature-login\n\
+                   HEAD def5678abc\n\
+                   branch refs/heads/feature/login\n";
+        let wts = parse_worktrees(out);
+        assert_eq!(wts.len(), 2);
+        assert_eq!(wts[0].path, "/repos/mota editor");
+        assert_eq!(wts[0].branch, "main");
+        assert_eq!(wts[0].head, "abc1234def");
+        assert!(wts[0].main);
+        assert!(!wts[1].main);
+        // The refs/heads/ prefix goes; the branch's own slashes stay.
+        assert_eq!(wts[1].branch, "feature/login");
+    }
+
+    #[test]
+    fn a_detached_worktree_has_an_empty_branch() {
+        let out = "worktree /repos/app\n\
+                   HEAD abc1234\n\
+                   branch refs/heads/main\n\
+                   \n\
+                   worktree /repos/app-worktrees/spike\n\
+                   HEAD def5678\n\
+                   detached\n";
+        let wts = parse_worktrees(out);
+        assert_eq!(wts[1].branch, "");
+        assert_eq!(wts[1].head, "def5678");
+    }
+
+    #[test]
+    fn bare_locked_and_prunable_markers_are_read() {
+        let out = "worktree /repos/store.git\n\
+                   bare\n\
+                   \n\
+                   worktree /repos/store-worktrees/held\n\
+                   HEAD abc\n\
+                   branch refs/heads/held\n\
+                   locked being used on another machine\n\
+                   \n\
+                   worktree /repos/store-worktrees/gone\n\
+                   HEAD def\n\
+                   branch refs/heads/gone\n\
+                   prunable\n";
+        let wts = parse_worktrees(out);
+        assert!(wts[0].bare && wts[0].main);
+        assert!(wts[1].locked && !wts[1].bare);
+        assert!(wts[2].prunable && !wts[2].locked);
+    }
+
+    #[test]
+    fn worktree_garbage_and_trailing_blanks_are_ignored() {
+        assert!(parse_worktrees("").is_empty());
+        assert!(parse_worktrees("\n\n").is_empty());
+        let wts = parse_worktrees("worktree /only\nHEAD abc\nbranch refs/heads/main\n\n");
+        assert_eq!(wts.len(), 1);
     }
 
     #[test]

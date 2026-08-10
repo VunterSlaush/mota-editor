@@ -19,6 +19,7 @@ export function toPersisted(state: AppState): PersistedWorkspace {
       verbose: t.project.verbose,
       providerSessions: t.project.providerSessions,
       mcpOverrides: t.project.mcpOverrides,
+      worktreeOf: t.project.worktreeOf,
     })),
     activeTabId: state.activeTabId,
     settings: state.settings,

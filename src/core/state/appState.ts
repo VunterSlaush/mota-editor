@@ -18,6 +18,8 @@ import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
 import type { ProviderId } from "../entities/provider";
 import { DEFAULT_PROVIDER } from "../entities/provider";
+import type { WorktreeSettings } from "../entities/worktree";
+import { defaultWorktreeSettings } from "../entities/worktree";
 
 /**
  * Core state — a pure, framework-free model of the whole workbench,
@@ -55,6 +57,10 @@ export interface TabState {
   readonly historySessionId?: string;
   /** True when a turn finished while the user was on another tab. */
   readonly attention?: boolean;
+  /** Set while this worktree's heavy folders are being put in place. */
+  readonly preparing?: boolean;
+  /** What went wrong preparing them, once, until dismissed. */
+  readonly preparingProblem?: string;
   /** Context-window usage of the tab's agent session. `estimated` marks
    *  a client-side approximation (no `usage_update` from the agent). */
   readonly usage?: {
@@ -123,6 +129,8 @@ export interface AppSettings {
   readonly autoCompact: AutoCompactPolicy;
   /** Color theme id, from `entities/theme`. */
   readonly theme: string;
+  /** Where worktrees go, how they are stocked, what their tabs inherit. */
+  readonly worktrees: WorktreeSettings;
 }
 
 export interface AppState {
@@ -145,6 +153,7 @@ export const defaultSettings: AppSettings = {
   autoCompactThreshold: 0.9,
   autoCompact: "compact",
   theme: "mota-dark",
+  worktrees: defaultWorktreeSettings,
 };
 
 export const initialState: AppState = {
@@ -163,6 +172,9 @@ export type Action =
   | { type: "settings/changed"; patch: Partial<AppSettings> }
   | { type: "tab/opened"; project: Project }
   | { type: "tab/closed"; tabId: string }
+  | { type: "worktree/preparing"; tabId: string }
+  /** `problem` is absent when everything landed. */
+  | { type: "worktree/prepared"; tabId: string; problem?: string }
   | { type: "tab/activated"; tabId: string }
   | { type: "tab/moved"; tabId: string; toIndex: number }
   | { type: "tab/attentionRequested"; tabId: string }
@@ -314,6 +326,20 @@ export function reduce(state: AppState, action: Action): AppState {
         ...mapTab(state, action.tabId, (tab) => ({ ...tab, attention: false })),
         activeTabId: action.tabId,
       };
+
+    case "worktree/preparing":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        preparing: true,
+        preparingProblem: undefined,
+      }));
+
+    case "worktree/prepared":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        preparing: false,
+        preparingProblem: action.problem,
+      }));
 
     case "tab/moved": {
       // Reordering is purely cosmetic: which tab you are looking at never

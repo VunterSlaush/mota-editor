@@ -1,14 +1,17 @@
-import { GitBranch, NotePencil } from "@phosphor-icons/react";
+import { GitBranch, GitFork, NotePencil } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
 import { agentEditedFiles, countFileChangingTools } from "../../core/entities/tool";
+import type { RemovalCheck } from "../../core/entities/worktree";
+import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
 import type { TabState } from "../../core/state/appState";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryListing } from "../../core/usecases/history";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
+import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { useDragWidth } from "../useDragWidth";
 import { ActivityBar, type SidebarView } from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
@@ -21,6 +24,7 @@ import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
 import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
+import { WorktreePicker } from "./WorktreePicker";
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
 const GIT_RELOAD_DEBOUNCE_MS = 400;
@@ -91,6 +95,14 @@ interface Props {
     staged: boolean,
     untracked: boolean,
   ) => Promise<GitActionResult>;
+  /** The repo's checkouts, for the worktree picker. */
+  loadWorktrees: () => Promise<WorktreeItem[]>;
+  onOpenWorktree: (path: string, mainPath: string) => void;
+  onCreateWorktree: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
+  /** Try the heavy-folder copy again after it failed. */
+  onRetryPreparing: () => void;
+  onCheckWorktreeRemoval: (path: string) => Promise<RemovalCheck>;
+  onRemoveWorktree: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
   onOpenFile: (path: string) => Promise<string | null>;
   onPickFiles: () => Promise<string[]>;
   /** Save an image pasted into the composer; returns its file path. */
@@ -142,6 +154,12 @@ export function ChatPanel({
   onGitPull,
   onGitFetch,
   onGitDiff,
+  loadWorktrees,
+  onOpenWorktree,
+  onCreateWorktree,
+  onRetryPreparing,
+  onCheckWorktreeRemoval,
+  onRemoveWorktree,
   onOpenFile,
   onPickFiles,
   onPasteImage,
@@ -157,6 +175,7 @@ export function ChatPanel({
   const sidebar = useDragWidth(270, 180, 520);
   const planPanel = useDragWidth(420, 280, 760, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+  const [worktreePickerOpen, setWorktreePickerOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
@@ -277,7 +296,36 @@ export function ChatPanel({
             {currentBranch}
           </button>
         )}
+        {tab.preparing && (
+          <span
+            className="worktree-preparing"
+            title="Copying this worktree's dependencies and build folders into place."
+          >
+            Preparing…
+          </span>
+        )}
+        {tab.preparingProblem && (
+          <button
+            type="button"
+            className="worktree-preparing worktree-preparing--failed"
+            title={`${tab.preparingProblem} — click to try again.`}
+            onClick={onRetryPreparing}
+          >
+            Not prepared
+          </button>
+        )}
         <div className="chat-panel__controls">
+          {currentBranch && (
+            <button
+              type="button"
+              className="branch-chip"
+              title="Open or create a worktree"
+              onClick={() => setWorktreePickerOpen(true)}
+            >
+              <GitFork size={12} aria-hidden="true" />
+              Worktrees
+            </button>
+          )}
           <button
             type="button"
             className="new-chat-button"
@@ -497,6 +545,18 @@ export function ChatPanel({
             void onGitCheckout(branch).then(() => setChangesRefreshKey((k) => k + 1));
           }}
           onClose={() => setBranchPickerOpen(false)}
+        />
+      )}
+      {worktreePickerOpen && (
+        <WorktreePicker
+          loadWorktrees={loadWorktrees}
+          branches={changes?.branches ?? []}
+          currentBranch={currentBranch ?? ""}
+          onOpen={onOpenWorktree}
+          onCreate={onCreateWorktree}
+          onCheckRemoval={onCheckWorktreeRemoval}
+          onRemove={onRemoveWorktree}
+          onClose={() => setWorktreePickerOpen(false)}
         />
       )}
     </main>

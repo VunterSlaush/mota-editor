@@ -1,5 +1,6 @@
 import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
 import { projectNameFromPath } from "../entities/project";
+import type { WorktreeSettings } from "../entities/worktree";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { PersistedSettings, WorkspaceStore } from "../ports/workspacePort";
 import type { AppSettings, TabState } from "../state/appState";
@@ -35,6 +36,7 @@ export class RestoreWorkspace {
         verbose: p.verbose ?? true,
         providerSessions: p.providerSessions,
         mcpOverrides: p.mcpOverrides,
+        worktreeOf: p.worktreeOf,
       },
       messages: [],
       busy: false,
@@ -72,5 +74,20 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
       persisted?.autoCompactThreshold ?? defaultSettings.autoCompactThreshold,
     autoCompact: persisted?.autoCompact ?? defaultSettings.autoCompact,
     theme: persisted?.theme ?? defaultSettings.theme,
+    worktrees: restoredWorktrees(persisted?.worktrees),
+  };
+}
+
+/** Field by field again, one level down, for the same reason. */
+function restoredWorktrees(
+  persisted: Partial<WorktreeSettings> | undefined,
+): WorktreeSettings {
+  const fallback = defaultSettings.worktrees;
+  return {
+    container: persisted?.container ?? fallback.container,
+    remote: persisted?.remote ?? fallback.remote,
+    provisioning: persisted?.provisioning ?? fallback.provisioning,
+    inheritFromSourceTab:
+      persisted?.inheritFromSourceTab ?? fallback.inheritFromSourceTab,
   };
 }

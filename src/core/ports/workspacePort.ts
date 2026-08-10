@@ -6,6 +6,7 @@ import type {
 import type { CommandConfig } from "../entities/commandConfig";
 import type { McpServerConfig, ProjectMcpOverrides } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
+import type { WorktreeSettings } from "../entities/worktree";
 
 /**
  * Ports layer — persistence and OS-interaction boundaries.
@@ -25,6 +26,8 @@ export interface PersistedProject {
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
   /** Per-project MCP on/off overrides, by server id. */
   readonly mcpOverrides?: ProjectMcpOverrides;
+  /** Main-checkout path when this project is a linked git worktree. */
+  readonly worktreeOf?: string;
 }
 
 /**
@@ -42,6 +45,8 @@ export interface PersistedSettings {
   readonly autoCompactThreshold?: number;
   readonly autoCompact?: AutoCompactPolicy;
   readonly theme?: string;
+  /** Partial too: a field added after this file was written is defaulted. */
+  readonly worktrees?: Partial<WorktreeSettings>;
 }
 
 export interface PersistedWorkspace {

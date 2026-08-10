@@ -205,6 +205,14 @@ body {
   color: var(--text);
 }
 
+/* Folder or worktree — the one glance that tells tabs of a repo apart. */
+.tab__icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  opacity: 0.75;
+}
+
 .tab__close {
   border: none;
   background: transparent;
@@ -1681,6 +1689,106 @@ body {
   border-color: var(--accent);
 }
 
+/* Removing a worktree: the trash on the row, then the confirm beneath. */
+.worktree-picker__remove {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.worktree-picker__remove:hover {
+  color: var(--error);
+}
+
+.worktree-picker__confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  font-size: 12px;
+}
+
+.worktree-picker__confirm-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-dim);
+}
+
+.worktree-picker__confirm-no,
+.worktree-picker__confirm-yes {
+  flex: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+.worktree-picker__confirm-yes {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.worktree-picker__confirm-yes:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A worktree stocking itself, and the chip that offers a retry. */
+.worktree-preparing {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: transparent;
+  font-family: inherit;
+}
+
+.worktree-preparing--failed {
+  color: var(--error);
+  border-color: var(--error);
+  cursor: pointer;
+}
+
+/* ---- Settings: Worktrees section ---- */
+.worktree-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.worktree-path-row .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.worktree-path-row__side {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.worktree-path-row__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ---- Providers section ---- */
 .provider-row {
   display: flex;
@@ -1961,6 +2069,49 @@ body {
   padding: 12px 14px;
   color: var(--text-dim);
   font-size: 13px;
+}
+
+/* The worktree picker borrows the branch picker's frame and rows. */
+.worktree-picker__section {
+  padding: 6px 14px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.worktree-picker__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.worktree-picker__path {
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-picker__badges {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.worktree-picker__item--busy {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.worktree-picker__error {
+  padding: 10px 14px;
+  color: var(--error);
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
 }
 
 .changes__commit {

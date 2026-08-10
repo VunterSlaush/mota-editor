@@ -1,6 +1,7 @@
 import {
   ChartBar,
   Gauge,
+  GitFork,
   Palette,
   PlugsConnected,
   Sliders,
@@ -22,12 +23,14 @@ import { SettingsProviders } from "./SettingsProviders";
 import { SettingsTheme } from "./SettingsTheme";
 import { SettingsTools } from "./SettingsTools";
 import { SettingsUsage } from "./SettingsUsage";
+import { SettingsWorktrees } from "./SettingsWorktrees";
 
 export type SettingsSection =
   | "defaults"
   | "commands"
   | "tools"
   | "providers"
+  | "worktrees"
   | "usage"
   | "insights"
   | "theme";
@@ -48,6 +51,8 @@ interface Props {
   mcpProbe: McpProbe;
   onScopeMcpServer: (serverId: string, enabled: boolean | undefined) => void;
   newId: () => string;
+  /** Whether this disk clones; null until the probe answers. */
+  supportsCow: boolean | null;
   onClose: () => void;
 }
 
@@ -57,6 +62,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
     { id: "commands", label: "Commands", Icon: TerminalWindow },
     { id: "tools", label: "Tools", Icon: Toolbox },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
+    { id: "worktrees", label: "Worktrees", Icon: GitFork },
     { id: "usage", label: "Usage", Icon: Gauge },
     { id: "insights", label: "Insights", Icon: ChartBar },
     { id: "theme", label: "Theme", Icon: Palette },
@@ -79,6 +85,7 @@ export function SettingsModal({
   mcpProbe,
   onScopeMcpServer,
   newId,
+  supportsCow,
   onClose,
 }: Props) {
   const [section, setSection] = useState<SettingsSection>("defaults");
@@ -140,6 +147,13 @@ export function SettingsModal({
           )}
           {section === "providers" && (
             <SettingsProviders probe={probeProvider} signIn={signInProvider} />
+          )}
+          {section === "worktrees" && (
+            <SettingsWorktrees
+              settings={settings}
+              onChange={onChange}
+              supportsCow={supportsCow}
+            />
           )}
           {section === "usage" && (
             <SettingsUsage settings={settings} onChange={onChange} tabs={tabs} />

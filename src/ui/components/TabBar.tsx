@@ -1,3 +1,4 @@
+import { FolderSimple, GitFork } from "@phosphor-icons/react";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
 import { useDragReorder } from "../useDragReorder";
@@ -31,9 +32,10 @@ export function TabBar({
         const status = tabStatus(tab);
         const label = TAB_STATUS_LABELS[status];
         // The branch comes from the tab's cached git read, never a live call.
-        const where = tab.branch
-          ? `${tab.project.path} (${tab.branch})`
-          : tab.project.path;
+        const at = tab.branch ? `${tab.project.path} (${tab.branch})` : tab.project.path;
+        const where = tab.project.worktreeOf
+          ? `${at} — worktree of ${tab.project.worktreeOf}`
+          : at;
         return (
           <div
             key={id}
@@ -47,6 +49,14 @@ export function TabBar({
               if (!drag.wasDragged()) onSelect(id);
             }}
           >
+            {/* Folder vs worktree at a glance; the tooltip says which repo. */}
+            <span className="tab__icon">
+              {tab.project.worktreeOf ? (
+                <GitFork size={13} aria-hidden="true" />
+              ) : (
+                <FolderSimple size={13} aria-hidden="true" />
+              )}
+            </span>
             {status !== "idle" && (
               <span
                 className={`tab__dot tab__dot--${status}`}
