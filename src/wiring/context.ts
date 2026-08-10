@@ -1,5 +1,6 @@
 import {
   DemoAgentGateway,
+  DemoAppBadge,
   DemoBillingStore,
   DemoCommandCatalog,
   DemoFilePicker,
@@ -18,6 +19,7 @@ import {
 } from "../adapters/demo/demoAdapters";
 import { isTauriRuntime } from "../adapters/tauri/runtime";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
+import { TauriAppBadge } from "../adapters/tauri/tauriAppBadge";
 import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
 import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
@@ -34,6 +36,7 @@ import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
 import { TauriZoom } from "../adapters/tauri/tauriZoom";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
+import type { AppBadgePort } from "../core/ports/appBadgePort";
 import type { McpProbe } from "../core/ports/mcpProbe";
 import type { ProviderProbe } from "../core/ports/providerProbe";
 import type { ShellHistorySource } from "../core/ports/shellHistorySource";
@@ -125,6 +128,8 @@ export interface AppContext {
   ) => Promise<{ output: string; truncated: boolean; exited: boolean } | null>;
   /** Scales the whole interface, driven by the Ctrl+= / Ctrl+- keys. */
   readonly zoom: ZoomPort;
+  /** The app's own icon in the OS: taskbar, dock, launcher. */
+  readonly appBadge: AppBadgePort;
   /** Ids for things the UI creates, e.g. a new MCP server row. */
   readonly newId: () => string;
   /** False when the UI is opened in a plain browser tab (no backend). */
@@ -242,6 +247,7 @@ export function createAppContext(): AppContext {
     readTerminalOutput: (tabId, terminalId) =>
       agentGateway.readTerminalOutput(tabId, terminalId),
     zoom: inTauri ? new TauriZoom() : new DemoZoom(),
+    appBadge: inTauri ? new TauriAppBadge() : new DemoAppBadge(),
     newId,
     runningInTauri: inTauri,
   };

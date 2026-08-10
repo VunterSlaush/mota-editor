@@ -3,6 +3,7 @@
 //! process runner, and workspace persistence.
 
 mod acp_session;
+mod app_badge;
 mod billing_log;
 mod command_discovery;
 mod commands;
@@ -67,6 +68,7 @@ pub fn run() {
             commands::end_session,
             commands::get_terminal_output,
             commands::list_custom_commands,
+            app_badge::set_app_badge,
             commands::open_external,
             commands::open_path,
             commands::save_pasted_image,

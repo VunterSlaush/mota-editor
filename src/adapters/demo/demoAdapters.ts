@@ -1,3 +1,4 @@
+import type { AppBadge } from "../../core/entities/appBadge";
 import type { BilledRequest } from "../../core/entities/billing";
 import type { CommandInfo } from "../../core/entities/command";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
@@ -9,6 +10,7 @@ import type {
   AgentTurnEvent,
   AgentTurnRequest,
 } from "../../core/ports/agentGateway";
+import type { AppBadgePort } from "../../core/ports/appBadgePort";
 import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
 import type {
@@ -838,5 +840,18 @@ export class DemoProviderProbe implements ProviderProbe {
 export class DemoZoom implements ZoomPort {
   async apply(factor: number): Promise<void> {
     document.documentElement.style.zoom = String(factor);
+  }
+}
+
+/**
+ * A browser tab has no taskbar icon to decorate, so the badge goes where
+ * a browser does show it: the document title, the way a webmail counts
+ * unread messages. Enough to see the rule working in the preview.
+ */
+export class DemoAppBadge implements AppBadgePort {
+  private readonly base = document.title;
+
+  async show(badge: AppBadge | null): Promise<void> {
+    document.title = badge === null ? this.base : `(${badge.count}) ${this.base}`;
   }
 }

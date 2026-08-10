@@ -23,6 +23,26 @@ tokio = { version = "1", features = ["process", "io-util", "macros", "rt", "sync
 # elsewhere) — see docs/adr/0009. Nothing else in the app spawns one.
 portable-pty = "0.9"
 
+# macOS draws its own dock badge — a red pill, whatever the state is —
+# so the app-level indicator has to take the dock tile over and paint it
+# itself. That means AppKit, which means these bindings. Both crates are
+# already in the lock file (tao pulls them), and neither is compiled on
+# any other platform. See docs/adr/0010-app-badge.md.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = [
+  "NSApplication",
+  "NSBitmapImageRep",
+  "NSDockTile",
+  "NSGraphics",
+  "NSImage",
+  "NSImageRep",
+  "NSImageView",
+  "NSResponder",
+  "NSView",
+] }
+
 [dev-dependencies]
 # Test-only: billing_log walks a real directory tree, so its tests build one.
 tempfile = "3"

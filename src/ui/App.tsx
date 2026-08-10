@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
 import type { ProviderId } from "../core/entities/provider";
 import { themeById } from "../core/entities/theme";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
@@ -58,6 +59,18 @@ export function App({ context }: { context: AppContext }) {
   useEffect(() => {
     void context.zoom.apply(zoomFactor(zoomLevel)).catch(() => undefined);
   }, [context, zoomLevel]);
+
+  // The taskbar/dock badge — the tab dots, said once for the whole app
+  // so a minimised window can still get your attention. Pushed only when
+  // the badge actually changes: every keystroke of a streaming turn
+  // dispatches, and none of them alter what the icon should say.
+  const badge = useMemo(() => appBadge(state.tabs), [state.tabs]);
+  const shownBadge = useRef<AppBadge | null>(null);
+  useEffect(() => {
+    if (sameBadge(shownBadge.current, badge)) return;
+    shownBadge.current = badge;
+    void context.appBadge.show(badge);
+  }, [context, badge]);
 
   // Ctrl+= / Ctrl+- / Ctrl+0, wherever the caret is: zoom belongs to the
   // window, so a composer with focus must not swallow it.
