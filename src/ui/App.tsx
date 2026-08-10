@@ -55,6 +55,10 @@ export function App({ context }: { context: AppContext }) {
     (provider: ProviderId) => context.providerProbe.probe(provider, projectPath),
     [context, projectPath],
   );
+  const signInProvider = useCallback(
+    (provider: ProviderId) => context.providerProbe.signIn(provider),
+    [context],
+  );
   // Stable identities: these reach memoized transcript rows (ApprovalCard)
   // and a document-level keydown effect; fresh arrows every render would
   // defeat the memo / re-register the listener on every streamed token.
@@ -72,6 +76,11 @@ export function App({ context }: { context: AppContext }) {
   const retryLast = useCallback(
     () => void context.sendPrompt.retryLast(activeProjectId),
     [context, activeProjectId],
+  );
+  const activeProvider = tab?.project.provider;
+  const signInActiveProvider = useCallback(
+    () => void (activeProvider && context.providerProbe.signIn(activeProvider)),
+    [context, activeProvider],
   );
   const readTerminal = useCallback(
     (terminalId: string) => context.readTerminalOutput(activeProjectId, terminalId),
@@ -176,6 +185,7 @@ export function App({ context }: { context: AppContext }) {
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}
           onRetry={retryLast}
+          onSignIn={signInActiveProvider}
           onReadTerminal={readTerminal}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
           onPickFiles={() => context.filePicker.pickFiles()}
@@ -193,6 +203,7 @@ export function App({ context }: { context: AppContext }) {
           onChange={(patch) => void context.updateSettings.execute(patch)}
           loadCommands={loadCommandsFor}
           probeProvider={probeProvider}
+          signInProvider={signInProvider}
           loadInsights={context.loadInsights}
           tabs={state.tabs}
           newId={context.newId}

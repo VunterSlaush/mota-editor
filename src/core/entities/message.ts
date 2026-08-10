@@ -109,6 +109,13 @@ export interface ToolCallState {
   readonly locations: readonly ToolLocation[];
 }
 
+/**
+ * Tag on the one failure the user can always fix themselves. The
+ * transcript turns it into a Sign in button, so the remedy is a click
+ * rather than a trip to Settings or a terminal.
+ */
+export const AUTH_REQUIRED_CONTEXT = "auth-required";
+
 /** Extra context carried by an error message. */
 export interface ErrorInfo {
   /** Machine-readable tag ("agent-exited", "session-not-restored", ...). */
