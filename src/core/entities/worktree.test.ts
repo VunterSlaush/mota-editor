@@ -3,6 +3,7 @@ import {
   defaultContainer,
   deriveBranchName,
   deriveWorktreePath,
+  folderSuggestions,
   provisionPathProblem,
   removalCheck,
   samePath,
@@ -201,5 +202,40 @@ describe("shareRisk", () => {
   it("stays quiet about pure build output", () => {
     expect(shareRisk("src-tauri/target")).toBeUndefined();
     expect(shareRisk("dist")).toBeUndefined();
+  });
+});
+
+describe("folderSuggestions", () => {
+  const FOLDERS = [
+    "docs",
+    "node_modules",
+    "src",
+    "src/ui",
+    "src-tauri",
+    "src-tauri/target",
+  ];
+
+  it("offers the likely-heavy folders first when nothing is typed", () => {
+    expect(folderSuggestions(FOLDERS, "", [])[0]).toBe("node_modules");
+  });
+
+  it("matches what has been typed, anywhere in the path", () => {
+    expect(folderSuggestions(FOLDERS, "target", [])).toEqual(["src-tauri/target"]);
+  });
+
+  it("leaves out folders already on the list", () => {
+    expect(folderSuggestions(FOLDERS, "", ["node_modules"])).not.toContain(
+      "node_modules",
+    );
+  });
+
+  it("ignores the trailing slash and slash style of a listed folder", () => {
+    expect(folderSuggestions(FOLDERS, "", ["src-tauri\\target\\"])).not.toContain(
+      "src-tauri/target",
+    );
+  });
+
+  it("never offers more than the limit", () => {
+    expect(folderSuggestions(FOLDERS, "", [], 2)).toHaveLength(2);
   });
 });

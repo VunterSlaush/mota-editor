@@ -29,6 +29,10 @@ export class TauriWorktreeProvisioning implements WorktreeProvisioning {
     return invoke<boolean>("worktree_supports_cow", { path });
   }
 
+  async folderCandidates(projectPath: string): Promise<string[]> {
+    return invoke<string[]>("worktree_folder_candidates", { projectPath });
+  }
+
   async diskUsage(
     worktreePath: string,
     sharedPaths: readonly string[],

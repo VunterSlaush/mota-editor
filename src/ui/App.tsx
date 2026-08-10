@@ -59,6 +59,10 @@ export function App({ context }: { context: AppContext }) {
     (provider: ProviderId) => context.providerProbe.signIn(provider),
     [context],
   );
+  const loadFolders = useCallback(
+    () => context.worktreeProvisioning.folderCandidates(projectPath),
+    [context, projectPath],
+  );
   // Stable identities: these reach memoized transcript rows (ApprovalCard)
   // and a document-level keydown effect; fresh arrows every render would
   // defeat the memo / re-register the listener on every streamed token.
@@ -220,6 +224,7 @@ export function App({ context }: { context: AppContext }) {
           }}
           newId={context.newId}
           supportsCow={supportsCow}
+          loadFolders={projectPath ? loadFolders : undefined}
           onClose={closeSettings}
         />
       )}

@@ -1,6 +1,11 @@
 import { Plus, Trash } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import type { ProvisionEntry, ProvisionStrategy } from "../../core/entities/worktree";
-import { provisionPathProblem, shareRisk } from "../../core/entities/worktree";
+import {
+  folderSuggestions,
+  provisionPathProblem,
+  shareRisk,
+} from "../../core/entities/worktree";
 import type { AppSettings } from "../../core/state/appState";
 import { OptionPicker } from "./OptionPicker";
 
@@ -12,6 +17,12 @@ interface Props {
    * Null while unknown — the wording then promises nothing either way.
    */
   supportsCow?: boolean | null;
+  /**
+   * The project's folders, for the path suggestions. Must be stable
+   * across renders — it is an effect's dependency. Omitted with no
+   * project open, and the inputs then take a typed path as before.
+   */
+  loadFolders?: () => Promise<string[]>;
 }
 
 /**
@@ -19,22 +30,44 @@ interface Props {
  * remote-only branch comes from, what a worktree tab inherits, and how
  * the heavy folders git does not carry get stocked.
  */
-export function SettingsWorktrees({ settings, onChange, supportsCow = null }: Props) {
+export function SettingsWorktrees({
+  settings,
+  onChange,
+  supportsCow = null,
+  loadFolders,
+}: Props) {
   const worktrees = settings.worktrees;
   const patch = (changes: Partial<AppSettings["worktrees"]>) =>
     onChange({ worktrees: { ...worktrees, ...changes } });
 
-  // A folder is named once, so its path is its identity. `add` refuses a
-  // second blank row for the same reason: two rows with no path yet are
-  // indistinguishable to the reader and to React.
+  // Rows are addressed by position, not by path: a path being typed
+  // changes on every keystroke, and a row that changes identity mid-word
+  // is remounted by React and loses the caret.
   const entries = worktrees.provisioning;
   const replace = (next: readonly ProvisionEntry[]) => patch({ provisioning: next });
-  const update = (path: string, changes: Partial<ProvisionEntry>) =>
-    replace(entries.map((e) => (e.path === path ? { ...e, ...changes } : e)));
+  const update = (index: number, changes: Partial<ProvisionEntry>) =>
+    replace(entries.map((e, i) => (i === index ? { ...e, ...changes } : e)));
+  // A second blank row would be indistinguishable from the first.
   const add = () => {
     if (entries.some((e) => !e.path.trim())) return;
     replace([...entries, { path: "", strategy: "clone" }]);
   };
+
+  // Read once per opening of this section: a folder scan is disk work,
+  // and the answer does not change while someone types into it.
+  const [candidates, setCandidates] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (!loadFolders) return;
+    let cancelled = false;
+    loadFolders()
+      .then((folders) => {
+        if (!cancelled) setCandidates(folders);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadFolders]);
 
   return (
     <div className="settings-section">
@@ -94,32 +127,32 @@ export function SettingsWorktrees({ settings, onChange, supportsCow = null }: Pr
         </p>
       )}
 
-      {entries.map((entry) => {
+      {entries.map((entry, index) => {
         const warning = rowWarning(entry, entries);
         return (
-          <div className="worktree-path-row" key={entry.path}>
-            <input
-              className="settings-input"
-              placeholder="Folder, relative to the repository (e.g. node_modules)"
+          // biome-ignore lint/suspicious/noArrayIndexKey: position is the row's identity
+          <div className="worktree-path-row" key={index}>
+            <FolderInput
               value={entry.path}
-              onChange={(e) => update(entry.path, { path: e.target.value })}
+              candidates={candidates}
+              taken={entries.filter((_, i) => i !== index).map((e) => e.path)}
+              onChange={(path) => update(index, { path })}
             />
             <div className="worktree-path-row__side">
               <OptionPicker
                 ariaLabel={`How to prepare ${entry.path || "this folder"}`}
                 placement="bottom"
+                align="end"
                 disabled={false}
                 value={entry.strategy}
                 options={strategyOptions(supportsCow)}
-                onChange={(strategy: ProvisionStrategy) =>
-                  update(entry.path, { strategy })
-                }
+                onChange={(strategy: ProvisionStrategy) => update(index, { strategy })}
               />
               <button
                 type="button"
                 className="tool-row__remove"
                 aria-label={`Stop preparing ${entry.path || "this folder"}`}
-                onClick={() => replace(entries.filter((e) => e.path !== entry.path))}
+                onClick={() => replace(entries.filter((_, i) => i !== index))}
               >
                 <Trash size={14} />
               </button>
@@ -132,6 +165,90 @@ export function SettingsWorktrees({ settings, onChange, supportsCow = null }: Pr
       <button type="button" className="tool-add" onClick={add}>
         <Plus size={14} /> Add a folder
       </button>
+    </div>
+  );
+}
+
+/**
+ * UI — a folder path with the project's own folders offered underneath,
+ * the composer's "@" menu wearing settings clothes: the same substring
+ * match, the same arrows-and-Enter, the same mousedown that picks
+ * without stealing focus first.
+ */
+function FolderInput({
+  value,
+  candidates,
+  taken,
+  onChange,
+}: {
+  value: string;
+  candidates: readonly string[];
+  taken: readonly string[];
+  onChange: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const suggestions = open ? folderSuggestions(candidates, value, taken) : [];
+
+  const pick = (path: string) => {
+    onChange(path);
+    setOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape" && open) {
+      e.preventDefault();
+      setOpen(false);
+    } else if (suggestions.length === 0) {
+      return;
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      setHighlighted((highlighted + delta + suggestions.length) % suggestions.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      pick(suggestions[Math.min(highlighted, suggestions.length - 1)]);
+    }
+  };
+
+  return (
+    <div className="folder-suggest">
+      <input
+        className="settings-input"
+        placeholder="Folder, relative to the repository (e.g. node_modules)"
+        value={value}
+        autoComplete="off"
+        aria-expanded={suggestions.length > 0}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setHighlighted(0);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
+      />
+      {suggestions.length > 0 && (
+        <div className="folder-suggest__menu" role="listbox" aria-label="Project folders">
+          {suggestions.map((path, index) => (
+            <div
+              key={path}
+              role="option"
+              aria-selected={index === highlighted}
+              className={`folder-suggest__item ${
+                index === highlighted ? "folder-suggest__item--selected" : ""
+              }`}
+              onMouseEnter={() => setHighlighted(index)}
+              onMouseDown={(e) => {
+                e.preventDefault(); // pick without blurring the input first
+                pick(path);
+              }}
+            >
+              {path}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

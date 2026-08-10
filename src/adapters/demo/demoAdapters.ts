@@ -489,6 +489,18 @@ export class DemoWorktreeProvisioning implements WorktreeProvisioning {
     return true;
   }
 
+  async folderCandidates() {
+    return [
+      "docs",
+      "node_modules",
+      "src",
+      "src/core",
+      "src/ui",
+      "src-tauri",
+      "src-tauri/target",
+    ];
+  }
+
   async diskUsage(): Promise<DiskUsage> {
     return {
       ownBytes: 2_100_000,

@@ -175,6 +175,9 @@ class FakeProvisioning implements WorktreeProvisioning {
   async supportsCow() {
     return true;
   }
+  async folderCandidates() {
+    return [];
+  }
   async diskUsage() {
     return {
       ownBytes: 0,
@@ -366,9 +369,22 @@ describe("Worktrees.create", () => {
 });
 
 describe("Worktrees provisioning", () => {
+  /** Nothing is provisioned by default, so these tests say what is. */
   async function created() {
     const made = setup();
     made.git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    made.store.dispatch({
+      type: "settings/changed",
+      patch: {
+        worktrees: {
+          ...defaultSettings.worktrees,
+          provisioning: [
+            { path: "node_modules", strategy: "clone" },
+            { path: "src-tauri/target", strategy: "skip" },
+          ],
+        },
+      },
+    });
     return made;
   }
 
@@ -380,7 +396,7 @@ describe("Worktrees provisioning", () => {
     expect(provisioning.calls).toHaveLength(1);
     expect(provisioning.calls[0].mainPath).toBe("C:/repos/app");
     expect(provisioning.calls[0].worktreePath).toBe(git.added[0].path);
-    // src-tauri/target defaults to skip, so only node_modules is asked for.
+    // src-tauri/target is set to skip, so only node_modules is asked for.
     expect(provisioning.calls[0].paths).toEqual(["node_modules"]);
   });
 

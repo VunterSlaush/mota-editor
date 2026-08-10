@@ -90,6 +90,7 @@ pub fn run() {
             worktree::worktree_unprovision,
             worktree::worktree_supports_cow,
             worktree::worktree_disk_usage,
+            worktree::worktree_folder_candidates,
             commands::load_workspace,
             commands::save_workspace,
             history_file::save_session,
