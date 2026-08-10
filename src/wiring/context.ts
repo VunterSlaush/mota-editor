@@ -9,6 +9,7 @@ import {
   DemoNotifications,
   DemoPastedImageStore,
   DemoProviderProbe,
+  DemoShell,
   DemoTranscriptStore,
   DemoWorkspaceStore,
   DemoWorktreeProvisioning,
@@ -24,12 +25,14 @@ import { TauriMcpProbe } from "../adapters/tauri/tauriMcpProbe";
 import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
 import { TauriPastedImageStore } from "../adapters/tauri/tauriPastedImageStore";
 import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
+import { TauriShell } from "../adapters/tauri/tauriShell";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
 import type { McpProbe } from "../core/ports/mcpProbe";
 import type { ProviderProbe } from "../core/ports/providerProbe";
+import type { ShellPort } from "../core/ports/shellPort";
 import type { FilePicker, PastedImageStore } from "../core/ports/workspacePort";
 import type { WorktreeProvisioning } from "../core/ports/worktreeProvisioning";
 import { Store } from "../core/state/store";
@@ -51,6 +54,7 @@ import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
 import { ScopeMcpServer } from "../core/usecases/scopeMcpServer";
 import { SendPrompt } from "../core/usecases/sendPrompt";
 import { SessionStatus } from "../core/usecases/sessionStatus";
+import { Shells } from "../core/usecases/shells";
 import {
   SelectEffort,
   SelectMode,
@@ -99,6 +103,8 @@ export interface AppContext {
   readonly respondQuestion: RespondQuestion;
   readonly listCommands: ListCommands;
   readonly listProjectFiles: ListProjectFiles;
+  /** The user's terminals — the panel opens, feeds, and closes them. */
+  readonly shells: Shells;
   /** Historical usage report for the settings Insights section. */
   readonly loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
   readonly providerProbe: ProviderProbe;
@@ -132,6 +138,7 @@ export function createAppContext(): AppContext {
   const billingStore = inTauri ? new TauriBillingStore() : new DemoBillingStore();
   const mcpProbe = inTauri ? new TauriMcpProbe() : new DemoMcpProbe();
   const notifications = inTauri ? new TauriNotifications() : new DemoNotifications();
+  const shellPort: ShellPort = inTauri ? new TauriShell() : new DemoShell();
   const worktreeProvisioning = inTauri
     ? new TauriWorktreeProvisioning()
     : new DemoWorktreeProvisioning();
@@ -145,7 +152,7 @@ export function createAppContext(): AppContext {
   // the toolbar drives, so both routes persist and restart identically.
   // Removing a worktree closes its tab, and closing a tab is exactly
   // what CloseProject does — so it is shared rather than reimplemented.
-  const closeProject = new CloseProject(store, agentGateway, workspaceStore);
+  const closeProject = new CloseProject(store, agentGateway, workspaceStore, shellPort);
   const selectMode = new SelectMode(store, workspaceStore);
   const selectPermission = new SelectPermission(store, workspaceStore);
   const selectEffort = new SelectEffort(store, workspaceStore, agentGateway);
@@ -212,6 +219,7 @@ export function createAppContext(): AppContext {
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
     listProjectFiles: new ListProjectFiles(store, gitPort),
+    shells: new Shells(store, shellPort),
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),

@@ -47,6 +47,8 @@ export interface PersistedSettings {
   readonly theme?: string;
   /** Partial too: a field added after this file was written is defaulted. */
   readonly worktrees?: Partial<WorktreeSettings>;
+  readonly terminalShell?: string;
+  readonly terminalFontSize?: number;
 }
 
 export interface PersistedWorkspace {

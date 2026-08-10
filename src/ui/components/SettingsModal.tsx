@@ -5,6 +5,7 @@ import {
   Palette,
   PlugsConnected,
   Sliders,
+  Terminal,
   TerminalWindow,
   Toolbox,
   X,
@@ -20,6 +21,7 @@ import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsInsights } from "./SettingsInsights";
 import { SettingsProviders } from "./SettingsProviders";
+import { SettingsTerminal } from "./SettingsTerminal";
 import { SettingsTheme } from "./SettingsTheme";
 import { SettingsTools } from "./SettingsTools";
 import { SettingsUsage } from "./SettingsUsage";
@@ -31,6 +33,7 @@ export type SettingsSection =
   | "tools"
   | "providers"
   | "worktrees"
+  | "terminal"
   | "usage"
   | "insights"
   | "theme";
@@ -63,6 +66,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
     { id: "tools", label: "Tools", Icon: Toolbox },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
     { id: "worktrees", label: "Worktrees", Icon: GitFork },
+    { id: "terminal", label: "Terminal", Icon: Terminal },
     { id: "usage", label: "Usage", Icon: Gauge },
     { id: "insights", label: "Insights", Icon: ChartBar },
     { id: "theme", label: "Theme", Icon: Palette },
@@ -154,6 +158,9 @@ export function SettingsModal({
               onChange={onChange}
               supportsCow={supportsCow}
             />
+          )}
+          {section === "terminal" && (
+            <SettingsTerminal settings={settings} onChange={onChange} />
           )}
           {section === "usage" && (
             <SettingsUsage settings={settings} onChange={onChange} tabs={tabs} />

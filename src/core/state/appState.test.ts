@@ -373,4 +373,42 @@ describe("tab/planMarkdownUpdated", () => {
     expect(tab.plan).toEqual([]); // stale checklist must not shadow the new plan
     expect(tab.planFilePath).toBeUndefined(); // A's file must not resurrect on reopen
   });
+
+  describe("terminals", () => {
+    const withShell = (state: AppState, id: string, title: string) =>
+      reduce(state, { type: "shell/opened", tabId: "t1", session: { id, title } });
+
+    it("ignores a selection of a terminal that is not there", () => {
+      let state = open(initialState, "t1", "/a");
+      state = withShell(state, "s1", "Terminal 1");
+      state = reduce(state, { type: "shell/selected", tabId: "t1", sessionId: "gone" });
+      expect(state.tabs[0].activeShellId).toBe("s1");
+    });
+
+    it("keeps the first exit, so a kill cannot overwrite the real status", () => {
+      let state = open(initialState, "t1", "/a");
+      state = withShell(state, "s1", "Terminal 1");
+      state = reduce(state, {
+        type: "shell/exited",
+        tabId: "t1",
+        sessionId: "s1",
+        code: 1,
+      });
+      state = reduce(state, {
+        type: "shell/exited",
+        tabId: "t1",
+        sessionId: "s1",
+        code: null,
+      });
+      expect(state.tabs[0].shells[0].exit).toEqual({ code: 1 });
+    });
+
+    it("keeps each project's terminals to itself", () => {
+      let state = open(initialState, "t1", "/a");
+      state = open(state, "t2", "/b");
+      state = withShell(state, "s1", "Terminal 1");
+      expect(state.tabs[0].shells).toHaveLength(1);
+      expect(state.tabs[1].shells).toEqual([]);
+    });
+  });
 });

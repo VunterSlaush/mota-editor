@@ -13,6 +13,7 @@ pub mod event;
 pub mod mcp;
 pub mod provider;
 pub mod providers;
+pub mod shell;
 pub mod turn;
 pub mod vcs;
 pub mod worktree;

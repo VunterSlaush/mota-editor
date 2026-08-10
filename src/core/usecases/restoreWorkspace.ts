@@ -43,6 +43,8 @@ export class RestoreWorkspace {
       queued: [],
       agentCommands: [],
       plan: [],
+      // Never restored: a pty cannot outlive the process that owned it.
+      shells: [],
     }));
 
     const activeTabId =
@@ -75,6 +77,8 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     autoCompact: persisted?.autoCompact ?? defaultSettings.autoCompact,
     theme: persisted?.theme ?? defaultSettings.theme,
     worktrees: restoredWorktrees(persisted?.worktrees),
+    terminalShell: persisted?.terminalShell ?? defaultSettings.terminalShell,
+    terminalFontSize: persisted?.terminalFontSize ?? defaultSettings.terminalFontSize,
   };
 }
 

@@ -1,4 +1,4 @@
-import { GitBranch, GitFork, NotePencil } from "@phosphor-icons/react";
+import { GitBranch, GitFork, NotePencil, TerminalWindow } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
 import { type CommandInfo, commandNames } from "../../core/entities/command";
@@ -7,10 +7,12 @@ import { providerById } from "../../core/entities/provider";
 import { agentEditedFiles, countFileChangingTools } from "../../core/entities/tool";
 import type { RemovalCheck } from "../../core/entities/worktree";
 import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
+import type { ShellSize } from "../../core/ports/shellPort";
 import type { TabState } from "../../core/state/appState";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryListing } from "../../core/usecases/history";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
+import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { useDragWidth } from "../useDragWidth";
 import { ActivityBar, type SidebarView } from "./ActivityBar";
@@ -24,7 +26,28 @@ import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
 import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
+import { TerminalPanel } from "./TerminalPanel";
 import { WorktreePicker } from "./WorktreePicker";
+
+/**
+ * Which panel occupies the right-hand column. One at a time: two
+ * resizable columns beside a chat leaves the chat with nothing.
+ */
+export type RightPanel = "plan" | "terminal" | null;
+
+/**
+ * What the terminal panel needs from outside, bundled — this component
+ * already takes more props than it should, and a terminal is six more.
+ */
+export interface ShellsView {
+  readonly fontSize: number;
+  readonly theme: string;
+  readonly open: (request: OpenShellRequest) => Promise<OpenShellResult>;
+  readonly write: (sessionId: string, data: string) => void;
+  readonly resize: (sessionId: string, size: ShellSize) => void;
+  readonly select: (sessionId: string) => void;
+  readonly close: (sessionId: string) => void;
+}
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
 const GIT_RELOAD_DEBOUNCE_MS = 400;
@@ -53,6 +76,11 @@ interface Props {
   autoCompactThreshold: number;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
+  /** Which right-hand panel is showing. Lifted for the same reason
+   *  `sidebarView` is: this component remounts on every project switch. */
+  rightPanel: RightPanel;
+  onSelectRightPanel: (panel: RightPanel) => void;
+  shells: ShellsView;
   onOpenSettings: () => void;
   /** Resolves with the instant local listing; `onRefresh` delivers the
    *  merged native listing later, when a live agent could be asked. */
@@ -120,6 +148,9 @@ export function ChatPanel({
   tab,
   autoCompactThreshold,
   sidebarView,
+  onSelectRightPanel,
+  rightPanel,
+  shells,
   onSelectSidebarView,
   onOpenSettings,
   loadHistory,
@@ -174,16 +205,24 @@ export function ChatPanel({
   const [historyLoading, setHistoryLoading] = useState(false);
   const sidebar = useDragWidth(270, 180, 520);
   const planPanel = useDragWidth(420, 280, 760, "left");
+  const terminalPanel = useDragWidth(520, 320, 900, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [worktreePickerOpen, setWorktreePickerOpen] = useState(false);
-  const [planOpen, setPlanOpen] = useState(false);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
 
   // Reaches memoized transcript rows — must not be a fresh arrow per render.
-  const showPlan = useCallback(() => setPlanOpen(true), []);
+  const showPlan = useCallback(() => onSelectRightPanel("plan"), [onSelectRightPanel]);
+  const closeRightPanel = useCallback(
+    () => onSelectRightPanel(null),
+    [onSelectRightPanel],
+  );
+  const toggleTerminal = useCallback(
+    () => onSelectRightPanel(rightPanel === "terminal" ? null : "terminal"),
+    [onSelectRightPanel, rightPanel],
+  );
   const showAgentDiff = useCallback(
     (diff: { path: string; oldText?: string; newText: string }) =>
       setDiffTarget({ kind: "agent", ...diff }),
@@ -279,6 +318,19 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarView, tab.busy, tab.project.id]);
 
+  // Ctrl+` — the binding every editor uses for this. Registered here
+  // rather than in a global map because the app has no shortcut registry
+  // and one panel does not justify inventing one.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "`" || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+      e.preventDefault();
+      toggleTerminal();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [toggleTerminal]);
+
   return (
     <main className="chat-panel">
       <div className="chat-panel__header">
@@ -351,6 +403,16 @@ export function ChatPanel({
             />
             <span className="switch" aria-hidden="true" />
           </label>
+          <button
+            type="button"
+            className={`icon-button ${rightPanel === "terminal" ? "icon-button--on" : ""}`}
+            aria-label="Terminal"
+            aria-pressed={rightPanel === "terminal"}
+            title="Terminal (Ctrl+`)"
+            onClick={toggleTerminal}
+          >
+            <TerminalWindow size={16} />
+          </button>
           <ProviderPicker
             value={tab.project.provider}
             disabled={tab.busy}
@@ -487,23 +549,40 @@ export function ChatPanel({
             pendingSpec={tab.pendingSpec}
           />
         </div>
-        {planOpen && (
-          <>
-            <div
-              className="panel-resizer"
-              role="separator"
-              aria-orientation="vertical"
-              title="Drag to resize"
-              onPointerDown={planPanel.startResize}
-            />
-            <PlanSidePanel
-              plan={tab.plan}
-              planMarkdown={tab.planMarkdown}
-              width={planPanel.width}
-              onExpand={() => setPlanModalOpen(true)}
-              onClose={() => setPlanOpen(false)}
-            />
-          </>
+        {rightPanel && (
+          <div
+            className="panel-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize"
+            onPointerDown={
+              rightPanel === "plan" ? planPanel.startResize : terminalPanel.startResize
+            }
+          />
+        )}
+        {rightPanel === "plan" && (
+          <PlanSidePanel
+            plan={tab.plan}
+            planMarkdown={tab.planMarkdown}
+            width={planPanel.width}
+            onExpand={() => setPlanModalOpen(true)}
+            onClose={closeRightPanel}
+          />
+        )}
+        {rightPanel === "terminal" && (
+          <TerminalPanel
+            sessions={tab.shells}
+            activeShellId={tab.activeShellId}
+            width={terminalPanel.width}
+            fontSize={shells.fontSize}
+            theme={shells.theme}
+            onOpen={shells.open}
+            onWrite={shells.write}
+            onResize={shells.resize}
+            onSelect={shells.select}
+            onClose={shells.close}
+            onClosePanel={closeRightPanel}
+          />
         )}
       </div>
       {planModalOpen && (

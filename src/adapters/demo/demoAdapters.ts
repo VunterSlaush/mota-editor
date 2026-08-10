@@ -24,6 +24,11 @@ import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
 import type { NotificationPort } from "../../core/ports/notificationPort";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
 import type {
+  ShellOpenRequest,
+  ShellPort,
+  ShellStream,
+} from "../../core/ports/shellPort";
+import type {
   PersistedTranscript,
   TranscriptMeta,
   TranscriptStore,
@@ -651,6 +656,90 @@ export class DemoBillingStore implements BillingStore {
 
 export class DemoNotifications implements NotificationPort {
   async turnCompleted(): Promise<void> {}
+}
+
+/**
+ * Browser demo — a shell that cannot run anything, but answers. Enough
+ * to drive the panel end to end (echo, prompt, exit, close) without a
+ * pty, so the port stays honest outside Tauri.
+ */
+export class DemoShell implements ShellPort {
+  private readonly streams = new Map<string, ShellStream>();
+  private readonly lines = new Map<string, string>();
+  private readonly prompts = new Map<string, string>();
+  private nextId = 1;
+
+  async open(request: ShellOpenRequest, stream: ShellStream): Promise<string> {
+    const sessionId = `demo-shell-${this.nextId++}`;
+    this.streams.set(sessionId, stream);
+    this.lines.set(sessionId, "");
+    this.prompts.set(sessionId, `\x1b[36m${request.cwd || "demo"}\x1b[0m $ `);
+    await delay(120);
+    this.say(
+      sessionId,
+      "Browser preview — this terminal is a stand-in and runs nothing.\r\n" +
+        "Run \x1b[1mnpm run tauri dev\x1b[0m for a real shell.\r\n\r\n",
+    );
+    this.prompt(sessionId);
+    return sessionId;
+  }
+
+  async write(sessionId: string, data: string): Promise<void> {
+    for (const char of data) this.type(sessionId, char);
+  }
+
+  async resize(): Promise<void> {}
+
+  async close(sessionId: string): Promise<void> {
+    this.streams.delete(sessionId);
+    this.lines.delete(sessionId);
+    this.prompts.delete(sessionId);
+  }
+
+  async closeProject(): Promise<void> {}
+
+  /** Line discipline, by hand: a pty would normally do the echoing. */
+  private type(sessionId: string, char: string): void {
+    const line = this.lines.get(sessionId);
+    if (line === undefined) return;
+    if (char === "\r") {
+      this.say(sessionId, "\r\n");
+      this.run(sessionId, line.trim());
+      return;
+    }
+    if (char === "\x7f" || char === "\b") {
+      if (line.length === 0) return;
+      this.lines.set(sessionId, line.slice(0, -1));
+      this.say(sessionId, "\b \b");
+      return;
+    }
+    if (char < " ") return; // control keys do nothing here
+    this.lines.set(sessionId, line + char);
+    this.say(sessionId, char);
+  }
+
+  private run(sessionId: string, command: string): void {
+    this.lines.set(sessionId, "");
+    if (command === "exit") {
+      this.streams.get(sessionId)?.onExit(0);
+      this.streams.delete(sessionId);
+      return;
+    }
+    if (command === "clear") this.say(sessionId, "\x1b[2J\x1b[H");
+    else if (command === "help")
+      this.say(sessionId, "Known here: help, clear, exit. Nothing else runs.\r\n");
+    else if (command !== "")
+      this.say(sessionId, `${command}: not available in the browser preview\r\n`);
+    this.prompt(sessionId);
+  }
+
+  private prompt(sessionId: string): void {
+    this.say(sessionId, this.prompts.get(sessionId) ?? "$ ");
+  }
+
+  private say(sessionId: string, text: string): void {
+    this.streams.get(sessionId)?.onOutput(new TextEncoder().encode(text));
+  }
 }
 
 /** Browser demo — a plausible inventory so the Tools screen has numbers. */

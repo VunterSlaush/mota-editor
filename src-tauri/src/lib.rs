@@ -12,6 +12,7 @@ mod history_file;
 mod provider_probe;
 mod runner;
 mod shell_env;
+mod shell_session;
 mod sign_in;
 mod terminal;
 mod workspace_file;
@@ -19,6 +20,7 @@ mod worktree;
 
 use acp_session::AcpSessions;
 use commands::RunningTurns;
+use shell_session::ShellSessions;
 
 pub fn run() {
     // Before anything resolves a program name: a Finder-launched macOS
@@ -51,6 +53,7 @@ pub fn run() {
         .manage(RunningTurns::default())
         .manage(AcpSessions::default())
         .manage(worktree::Provisioning::default())
+        .manage(ShellSessions::default())
         .invoke_handler(tauri::generate_handler![
             commands::start_turn,
             commands::warm_session,
@@ -90,6 +93,11 @@ pub fn run() {
             worktree::worktree_unprovision,
             worktree::worktree_supports_cow,
             worktree::worktree_disk_usage,
+            shell_session::shell_open,
+            shell_session::shell_write,
+            shell_session::shell_resize,
+            shell_session::shell_close,
+            shell_session::shell_close_project,
             commands::load_workspace,
             commands::save_workspace,
             history_file::save_session,
@@ -112,6 +120,9 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 use tauri::Manager;
                 app.state::<AcpSessions>().shutdown_all();
+                // The user's terminals too — a shell tree survives the
+                // window closing unless it is felled deliberately.
+                app.state::<ShellSessions>().kill_all();
             }
         });
 }

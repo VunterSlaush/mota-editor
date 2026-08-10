@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ProviderId } from "../core/entities/provider";
 import { themeById } from "../core/entities/theme";
+import type { ShellSize } from "../core/ports/shellPort";
 import { activeTab } from "../core/state/appState";
+import type { OpenShellRequest } from "../core/usecases/shells";
 import type { AppContext } from "../wiring/context";
 import type { SidebarView } from "./components/ActivityBar";
+import type { RightPanel, ShellsView } from "./components/ChatPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { EmptyState } from "./components/EmptyState";
 import { SettingsModal } from "./components/SettingsModal";
@@ -19,6 +22,9 @@ export function App({ context }: { context: AppContext }) {
   const state = useAppState(context.store);
   const tab = activeTab(state);
   const [sidebarView, setSidebarView] = useState<SidebarView | null>("changes");
+  // Above ChatPanel, which is keyed by project id: a terminal must still
+  // be showing when you come back from another project.
+  const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [supportsCow, setSupportsCow] = useState<boolean | null>(null);
   const projectPath = tab?.project.path ?? "";
@@ -88,6 +94,24 @@ export function App({ context }: { context: AppContext }) {
   );
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
+  // Stable identity: these reach a component that creates and holds live
+  // xterm instances in effects, and a fresh object every render would
+  // tear the terminal down and rebuild it on every streamed token.
+  const { terminalFontSize, theme } = state.settings;
+  const shells: ShellsView = useMemo(
+    () => ({
+      fontSize: terminalFontSize,
+      theme,
+      open: (request: OpenShellRequest) => context.shells.open(activeProjectId, request),
+      write: (sessionId: string, data: string) => context.shells.write(sessionId, data),
+      resize: (sessionId: string, size: ShellSize) =>
+        context.shells.resize(sessionId, size),
+      select: (sessionId: string) => context.shells.select(activeProjectId, sessionId),
+      close: (sessionId: string) => void context.shells.close(activeProjectId, sessionId),
+    }),
+    [context, activeProjectId, terminalFontSize, theme],
+  );
+
   return (
     <div className="app">
       {!context.runningInTauri && (
@@ -112,6 +136,9 @@ export function App({ context }: { context: AppContext }) {
           autoCompactThreshold={state.settings.autoCompactThreshold}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
+          rightPanel={rightPanel}
+          onSelectRightPanel={setRightPanel}
+          shells={shells}
           onOpenSettings={() => setSettingsOpen(true)}
           loadHistory={(onRefresh) =>
             context.sessionHistory.list(tab.project.id, onRefresh)

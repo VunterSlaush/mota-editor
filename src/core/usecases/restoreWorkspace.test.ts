@@ -56,6 +56,8 @@ const CUSTOM_SETTINGS: AppSettings = {
     inheritFromSourceTab: !defaultSettings.worktrees.inheritFromSourceTab,
   },
   theme: "mota-light",
+  terminalShell: "/bin/zsh",
+  terminalFontSize: 15,
 };
 
 /**
