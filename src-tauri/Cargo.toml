@@ -19,6 +19,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 tokio = { version = "1", features = ["process", "io-util", "macros", "rt", "sync", "time"] }
+# The user's terminal needs a real pty (ConPTY on Windows, openpty
+# elsewhere) — see docs/adr/0009. Nothing else in the app spawns one.
+portable-pty = "0.9"
 
 [dev-dependencies]
 # Test-only: billing_log walks a real directory tree, so its tests build one.

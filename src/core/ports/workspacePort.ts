@@ -48,6 +48,9 @@ export interface PersistedSettings {
   readonly zoomLevel?: number;
   /** Partial too: a field added after this file was written is defaulted. */
   readonly worktrees?: Partial<WorktreeSettings>;
+  readonly terminalShell?: string;
+  readonly terminalFontSize?: number;
+  readonly terminalSuggestions?: boolean;
 }
 
 export interface PersistedWorkspace {

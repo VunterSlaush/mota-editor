@@ -18,6 +18,8 @@ import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
 import type { ProviderId } from "../entities/provider";
 import { DEFAULT_PROVIDER } from "../entities/provider";
+import type { ShellSession } from "../entities/shellSession";
+import { shellAfterClosing } from "../entities/shellSession";
 import type { WorktreeSettings } from "../entities/worktree";
 import { defaultWorktreeSettings } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
@@ -100,6 +102,17 @@ export interface TabState {
   /** The project's current git branch, cached from the last git read —
    *  tooltips read this instead of asking git on every hover. */
   readonly branch?: string;
+  /**
+   * The terminals open in this project.
+   *
+   * Here rather than in the panel's own React state because switching
+   * projects remounts the view, and a remount must not silently kill a
+   * running build. Only the lifecycle lives here: a terminal's *output*
+   * never touches the store, or every frame of a build log would
+   * re-render the app.
+   */
+  readonly shells: readonly ShellSession[];
+  readonly activeShellId?: string;
 }
 
 /**
@@ -134,6 +147,15 @@ export interface AppSettings {
   readonly zoomLevel: number;
   /** Where worktrees go, how they are stocked, what their tabs inherit. */
   readonly worktrees: WorktreeSettings;
+  /**
+   * The shell the terminal panel runs. A program path — `pwsh`, a Git
+   * Bash `bash.exe`, `/bin/zsh` — never a command line. Empty means the
+   * platform default (see `agent_core::shell`).
+   */
+  readonly terminalShell: string;
+  readonly terminalFontSize: number;
+  /** Greyed-out completions in the terminal, from the user's history. */
+  readonly terminalSuggestions: boolean;
 }
 
 export interface AppState {
@@ -158,6 +180,9 @@ export const defaultSettings: AppSettings = {
   theme: "mota-dark",
   zoomLevel: DEFAULT_ZOOM_LEVEL,
   worktrees: defaultWorktreeSettings,
+  terminalShell: "",
+  terminalFontSize: 13,
+  terminalSuggestions: true,
 };
 
 export const initialState: AppState = {
@@ -287,7 +312,13 @@ export type Action =
       tabId: string;
       provider: ProviderId;
       sessionId: string;
-    };
+    }
+  | { type: "shell/opened"; tabId: string; session: ShellSession }
+  | { type: "shell/selected"; tabId: string; sessionId: string }
+  /** The shell died on its own — a `exit` typed, or a crash. */
+  | { type: "shell/exited"; tabId: string; sessionId: string; code: number | null }
+  /** The user dismissed the terminal; the pty is killed either way. */
+  | { type: "shell/closed"; tabId: string; sessionId: string };
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -311,6 +342,7 @@ export function reduce(state: AppState, action: Action): AppState {
         queued: [],
         agentCommands: [],
         plan: [],
+        shells: [],
       };
       return { ...state, tabs: [...state.tabs, tab], activeTabId: action.project.id };
     }
@@ -653,6 +685,46 @@ export function reduce(state: AppState, action: Action): AppState {
           },
         },
       }));
+
+    case "shell/opened":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        shells: [...tab.shells, action.session],
+        activeShellId: action.session.id,
+      }));
+
+    case "shell/selected":
+      return mapTab(state, action.tabId, (tab) =>
+        tab.shells.some((s) => s.id === action.sessionId)
+          ? { ...tab, activeShellId: action.sessionId }
+          : tab,
+      );
+
+    case "shell/exited":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        shells: tab.shells.map((s) =>
+          // First exit wins: a kill racing the shell's own exit must not
+          // overwrite the status the user is looking at.
+          s.id === action.sessionId && !s.exit
+            ? { ...s, exit: { code: action.code } }
+            : s,
+        ),
+      }));
+
+    case "shell/closed":
+      return mapTab(state, action.tabId, (tab) => {
+        const { activeShellId: _, ...rest } = tab;
+        const selected =
+          tab.activeShellId === action.sessionId
+            ? shellAfterClosing(tab.shells, action.sessionId)
+            : tab.activeShellId;
+        return {
+          ...rest,
+          shells: tab.shells.filter((s) => s.id !== action.sessionId),
+          ...(selected === undefined ? {} : { activeShellId: selected }),
+        };
+      });
   }
 }
 
