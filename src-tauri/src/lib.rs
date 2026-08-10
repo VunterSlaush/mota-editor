@@ -93,6 +93,7 @@ pub fn run() {
             worktree::worktree_unprovision,
             worktree::worktree_supports_cow,
             worktree::worktree_disk_usage,
+            worktree::worktree_folder_candidates,
             shell_session::shell_open,
             shell_session::shell_write,
             shell_session::shell_resize,

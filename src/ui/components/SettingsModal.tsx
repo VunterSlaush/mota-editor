@@ -56,6 +56,8 @@ interface Props {
   newId: () => string;
   /** Whether this disk clones; null until the probe answers. */
   supportsCow: boolean | null;
+  /** The active project's folders, for the Worktrees path suggestions. */
+  loadFolders?: () => Promise<string[]>;
   onClose: () => void;
 }
 
@@ -90,6 +92,7 @@ export function SettingsModal({
   onScopeMcpServer,
   newId,
   supportsCow,
+  loadFolders,
   onClose,
 }: Props) {
   const [section, setSection] = useState<SettingsSection>("defaults");
@@ -157,6 +160,7 @@ export function SettingsModal({
               settings={settings}
               onChange={onChange}
               supportsCow={supportsCow}
+              loadFolders={loadFolders}
             />
           )}
           {section === "terminal" && (

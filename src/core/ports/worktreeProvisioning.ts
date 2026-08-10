@@ -55,6 +55,13 @@ export interface WorktreeProvisioning {
   unprovision(worktreePath: string, paths: readonly string[]): Promise<string[]>;
   /** Whether this disk copies without duplicating the bytes. */
   supportsCow(path: string): Promise<boolean>;
+  /**
+   * Folders inside a project that could be provisioned, repo-relative —
+   * what the settings section offers as suggestions. Read off the disk
+   * rather than from git, because the folders worth naming are the ones
+   * git ignores.
+   */
+  folderCandidates(projectPath: string): Promise<string[]>;
   /** Size on disk, with the shared folders counted apart. */
   diskUsage(worktreePath: string, sharedPaths: readonly string[]): Promise<DiskUsage>;
 }

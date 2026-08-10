@@ -4,6 +4,8 @@
  * that steer it. Pure string work; nothing here touches a disk.
  */
 
+import { filterFiles } from "./fileMention";
+
 /**
  * What to do with a heavy folder — `node_modules`, a build target — that
  * git does not carry into a new worktree.
@@ -37,18 +39,16 @@ export interface WorktreeSettings {
 }
 
 /**
- * `src-tauri/target` defaults to `skip` rather than `share`: two
- * worktrees sharing one target directory serialize on cargo's build
- * lock, which is exactly the parallelism worktrees exist to provide.
- * Where the filesystem can clone, `clone` beats both.
+ * Nothing is provisioned by default. Which folders are heavy is a
+ * property of the repository, not of this app: `node_modules` means
+ * nothing to a Go project, and copying it behind someone's back is the
+ * kind of surprise a fresh worktree should never spring. The settings
+ * section suggests the folders it actually finds on disk instead.
  */
 export const defaultWorktreeSettings: WorktreeSettings = {
   container: "",
   remote: "origin",
-  provisioning: [
-    { path: "node_modules", strategy: "clone" },
-    { path: "src-tauri/target", strategy: "skip" },
-  ],
+  provisioning: [],
   inheritFromSourceTab: true,
 };
 
@@ -113,6 +113,52 @@ export function provisionPathProblem(path: string): string | undefined {
   if (segments.includes("..")) return "Cannot step outside the worktree with '..'.";
   if (segments[0] === ".git") return "Git's own folder is never prepared.";
   return undefined;
+}
+
+/** How many folders the settings suggestion list ever offers. */
+export const FOLDER_SUGGESTION_LIMIT = 8;
+
+/**
+ * Folder names that are heavy in some ecosystem or other. Only an
+ * ordering hint — every folder in the project is still offered, these
+ * just come first, because they are what the list exists for.
+ */
+const LIKELY_HEAVY = [
+  "node_modules",
+  "target",
+  "dist",
+  "build",
+  ".next",
+  ".venv",
+  "venv",
+  "vendor",
+  ".gradle",
+  "Pods",
+];
+
+/**
+ * The folders to offer while typing a heavy-folder path: those the
+ * project has, minus the ones already listed, matched against what has
+ * been typed so far, likely-heavy names first.
+ */
+export function folderSuggestions(
+  candidates: readonly string[],
+  typed: string,
+  taken: readonly string[],
+  limit = FOLDER_SUGGESTION_LIMIT,
+): string[] {
+  const already = new Set(
+    taken.map((p) => p.trim().replace(/\\/g, "/").replace(/\/+$/, "")),
+  );
+  const free = candidates.filter((path) => !already.has(path));
+  const ordered = [...free].sort((a, b) => heaviness(a) - heaviness(b));
+  return filterFiles(ordered, typed.trim(), limit);
+}
+
+/** Lower sorts first: a likely-heavy leaf beats an ordinary folder. */
+function heaviness(path: string): number {
+  const leaf = path.slice(path.lastIndexOf("/") + 1);
+  return LIKELY_HEAVY.includes(leaf) ? 0 : 1;
 }
 
 /** Folders an agent has a real reason to read, by first path segment. */

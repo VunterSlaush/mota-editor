@@ -1499,9 +1499,9 @@ body {
 .settings-modal {
   position: relative;
   display: flex;
-  width: 860px;
-  max-width: 92vw;
-  height: min(620px, calc(100vh - 180px));
+  width: 980px;
+  max-width: 94vw;
+  height: min(760px, calc(100vh - 80px));
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1553,11 +1553,13 @@ body {
   background: var(--bg-input);
 }
 
+/* The bottom padding is room for a dropdown opened on the last row: the
+   scroll container clips, so a panel with nothing under it is cut off. */
 .settings-modal__body {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 22px 26px;
+  padding: 22px 26px 140px;
 }
 
 .settings-modal__close {
@@ -1892,8 +1894,44 @@ body {
 }
 
 .worktree-path-row .settings-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.folder-suggest {
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+
+.folder-suggest__menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.folder-suggest__item {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-suggest__item--selected {
+  background: var(--bg-input);
 }
 
 .worktree-path-row__side {

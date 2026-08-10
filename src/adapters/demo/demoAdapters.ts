@@ -45,6 +45,7 @@ import type {
   ProvisionReport,
   WorktreeProvisioning,
 } from "../../core/ports/worktreeProvisioning";
+import type { ZoomPort } from "../../core/ports/zoomPort";
 
 /**
  * Demo adapters — in-memory implementations of every port, used when the
@@ -494,6 +495,18 @@ export class DemoWorktreeProvisioning implements WorktreeProvisioning {
     return true;
   }
 
+  async folderCandidates() {
+    return [
+      "docs",
+      "node_modules",
+      "src",
+      "src/core",
+      "src/ui",
+      "src-tauri",
+      "src-tauri/target",
+    ];
+  }
+
   async diskUsage(): Promise<DiskUsage> {
     return {
       ownBytes: 2_100_000,
@@ -786,5 +799,16 @@ export class DemoProviderProbe implements ProviderProbe {
 
   async signIn(): Promise<void> {
     await delay(200);
+  }
+}
+
+/**
+ * Zoom without a webview: CSS `zoom` on the document, which the browser
+ * this demo runs in understands. Close enough to see the effect; the
+ * real app scales the webview itself.
+ */
+export class DemoZoom implements ZoomPort {
+  async apply(factor: number): Promise<void> {
+    document.documentElement.style.zoom = String(factor);
   }
 }

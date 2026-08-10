@@ -436,6 +436,69 @@ fn sanitize_probe_key(path: &str) -> String {
     path.chars().filter(|c| c.is_ascii_alphanumeric()).take(24).collect()
 }
 
+/// A folder deep enough to be worth naming — `src-tauri/target` is two
+/// segments — but no deeper: past that the list stops being a menu.
+const CANDIDATE_DEPTH: usize = 2;
+/// Enough for any repository someone would scroll through by hand.
+const MAX_CANDIDATES: usize = 500;
+
+/// Folders inside a project that could be provisioned into a worktree,
+/// repo-relative and sorted, for the settings section's suggestions.
+///
+/// Unlike `git_list_files` this reads the disk, because the folders worth
+/// naming here — `node_modules`, a build target — are exactly the ones
+/// git ignores and would never report.
+#[tauri::command]
+pub async fn worktree_folder_candidates(project_path: String) -> Result<Vec<String>, String> {
+    if !Path::new(&project_path).is_absolute() {
+        return Err("Project path must be absolute.".to_owned());
+    }
+    run_blocking(move || Ok(folder_candidates(Path::new(&project_path)))).await
+}
+
+/// Names never searched for more inside them: `.git` is not a candidate
+/// at all, and the rest are already the heavy folder someone would pick,
+/// so their contents would only bury the list they belong in.
+const OPAQUE_FOLDERS: &[&str] =
+    &[".git", "node_modules", "target", "dist", "build", "vendor", ".venv", "venv"];
+
+fn folder_candidates(root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut level = vec![String::new()];
+    for _ in 0..CANDIDATE_DEPTH {
+        let mut next = Vec::new();
+        for parent in &level {
+            let dir = if parent.is_empty() {
+                root.to_path_buf()
+            } else {
+                root.join(parent)
+            };
+            let Ok(children) = std::fs::read_dir(&dir) else { continue };
+            for child in children.flatten() {
+                // `file_type` does not follow links, so a linked folder —
+                // what a shared entry leaves behind — is left out.
+                if !child.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    continue;
+                }
+                let name = child.file_name().to_string_lossy().to_string();
+                let relative =
+                    if parent.is_empty() { name.clone() } else { format!("{parent}/{name}") };
+                found.push(relative.clone());
+                if found.len() >= MAX_CANDIDATES {
+                    found.sort();
+                    return found;
+                }
+                if !OPAQUE_FOLDERS.contains(&name.as_str()) {
+                    next.push(relative);
+                }
+            }
+        }
+        level = next;
+    }
+    found.sort();
+    found
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskUsageArgs {

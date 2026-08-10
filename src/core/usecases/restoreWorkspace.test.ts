@@ -50,6 +50,7 @@ const CUSTOM_SETTINGS: AppSettings = {
   ],
   autoCompactThreshold: 0.6,
   autoCompact: "ask",
+  zoomLevel: 2,
   worktrees: {
     ...defaultSettings.worktrees,
     remote: "upstream",
@@ -118,12 +119,13 @@ describe("RestoreWorkspace settings", () => {
     );
   });
 
-  it("keeps an empty provisioning list rather than defaulting it back", async () => {
+  it("keeps the provisioning list the file carries", async () => {
+    const provisioning = [{ path: "node_modules", strategy: "clone" as const }];
     const state = await restore({
       ...EMPTY,
-      settings: { worktrees: { provisioning: [] } },
+      settings: { worktrees: { provisioning } },
     });
-    expect(state.settings.worktrees.provisioning).toEqual([]);
+    expect(state.settings.worktrees.provisioning).toEqual(provisioning);
   });
 
   it("leaves the state alone when there is no workspace file at all", async () => {

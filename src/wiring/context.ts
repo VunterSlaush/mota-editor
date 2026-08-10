@@ -13,6 +13,7 @@ import {
   DemoTranscriptStore,
   DemoWorkspaceStore,
   DemoWorktreeProvisioning,
+  DemoZoom,
 } from "../adapters/demo/demoAdapters";
 import { isTauriRuntime } from "../adapters/tauri/runtime";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
@@ -29,12 +30,14 @@ import { TauriShell } from "../adapters/tauri/tauriShell";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
+import { TauriZoom } from "../adapters/tauri/tauriZoom";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
 import type { McpProbe } from "../core/ports/mcpProbe";
 import type { ProviderProbe } from "../core/ports/providerProbe";
 import type { ShellPort } from "../core/ports/shellPort";
 import type { FilePicker, PastedImageStore } from "../core/ports/workspacePort";
 import type { WorktreeProvisioning } from "../core/ports/worktreeProvisioning";
+import type { ZoomPort } from "../core/ports/zoomPort";
 import { Store } from "../core/state/store";
 import { ApplyCommandConfig } from "../core/usecases/applyCommandConfig";
 import { ApplyPendingSpec, DiscardPendingSpec } from "../core/usecases/applyPendingSpec";
@@ -117,6 +120,8 @@ export interface AppContext {
     tabId: string,
     terminalId: string,
   ) => Promise<{ output: string; truncated: boolean; exited: boolean } | null>;
+  /** Scales the whole interface, driven by the Ctrl+= / Ctrl+- keys. */
+  readonly zoom: ZoomPort;
   /** Ids for things the UI creates, e.g. a new MCP server row. */
   readonly newId: () => string;
   /** False when the UI is opened in a plain browser tab (no backend). */
@@ -230,6 +235,7 @@ export function createAppContext(): AppContext {
     pastedImages: inTauri ? new TauriPastedImageStore() : new DemoPastedImageStore(),
     readTerminalOutput: (tabId, terminalId) =>
       agentGateway.readTerminalOutput(tabId, terminalId),
+    zoom: inTauri ? new TauriZoom() : new DemoZoom(),
     newId,
     runningInTauri: inTauri,
   };
