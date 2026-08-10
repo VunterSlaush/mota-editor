@@ -14,7 +14,7 @@ import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort"
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { ApplyCommandConfig } from "./applyCommandConfig";
-import { SendPrompt } from "./sendPrompt";
+import { FOLLOWUP_SETTLE_MS, SendPrompt } from "./sendPrompt";
 import { SelectEffort, SelectMode, SelectModel, SelectPermission } from "./switchTab";
 
 /** Test double — a scripted agent, per the case study's in-memory gateways. */
@@ -1131,7 +1131,7 @@ describe("a follow-up the agent starts on its own", () => {
     const { store, say } = await afterATurn();
 
     say({ kind: "assistant", text: "CI is green." });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
 
     expect(tabOf(store).busy).toBe(false);
   });
@@ -1143,7 +1143,7 @@ describe("a follow-up the agent starts on its own", () => {
     await useCase.execute("t1", "fix it then");
     expect(gateway.requests).toHaveLength(1); // queued behind the follow-up
 
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
 
     expect(gateway.requests).toHaveLength(2);
     expect(gateway.requests[1].prompt).toBe("fix it then");
@@ -1154,13 +1154,13 @@ describe("a follow-up the agent starts on its own", () => {
 
     say({ kind: "assistant", text: "CI failed." });
     gateway.script = []; // a turn that does not finish on its own
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
     await useCase.execute("t1", "fix it then");
     expect(tabOf(store).busy).toBe(true);
 
     // The follow-up's own settle must not mark that running turn idle.
     say({ kind: "assistant", text: "one more thing" });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
 
     expect(tabOf(store).busy).toBe(true);
   });
@@ -1185,7 +1185,7 @@ describe("a follow-up the agent starts on its own", () => {
     // Nothing yet: the agent may still be mid-sentence.
     expect(transcripts.saved.length).toBe(savedByTheTurn);
 
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
 
     expect(notifications.calls.length).toBe(notifiedByTheTurn + 1);
     const saved = transcripts.saved.at(-1);
@@ -1201,10 +1201,73 @@ describe("a follow-up the agent starts on its own", () => {
     };
 
     say({ kind: "usage", used: 1000, size: 200000 });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
 
     expect(notifications.calls.length).toBe(before.notified);
     expect(transcripts.saved.length).toBe(before.saved);
+  });
+
+  /**
+   * The gaps measured inside one real autonomous cycle, driving the ACP
+   * adapter directly (a background `sleep`, then the follow-up its
+   * completion triggers): the cycle opens by reading the task's output
+   * file, and the model's think time between a tool result and its next
+   * word cleared 2s twice. At the original 2s settle each of those gaps
+   * ended the stretch early — three notifications and three saves for one
+   * follow-up, and a queued prompt free to drain into the middle of it.
+   */
+  it("rides out the think-time gaps inside one real cycle", async () => {
+    const { store, notifications, transcripts, say } = await afterATurn();
+    const before = {
+      notified: notifications.calls.length,
+      saved: transcripts.saved.length,
+    };
+
+    say({
+      kind: "toolCall",
+      toolCallId: "c1",
+      toolKind: "read",
+      title: "Read File",
+      status: "pending",
+    });
+    await vi.advanceTimersByTimeAsync(2400);
+    say({ kind: "toolCallUpdate", toolCallId: "c1", status: "completed" });
+    await vi.advanceTimersByTimeAsync(2700);
+    say({ kind: "assistant", text: "It finished. Exit code 0, output: CI-DONE." });
+
+    // One unbroken stretch: still busy, and nothing announced yet.
+    expect(tabOf(store).busy).toBe(true);
+    expect(notifications.calls.length).toBe(before.notified);
+
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
+
+    expect(tabOf(store).busy).toBe(false);
+    expect(notifications.calls.length).toBe(before.notified + 1);
+    expect(transcripts.saved.length).toBe(before.saved + 1);
+  });
+
+  it("holds a queued prompt until the whole cycle is done, not the first gap", async () => {
+    const { gateway, useCase, say } = await afterATurn();
+
+    say({
+      kind: "toolCall",
+      toolCallId: "c1",
+      toolKind: "read",
+      title: "Read File",
+      status: "pending",
+    });
+    await useCase.execute("t1", "and then deploy");
+    expect(gateway.requests).toHaveLength(1);
+
+    // The 2.4s gap the real cycle has here must not release it.
+    await vi.advanceTimersByTimeAsync(2400);
+    say({ kind: "assistant", text: "It finished." });
+    expect(gateway.requests).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
+
+    expect(gateway.requests).toHaveLength(2);
+    expect(gateway.requests[1].prompt).toBe("and then deploy");
   });
 
   it("ignores a follow-up for a tab that is no longer open", async () => {
@@ -1221,7 +1284,7 @@ describe("a follow-up the agent starts on its own", () => {
 
     say({ kind: "assistantDelta", text: "CI " });
     say({ kind: "assistantDelta", text: "is green." });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
 
     const last = tabOf(store).messages.at(-1);
     expect(last?.role).toBe("assistant");

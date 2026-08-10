@@ -42,8 +42,18 @@ const DELTA_FLUSH_MS = 33;
  * quiet this long is taken as the end of one — long enough to outlast
  * the gap between a tool call and its result, short enough that the
  * transcript is saved while the user is still around to see it.
+ *
+ * 2s was the first guess and it was too short. Driving the real ACP
+ * adapter directly (a background `sleep`, then the follow-up it triggers)
+ * put the gaps *inside* one cycle at 2.2s and 2.7s: the cycle opens by
+ * reading the task's output file, and the model's think time between a
+ * tool result and its next word clears 2s routinely. Every one of those
+ * gaps settled the stretch early — three notifications, three transcript
+ * saves and three busy flickers for one follow-up, with a queued prompt
+ * free to drain into the middle of it. 8s clears the observed spread with
+ * room to spare and still lands the transcript promptly.
  */
-const FOLLOWUP_SETTLE_MS = 2_000;
+export const FOLLOWUP_SETTLE_MS = 8_000;
 
 interface DeltaBuffer {
   role: "assistant" | "thought";
