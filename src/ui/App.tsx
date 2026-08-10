@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ProviderId } from "../core/entities/provider";
 import { themeById } from "../core/entities/theme";
+import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import { activeTab } from "../core/state/appState";
 import type { AppContext } from "../wiring/context";
 import type { SidebarView } from "./components/ActivityBar";
@@ -44,6 +45,27 @@ export function App({ context }: { context: AppContext }) {
   useEffect(() => {
     document.documentElement.dataset.theme = themeById(state.settings.theme).id;
   }, [state.settings.theme]);
+
+  // Zoom is the webview's own, not a CSS trick, so it survives every
+  // fixed position and hairline border the layout leans on.
+  const zoomLevel = state.settings.zoomLevel;
+  useEffect(() => {
+    void context.zoom.apply(zoomFactor(zoomLevel)).catch(() => undefined);
+  }, [context, zoomLevel]);
+
+  // Ctrl+= / Ctrl+- / Ctrl+0, wherever the caret is: zoom belongs to the
+  // window, so a composer with focus must not swallow it.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const intent = zoomIntent(e);
+      if (!intent) return;
+      e.preventDefault();
+      const next = applyZoomIntent(zoomLevel, intent);
+      if (next !== zoomLevel) void context.updateSettings.execute({ zoomLevel: next });
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [context, zoomLevel]);
 
   // Stable identity: the settings screen loads commands from an effect,
   // and a fresh closure every render would re-run it forever.

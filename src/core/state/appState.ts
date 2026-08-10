@@ -20,6 +20,7 @@ import type { ProviderId } from "../entities/provider";
 import { DEFAULT_PROVIDER } from "../entities/provider";
 import type { WorktreeSettings } from "../entities/worktree";
 import { defaultWorktreeSettings } from "../entities/worktree";
+import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
 
 /**
  * Core state — a pure, framework-free model of the whole workbench,
@@ -129,6 +130,8 @@ export interface AppSettings {
   readonly autoCompact: AutoCompactPolicy;
   /** Color theme id, from `entities/theme`. */
   readonly theme: string;
+  /** How far the interface is zoomed, in notches. 0 is untouched. */
+  readonly zoomLevel: number;
   /** Where worktrees go, how they are stocked, what their tabs inherit. */
   readonly worktrees: WorktreeSettings;
 }
@@ -153,6 +156,7 @@ export const defaultSettings: AppSettings = {
   autoCompactThreshold: 0.9,
   autoCompact: "compact",
   theme: "mota-dark",
+  zoomLevel: DEFAULT_ZOOM_LEVEL,
   worktrees: defaultWorktreeSettings,
 };
 

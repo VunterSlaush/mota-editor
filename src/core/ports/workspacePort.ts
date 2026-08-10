@@ -45,6 +45,7 @@ export interface PersistedSettings {
   readonly autoCompactThreshold?: number;
   readonly autoCompact?: AutoCompactPolicy;
   readonly theme?: string;
+  readonly zoomLevel?: number;
   /** Partial too: a field added after this file was written is defaulted. */
   readonly worktrees?: Partial<WorktreeSettings>;
 }

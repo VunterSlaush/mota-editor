@@ -50,6 +50,7 @@ const CUSTOM_SETTINGS: AppSettings = {
   ],
   autoCompactThreshold: 0.6,
   autoCompact: "ask",
+  zoomLevel: 2,
   worktrees: {
     ...defaultSettings.worktrees,
     remote: "upstream",
