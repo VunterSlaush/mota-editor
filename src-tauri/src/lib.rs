@@ -12,6 +12,7 @@ mod history_file;
 mod provider_probe;
 mod runner;
 mod shell_env;
+mod shell_history;
 mod shell_session;
 mod sign_in;
 mod terminal;
@@ -94,6 +95,7 @@ pub fn run() {
             worktree::worktree_supports_cow,
             worktree::worktree_disk_usage,
             worktree::worktree_folder_candidates,
+            shell_history::shell_history,
             shell_session::shell_open,
             shell_session::shell_write,
             shell_session::shell_resize,

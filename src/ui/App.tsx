@@ -130,6 +130,7 @@ export function App({ context }: { context: AppContext }) {
       theme,
       open: (request: OpenShellRequest) => context.shells.open(activeProjectId, request),
       write: (sessionId: string, data: string) => context.shells.write(sessionId, data),
+      acceptSuggestion: (sessionId: string) => context.shells.acceptSuggestion(sessionId),
       resize: (sessionId: string, size: ShellSize) =>
         context.shells.resize(sessionId, size),
       select: (sessionId: string) => context.shells.select(activeProjectId, sessionId),

@@ -1233,6 +1233,17 @@ body {
   color: var(--text);
 }
 
+/* The suggested rest of the command, drawn over the cells after the
+   cursor. Dim enough to read as "not typed yet", and untouchable so a
+   click always lands on the terminal underneath. */
+.terminal-ghost {
+  opacity: 0.42;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+  font-style: italic;
+}
+
 /* The header toggle, lit while its panel is showing. */
 .icon-button--on {
   background: var(--border);

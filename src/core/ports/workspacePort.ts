@@ -50,6 +50,7 @@ export interface PersistedSettings {
   readonly worktrees?: Partial<WorktreeSettings>;
   readonly terminalShell?: string;
   readonly terminalFontSize?: number;
+  readonly terminalSuggestions?: boolean;
 }
 
 export interface PersistedWorkspace {

@@ -21,13 +21,22 @@ export interface XtermSession {
   focus(): void;
   /** Re-read the app's palette and font size, after either changes. */
   restyle(fontSize: number): void;
+  /** Draw the greyed-out completion after the cursor; "" clears it. */
+  showSuggestion(suffix: string): void;
   /** A closing line the shell itself never got to print. */
   writeExitNotice(code: number | null): void;
   dispose(): void;
 }
 
+/** What a terminal reports back to the app. */
+export interface XtermHandlers {
+  readonly onData: (data: string) => void;
+  /** The user pressed the accept key while a suggestion was showing. */
+  readonly onAcceptSuggestion: () => void;
+}
+
 export function createXtermSession(
-  onData: (data: string) => void,
+  handlers: XtermHandlers,
   fontSize: number,
 ): XtermSession {
   const term = new Terminal({
@@ -42,7 +51,7 @@ export function createXtermSession(
   });
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
-  term.onData(onData);
+  term.onData(handlers.onData);
 
   // xterm needs a live element to measure; it is moved between hosts as
   // the panel opens and closes, and re-opening must not lose scrollback.
@@ -51,6 +60,20 @@ export function createXtermSession(
   term.open(holder);
 
   let lastSize: ShellSize = { cols: term.cols, rows: term.rows };
+  const ghost = createGhost(term);
+
+  // Right arrow accepts, the way every shell that does this binds it.
+  // Safe to take: a suggestion only exists when the cursor is at the end
+  // of a line we have followed exactly, and there the shell would do
+  // nothing with the key anyway. With no suggestion showing it falls
+  // through untouched.
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown" || e.key !== "ArrowRight") return true;
+    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return true;
+    if (!ghost.showing()) return true;
+    handlers.onAcceptSuggestion();
+    return false;
+  });
 
   return {
     attach(host) {
@@ -61,7 +84,12 @@ export function createXtermSession(
       term.refresh(0, term.rows - 1);
     },
     write(bytes) {
-      term.write(bytes);
+      // Re-anchored rather than cleared: almost every write is the shell
+      // echoing the keystroke that produced the suggestion in the first
+      // place, and clearing on echo would erase it the instant it
+      // appeared. The cursor has moved, so it is redrawn once xterm has
+      // finished applying the bytes.
+      term.write(bytes, ghost.reanchor);
     },
     fit() {
       // A panel mid-layout measures as zero and would ask the pty for an
@@ -80,14 +108,78 @@ export function createXtermSession(
       term.options.theme = currentTheme();
       term.options.fontSize = nextFontSize;
     },
+    showSuggestion(suffix) {
+      ghost.show(suffix);
+    },
     writeExitNotice(code) {
       const detail = code === null ? "" : ` with code ${code}`;
       term.write(`\r\n\x1b[2m[process exited${detail}]\x1b[0m\r\n`);
     },
     dispose() {
+      ghost.clear();
       term.dispose();
       holder.remove();
     },
+  };
+}
+
+/**
+ * The greyed-out completion, drawn as an xterm decoration anchored to
+ * the cursor's line — the same mechanism VS Code uses for gutter marks.
+ * A decoration is display only: nothing here reaches the pty, so a stale
+ * suggestion can never become text the shell sees.
+ */
+function createGhost(term: Terminal) {
+  let marker: ReturnType<Terminal["registerMarker"]> | undefined;
+  let text = "";
+
+  /** Take the decoration off the screen, keeping what it said. */
+  const erase = () => {
+    marker?.dispose(); // disposes the decoration hanging off it
+    marker = undefined;
+  };
+
+  /** Draw the current text at wherever the cursor is now. */
+  const draw = () => {
+    erase();
+    if (!text) return;
+    const cursor = term.buffer.active;
+    const room = term.cols - cursor.cursorX;
+    if (room <= 0) return; // nothing left on this row to draw into
+    const next = term.registerMarker(0);
+    if (!next) return;
+    const decoration = term.registerDecoration({
+      marker: next,
+      x: cursor.cursorX,
+      width: Math.min(text.length, room),
+      layer: "top",
+    });
+    if (!decoration) {
+      next.dispose();
+      return;
+    }
+    marker = next;
+    const shown = text.slice(0, room);
+    // `classList`, not `className`: xterm puts its own positioning
+    // classes on this element and overwriting them hides it.
+    decoration.onRender((element) => {
+      element.classList.add("terminal-ghost");
+      element.textContent = shown;
+    });
+  };
+
+  return {
+    showing: () => text !== "",
+    clear() {
+      text = "";
+      erase();
+    },
+    show(suffix: string) {
+      if (suffix === text) return;
+      text = suffix;
+      draw();
+    },
+    reanchor: draw,
   };
 }
 

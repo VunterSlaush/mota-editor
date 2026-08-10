@@ -10,6 +10,7 @@ import {
   DemoPastedImageStore,
   DemoProviderProbe,
   DemoShell,
+  DemoShellHistory,
   DemoTranscriptStore,
   DemoWorkspaceStore,
   DemoWorktreeProvisioning,
@@ -27,6 +28,7 @@ import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
 import { TauriPastedImageStore } from "../adapters/tauri/tauriPastedImageStore";
 import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriShell } from "../adapters/tauri/tauriShell";
+import { TauriShellHistory } from "../adapters/tauri/tauriShellHistory";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
@@ -34,6 +36,7 @@ import { TauriZoom } from "../adapters/tauri/tauriZoom";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
 import type { McpProbe } from "../core/ports/mcpProbe";
 import type { ProviderProbe } from "../core/ports/providerProbe";
+import type { ShellHistorySource } from "../core/ports/shellHistorySource";
 import type { ShellPort } from "../core/ports/shellPort";
 import type { FilePicker, PastedImageStore } from "../core/ports/workspacePort";
 import type { WorktreeProvisioning } from "../core/ports/worktreeProvisioning";
@@ -144,6 +147,9 @@ export function createAppContext(): AppContext {
   const mcpProbe = inTauri ? new TauriMcpProbe() : new DemoMcpProbe();
   const notifications = inTauri ? new TauriNotifications() : new DemoNotifications();
   const shellPort: ShellPort = inTauri ? new TauriShell() : new DemoShell();
+  const shellHistory: ShellHistorySource = inTauri
+    ? new TauriShellHistory()
+    : new DemoShellHistory();
   const worktreeProvisioning = inTauri
     ? new TauriWorktreeProvisioning()
     : new DemoWorktreeProvisioning();
@@ -224,7 +230,7 @@ export function createAppContext(): AppContext {
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
     listProjectFiles: new ListProjectFiles(store, gitPort),
-    shells: new Shells(store, shellPort),
+    shells: new Shells(store, shellPort, shellHistory),
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),

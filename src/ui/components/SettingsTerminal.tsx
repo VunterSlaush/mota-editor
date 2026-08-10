@@ -57,6 +57,24 @@ export function SettingsTerminal({ settings, onChange }: Props) {
           onChange={(size) => onChange({ terminalFontSize: Number(size) })}
         />
       </Field>
+
+      <Field
+        label="Suggestions"
+        hint="Greys in the rest of a command you run often; → accepts it. Ranked by how often you have run it, seeded from your shell's own history."
+      >
+        <label className="verbose-toggle">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-checked={settings.terminalSuggestions}
+            aria-label="Terminal suggestions"
+            className="switch__input"
+            checked={settings.terminalSuggestions}
+            onChange={(e) => onChange({ terminalSuggestions: e.target.checked })}
+          />
+          <span className="switch" aria-hidden="true" />
+        </label>
+      </Field>
     </div>
   );
 }

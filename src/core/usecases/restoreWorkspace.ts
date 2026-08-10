@@ -81,6 +81,8 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     worktrees: restoredWorktrees(persisted?.worktrees),
     terminalShell: persisted?.terminalShell ?? defaultSettings.terminalShell,
     terminalFontSize: persisted?.terminalFontSize ?? defaultSettings.terminalFontSize,
+    terminalSuggestions:
+      persisted?.terminalSuggestions ?? defaultSettings.terminalSuggestions,
   };
 }
 

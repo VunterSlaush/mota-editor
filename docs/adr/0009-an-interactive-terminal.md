@@ -109,6 +109,48 @@ that filled the buffer is coalesced (to 64 KB or 16 ms). An echoed
 keystroke is never delayed; a build log becomes dozens of messages
 instead of thousands.
 
+### Suggestions are ours, not the shell's
+
+The greyed-out completion is drawn by us, from a history we rank
+ourselves. The obvious alternative was to let the shell do it —
+PSReadLine's predictive IntelliSense, `zsh-autosuggestions` — and it was
+rejected on measurement:
+
+- The machine this was built on runs Windows PowerShell 5.1 with
+  PSReadLine **2.0.0**. `Set-PSReadLineOption -PredictionSource` does
+  not exist before 2.1.0, so the feature was simply unavailable.
+- Getting it means installing something — `pwsh` 7 (~250 MB) or a newer
+  PSReadLine (~2 MB) — plus a startup snippet injected into the user's
+  shell profile to make it stick.
+- It would work in PowerShell and nowhere else. `cmd` and Git Bash, both
+  of which this terminal happily runs, would have nothing.
+- Its ranking is recency-with-prefix. Measured against a real history,
+  `cls` and `clear` are 43% of all entries, so recency and frequency
+  disagree constantly.
+
+Doing it ourselves needs no install, no profile injection, and works
+identically in every shell.
+
+**We know what is typed because we typed it.** Every byte the panel
+sends passes through `entities/inputLine` first, so no OSC 133 shell
+integration is needed. That model is a guess about the shell's line
+editor, and it fails closed: any control byte we do not model — Tab, an
+arrow, Ctrl+R — sets the line to null and suggestions stop until the
+next prompt. A missing suggestion is a shrug. A suggestion computed from
+a line we had wrong would insert text the user never typed, and that is
+the failure the shape of `InputLine` exists to make impossible.
+
+**Accepting types the rest in.** Right arrow sends the remaining
+characters as keystrokes rather than reaching into the shell's buffer,
+so both line editors end up believing the same thing. It is only
+intercepted while a suggestion is showing — which is only when the
+cursor is at the end of a line we followed exactly, and where the key
+would have done nothing anyway.
+
+**The corpus is the shell's own history file, read and never written.**
+The shell keeps it current, including commands run in our terminal, so a
+copy of ours would only be a second thing to get out of step.
+
 ## Consequences
 
 - Two new dependencies: `portable-pty` (Rust) and `@xterm/xterm` +
@@ -127,3 +169,15 @@ instead of thousands.
 - `terminal` in this codebase now always means the agent's, and `shell`
   always means the user's. Blurring them later re-opens exactly the
   question this ADR closed.
+- Suggestions cost, measured against a 14,215-entry history: **44 KB** of
+  heap for the ranked index (842 distinct commands), **4.4 ms** to build
+  it once at startup, **3 µs** per keystroke to look one up, and
+  **+3.6 KB / +1.2 KB gzipped** of bundle. No disk of our own.
+- We read the user's shell history file. It never leaves the machine and
+  nothing is written back, but it is personal data, and the Settings
+  toggle that turns suggestions off should stay the thing that stops us
+  reading it.
+- The line model will desync on anything exotic — a shell that rewrites
+  the prompt, a full-screen program, bracketed-paste edge cases. The
+  cost of each is one missing suggestion, and the model recovers at the
+  next prompt.

@@ -154,6 +154,8 @@ export interface AppSettings {
    */
   readonly terminalShell: string;
   readonly terminalFontSize: number;
+  /** Greyed-out completions in the terminal, from the user's history. */
+  readonly terminalSuggestions: boolean;
 }
 
 export interface AppState {
@@ -180,6 +182,7 @@ export const defaultSettings: AppSettings = {
   worktrees: defaultWorktreeSettings,
   terminalShell: "",
   terminalFontSize: 13,
+  terminalSuggestions: true,
 };
 
 export const initialState: AppState = {

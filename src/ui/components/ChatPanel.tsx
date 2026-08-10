@@ -44,6 +44,7 @@ export interface ShellsView {
   readonly theme: string;
   readonly open: (request: OpenShellRequest) => Promise<OpenShellResult>;
   readonly write: (sessionId: string, data: string) => void;
+  readonly acceptSuggestion: (sessionId: string) => void;
   readonly resize: (sessionId: string, size: ShellSize) => void;
   readonly select: (sessionId: string) => void;
   readonly close: (sessionId: string) => void;
@@ -578,6 +579,7 @@ export function ChatPanel({
             theme={shells.theme}
             onOpen={shells.open}
             onWrite={shells.write}
+            onAcceptSuggestion={shells.acceptSuggestion}
             onResize={shells.resize}
             onSelect={shells.select}
             onClose={shells.close}

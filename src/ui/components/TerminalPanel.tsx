@@ -21,6 +21,7 @@ interface Props {
   theme: string;
   onOpen: (request: OpenShellRequest) => Promise<OpenShellResult>;
   onWrite: (sessionId: string, data: string) => void;
+  onAcceptSuggestion: (sessionId: string) => void;
   onResize: (sessionId: string, size: { cols: number; rows: number }) => void;
   onSelect: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
@@ -46,6 +47,7 @@ export function TerminalPanel({
   theme,
   onOpen,
   onWrite,
+  onAcceptSuggestion,
   onResize,
   onSelect,
   onClose,
@@ -65,7 +67,14 @@ export function TerminalPanel({
 
     let sessionId: string | null = null;
     const xterm = createXtermSession(
-      (data) => sessionId && onWrite(sessionId, data),
+      {
+        onData: (data) => {
+          if (sessionId) onWrite(sessionId, data);
+        },
+        onAcceptSuggestion: () => {
+          if (sessionId) onAcceptSuggestion(sessionId);
+        },
+      },
       fontSize,
     );
     // Attached and measured before the shell starts, so its first prompt
@@ -80,6 +89,7 @@ export function TerminalPanel({
     const result = await onOpen({
       size: host ? xterm.size() : UNMEASURED,
       onOutput: (bytes) => xterm.write(bytes),
+      onSuggest: (suffix) => xterm.showSuggestion(suffix),
     });
     opening.current = false;
     if (!result.ok) {
@@ -90,7 +100,7 @@ export function TerminalPanel({
     sessionId = result.sessionId;
     rememberXterm(sessionId, xterm);
     xterm.focus();
-  }, [fontSize, onOpen, onWrite]);
+  }, [fontSize, onOpen, onWrite, onAcceptSuggestion]);
 
   // The panel opens with a terminal ready; nobody wants to press "+"
   // before they can type.

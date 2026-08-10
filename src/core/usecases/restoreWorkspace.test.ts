@@ -59,6 +59,7 @@ const CUSTOM_SETTINGS: AppSettings = {
   theme: "mota-light",
   terminalShell: "/bin/zsh",
   terminalFontSize: 15,
+  terminalSuggestions: false,
 };
 
 /**

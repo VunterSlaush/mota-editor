@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { newProject } from "../entities/project";
+import type { ShellHistorySource } from "../ports/shellHistorySource";
 import type {
   ShellOpenRequest,
   ShellPort,
@@ -57,12 +58,43 @@ class FakeShellPort implements ShellPort {
   }
 }
 
-function setUp() {
+/** Test double — the shell's history file, scripted per test. */
+class FakePastCommands implements ShellHistorySource {
+  constructor(private readonly lines: readonly string[] = []) {}
+  reads = 0;
+  async recent(): Promise<readonly string[]> {
+    this.reads += 1;
+    return this.lines;
+  }
+}
+
+function setUp(past: readonly string[] = []) {
   const store = new Store();
   const project = newProject("tab-1", "G:/repos/thing", DEFAULTS);
   store.dispatch({ type: "tab/opened", project });
   const port = new FakeShellPort();
-  return { store, port, shells: new Shells(store, port), tabId: project.id };
+  const pastCommands = new FakePastCommands(past);
+  return {
+    store,
+    port,
+    pastCommands,
+    shells: new Shells(store, port, pastCommands),
+    tabId: project.id,
+  };
+}
+
+/** Collects the greyed-out suggestion as the use case revises it. */
+function suggestionSpy() {
+  const seen: string[] = [];
+  return {
+    seen,
+    latest: () => seen[seen.length - 1] ?? "",
+    request: (onSuggest: (s: string) => void) => ({
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest,
+    }),
+  };
 }
 
 const shellsOf = (store: Store, tabId: string) =>
@@ -73,15 +105,27 @@ const activeShellOf = (store: Store, tabId: string) =>
 describe("opening a terminal", () => {
   it("opens it in the project's folder", async () => {
     const { port, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     expect(port.opened[0]?.cwd).toBe("G:/repos/thing");
     expect(port.opened[0]?.projectId).toBe(tabId);
   });
 
   it("names it and makes it the one you are looking at", async () => {
     const { store, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     expect(shellsOf(store, tabId).map((s) => s.title)).toEqual([
       "Terminal 1",
       "Terminal 2",
@@ -91,32 +135,52 @@ describe("opening a terminal", () => {
 
   it("passes the configured shell only when one is set", async () => {
     const { store, port, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     expect(port.opened[0]?.shellPath).toBeUndefined();
 
     store.dispatch({ type: "settings/changed", patch: { terminalShell: "  /bin/zsh " } });
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     expect(port.opened[1]?.shellPath).toBe("/bin/zsh");
   });
 
   it("reports why it could not open instead of throwing at the view", async () => {
     const { store, port, shells, tabId } = setUp();
     port.failOpenWith = "Could not find a shell to run.";
-    const result = await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    const result = await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     expect(result).toEqual({ ok: false, message: "Could not find a shell to run." });
     expect(shellsOf(store, tabId)).toEqual([]);
   });
 
   it("refuses a tab that is not open", async () => {
     const { shells } = setUp();
-    const result = await shells.open("gone", { size: SIZE, onOutput: () => undefined });
+    const result = await shells.open("gone", {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     expect(result.ok).toBe(false);
   });
 
   it("still records an exit that beat the open call back", async () => {
     const { store, port, shells, tabId } = setUp();
     port.exitDuringOpen = 127;
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     expect(shellsOf(store, tabId)[0]?.exit).toEqual({ code: 127 });
   });
 });
@@ -125,7 +189,11 @@ describe("a running terminal", () => {
   it("sends output to the view and never to the store", async () => {
     const { store, port, shells, tabId } = setUp();
     const received: Uint8Array[] = [];
-    await shells.open(tabId, { size: SIZE, onOutput: (bytes) => received.push(bytes) });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: (bytes) => received.push(bytes),
+      onSuggest: () => undefined,
+    });
     const before = store.getState();
 
     port.emitOutput("shell-1", new Uint8Array([104, 105]));
@@ -136,7 +204,11 @@ describe("a running terminal", () => {
 
   it("carries keystrokes and resizes through", async () => {
     const { port, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     shells.write("shell-1", "ls\r");
     shells.resize("shell-1", { cols: 120, rows: 40 });
     expect(port.written).toEqual([{ sessionId: "shell-1", data: "ls\r" }]);
@@ -147,7 +219,11 @@ describe("a running terminal", () => {
 
   it("keeps the session listed once the shell exits, so its output survives", async () => {
     const { store, port, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     port.emitExit("shell-1", 1);
     expect(shellsOf(store, tabId)).toHaveLength(1);
     expect(shellsOf(store, tabId)[0]?.exit).toEqual({ code: 1 });
@@ -157,7 +233,11 @@ describe("a running terminal", () => {
 describe("closing a terminal", () => {
   it("kills the shell and drops it from the strip", async () => {
     const { store, port, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     await shells.close(tabId, "shell-1");
     expect(port.closed).toEqual(["shell-1"]);
     expect(shellsOf(store, tabId)).toEqual([]);
@@ -166,18 +246,202 @@ describe("closing a terminal", () => {
 
   it("selects the neighbour that is left", async () => {
     const { store, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     await shells.close(tabId, "shell-2");
     expect(activeShellOf(store, tabId)).toBe("shell-1");
   });
 
   it("leaves the selection alone when another terminal is closed", async () => {
     const { store, shells, tabId } = setUp();
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
-    await shells.open(tabId, { size: SIZE, onOutput: () => undefined });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
     shells.select(tabId, "shell-1");
     await shells.close(tabId, "shell-2");
     expect(activeShellOf(store, tabId)).toBe("shell-1");
+  });
+});
+
+describe("suggesting the next command", () => {
+  const past = ["git status", "npm run build", "npm test", "npm test", "npm test"];
+
+  it("suggests the most-used command matching what has been typed", async () => {
+    const { shells, tabId } = setUp(past);
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "npm ");
+
+    expect(spy.latest()).toBe("test");
+  });
+
+  it("narrows as more is typed", async () => {
+    const { shells, tabId } = setUp(past);
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "npm r");
+
+    expect(spy.latest()).toBe("un build");
+  });
+
+  it("clears the suggestion when nothing matches", async () => {
+    const { shells, tabId } = setUp(past);
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "cargo");
+
+    expect(spy.latest()).toBe("");
+  });
+
+  it("stops suggesting once it has lost track of the line", async () => {
+    const { shells, tabId } = setUp(past);
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "npm ");
+    expect(spy.latest()).toBe("test");
+    shells.write("shell-1", "\t"); // Tab: the shell rewrites the line
+
+    expect(spy.latest()).toBe("");
+  });
+
+  it("accepting types the rest of the command into the shell", async () => {
+    const { port, shells, tabId } = setUp(past);
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "npm ");
+    shells.acceptSuggestion("shell-1");
+
+    expect(port.written.map((w) => w.data).join("")).toBe("npm test");
+    expect(spy.latest()).toBe("");
+  });
+
+  it("accepting nothing sends nothing", async () => {
+    const { port, shells, tabId } = setUp(past);
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "cargo");
+    shells.acceptSuggestion("shell-1");
+
+    expect(port.written.map((w) => w.data).join("")).toBe("cargo");
+  });
+
+  it("learns a command it watched being run", async () => {
+    const { shells, tabId } = setUp();
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "cargo clippy\r");
+    shells.write("shell-1", "car");
+
+    expect(spy.latest()).toBe("go clippy");
+  });
+
+  it("shares what it learned with a terminal opened later", async () => {
+    const { shells, tabId } = setUp();
+    const first = suggestionSpy();
+    await shells.open(
+      tabId,
+      first.request((s) => first.seen.push(s)),
+    );
+    shells.write("shell-1", "cargo clippy\r");
+
+    const second = suggestionSpy();
+    await shells.open(
+      tabId,
+      second.request((s) => second.seen.push(s)),
+    );
+    shells.write("shell-2", "car");
+
+    expect(second.latest()).toBe("go clippy");
+  });
+
+  it("reads the shell's history file only once, however many terminals open", async () => {
+    const { shells, pastCommands, tabId } = setUp(past);
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    expect(pastCommands.reads).toBe(1);
+  });
+
+  it("says nothing at all when suggestions are switched off", async () => {
+    const { store, shells, tabId } = setUp(past);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { terminalSuggestions: false },
+    });
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.write("shell-1", "npm ");
+
+    expect(spy.latest()).toBe("");
+  });
+
+  it("does not open the history file at all when suggestions are off", async () => {
+    const { store, shells, pastCommands, tabId } = setUp(past);
+    store.dispatch({
+      type: "settings/changed",
+      patch: { terminalSuggestions: false },
+    });
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+    shells.write("shell-1", "npm ");
+
+    expect(pastCommands.reads).toBe(0);
   });
 });

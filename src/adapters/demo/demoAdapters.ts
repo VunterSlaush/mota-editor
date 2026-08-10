@@ -23,6 +23,7 @@ import type {
 import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
 import type { NotificationPort } from "../../core/ports/notificationPort";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
+import type { ShellHistorySource } from "../../core/ports/shellHistorySource";
 import type {
   ShellOpenRequest,
   ShellPort,
@@ -672,6 +673,17 @@ export class DemoNotifications implements NotificationPort {
 }
 
 /**
+ * Browser demo — a history with a clear favourite, so the greyed-out
+ * suggestion has something to show and its ranking is visible.
+ */
+export class DemoShellHistory implements ShellHistorySource {
+  async recent(): Promise<readonly string[]> {
+    await delay(80);
+    return ["git status", "npm run build", "npm test", "npm test", "npm test", "help"];
+  }
+}
+
+/**
  * Browser demo — a shell that cannot run anything, but answers. Enough
  * to drive the panel end to end (echo, prompt, exit, close) without a
  * pty, so the port stays honest outside Tauri.
@@ -680,6 +692,7 @@ export class DemoShell implements ShellPort {
   private readonly streams = new Map<string, ShellStream>();
   private readonly lines = new Map<string, string>();
   private readonly prompts = new Map<string, string>();
+  private readonly escaping = new Set<string>();
   private nextId = 1;
 
   async open(request: ShellOpenRequest, stream: ShellStream): Promise<string> {
@@ -707,6 +720,7 @@ export class DemoShell implements ShellPort {
     this.streams.delete(sessionId);
     this.lines.delete(sessionId);
     this.prompts.delete(sessionId);
+    this.escaping.delete(sessionId);
   }
 
   async closeProject(): Promise<void> {}
@@ -715,6 +729,16 @@ export class DemoShell implements ShellPort {
   private type(sessionId: string, char: string): void {
     const line = this.lines.get(sessionId);
     if (line === undefined) return;
+    // Swallow escape sequences whole. A real terminal acts on an arrow
+    // key; echoing its bytes would print "[C" at the prompt.
+    if (this.escaping.has(sessionId)) {
+      if (char >= "@" && char <= "~") this.escaping.delete(sessionId);
+      return;
+    }
+    if (char === "") {
+      this.escaping.add(sessionId);
+      return;
+    }
     if (char === "\r") {
       this.say(sessionId, "\r\n");
       this.run(sessionId, line.trim());
