@@ -167,7 +167,12 @@ export function SettingsModal({
             <SettingsTerminal settings={settings} onChange={onChange} />
           )}
           {section === "usage" && (
-            <SettingsUsage settings={settings} onChange={onChange} tabs={tabs} />
+            <SettingsUsage
+              settings={settings}
+              onChange={onChange}
+              tabs={tabs}
+              loadInsights={loadInsights}
+            />
           )}
           {section === "insights" && <SettingsInsights loadInsights={loadInsights} />}
           {section === "theme" && (

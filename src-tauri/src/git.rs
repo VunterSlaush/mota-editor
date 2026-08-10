@@ -1,7 +1,7 @@
 //! Git command handlers — thin controllers over the `git` CLI.
 //! Output parsing is pure and lives in `agent_core::vcs`.
 
-use agent_core::vcs::{self, Branch, Commit, GitChange, Worktree};
+use agent_core::vcs::{self, Branch, Commit, Divergence, GitChange, Worktree};
 use agent_core::worktree;
 
 use crate::runner;
@@ -176,6 +176,25 @@ pub async fn git_branches(project_path: String) -> Result<Vec<Branch>, String> {
     )
     .await?;
     Ok(vcs::parse_branches(&out))
+}
+
+/// What separates the current branch from the one it tracks — the
+/// numbers on the Pull and Push buttons.
+///
+/// Null rather than an error for every "there is nothing to compare"
+/// case (no upstream, detached HEAD, empty repo, not a repository):
+/// git fails on all of them, and none is a problem the user has to be
+/// told about. Reads local refs only — what the remote has moved on to
+/// is known only as far as the last fetch.
+#[tauri::command]
+pub async fn git_upstream(project_path: String) -> Result<Option<Divergence>, String> {
+    let out = run_git(
+        &project_path,
+        &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+    )
+    .await
+    .unwrap_or_default();
+    Ok(vcs::parse_ahead_behind(&out))
 }
 
 #[tauri::command]

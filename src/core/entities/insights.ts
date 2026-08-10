@@ -188,6 +188,14 @@ export interface BilledModelRow {
   readonly costUsd: number;
 }
 
+/** One vendor's share of the bill — "what has Claude cost me". */
+export interface BilledProviderRow {
+  readonly provider: string;
+  readonly requests: number;
+  readonly tokens: BilledTokens;
+  readonly costUsd: number;
+}
+
 /** Exact spend, as reported by the vendors themselves. */
 export interface BilledSpend {
   readonly costUsd: number;
@@ -212,6 +220,9 @@ export interface BilledSpend {
   readonly sidechainCostUsd: number;
   readonly bySession: readonly BilledSessionRow[];
   readonly byModel: readonly BilledModelRow[];
+  /** Dearest vendor first. Summed from the same requests as `costUsd`,
+   *  so the rows always add up to the total. */
+  readonly byProvider: readonly BilledProviderRow[];
   readonly days: readonly { readonly day: string; readonly costUsd: number }[];
   /** Sessions in range whose exact cost is known. */
   readonly billedSessions: number;
@@ -413,6 +424,10 @@ function buildBilledSpend(
     string,
     { model: string; provider: string; requests: number; tokens: BilledTokens }
   >();
+  const providerRows = new Map<
+    string,
+    { requests: number; tokens: BilledTokens; costUsd: number }
+  >();
   const dayCost = new Map<string, number>();
   const costByKind = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
   let costUsd = 0;
@@ -441,6 +456,18 @@ function buildBilledSpend(
     };
     sessionRow.costUsd += cost;
     sessionRows.set(request.sessionId, sessionRow);
+
+    const providerRow = providerRows.get(provider) ?? {
+      requests: 0,
+      tokens: NO_BILLED_TOKENS,
+      costUsd: 0,
+    };
+    providerRow.requests += 1;
+    providerRow.tokens = addBilled(providerRow.tokens, request);
+    // Summed per request rather than repriced from the provider's total:
+    // one vendor can bill several models at different rates.
+    providerRow.costUsd += cost;
+    providerRows.set(provider, providerRow);
 
     const modelKey = `${provider}|${request.model}`;
     const modelRow = modelRows.get(modelKey) ?? {
@@ -474,6 +501,9 @@ function buildBilledSpend(
         costUsd: billedCostUsd(row.tokens, row.provider, row.model) ?? 0,
       }))
       .sort((a, b) => b.costUsd - a.costUsd),
+    byProvider: [...providerRows.entries()]
+      .map(([provider, row]) => ({ provider, ...row }))
+      .sort((a, b) => b.costUsd - a.costUsd || a.provider.localeCompare(b.provider)),
     days: [...dayCost.entries()]
       .map(([day, cost]) => ({ day, costUsd: cost }))
       .sort((a, b) => a.day.localeCompare(b.day)),

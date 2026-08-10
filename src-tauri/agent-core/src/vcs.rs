@@ -198,6 +198,33 @@ pub fn parse_worktrees(porcelain: &str) -> Vec<Worktree> {
     worktrees
 }
 
+/// How far the current branch has drifted from the branch it tracks:
+/// what a pull would bring down, and what a push would send up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Divergence {
+    /// Commits on the upstream that this branch does not have.
+    pub behind: u32,
+    /// Commits here that the upstream does not have.
+    pub ahead: u32,
+}
+
+/// Parse `git rev-list --left-right --count @{upstream}...HEAD`, which
+/// prints the two counts on one tab-separated line: upstream-only first
+/// (behind), HEAD-only second (ahead).
+///
+/// None for anything else — a branch with no upstream makes git fail
+/// before it prints, and a shape we don't recognise is not worth
+/// guessing at when the answer is a number shown to the user.
+pub fn parse_ahead_behind(output: &str) -> Option<Divergence> {
+    let line = output.lines().next()?;
+    let (behind, ahead) = line.trim().split_once(|c: char| c.is_whitespace())?;
+    Some(Divergence {
+        behind: behind.trim().parse().ok()?,
+        ahead: ahead.trim().parse().ok()?,
+    })
+}
+
 /// A repository bigger than this is fine; the composer's "@" menu shows
 /// fifty rows, so the rest would only cost bandwidth crossing to the UI.
 pub const MAX_PROJECT_FILES: usize = 20_000;
@@ -219,6 +246,29 @@ pub fn parse_ls_files(output: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rev_list_counts_read_behind_then_ahead() {
+        assert_eq!(
+            parse_ahead_behind("2\t5\n"),
+            Some(Divergence { behind: 2, ahead: 5 })
+        );
+    }
+
+    #[test]
+    fn a_branch_level_with_its_upstream_counts_zero() {
+        assert_eq!(
+            parse_ahead_behind("0\t0\n"),
+            Some(Divergence { behind: 0, ahead: 0 })
+        );
+    }
+
+    #[test]
+    fn output_that_is_not_two_counts_is_no_answer() {
+        assert_eq!(parse_ahead_behind(""), None);
+        assert_eq!(parse_ahead_behind("fatal: no upstream\n"), None);
+        assert_eq!(parse_ahead_behind("3\n"), None);
+    }
 
     #[test]
     fn nul_separated_paths_become_entries() {

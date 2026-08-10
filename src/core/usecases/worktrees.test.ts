@@ -66,6 +66,9 @@ class FakeGit implements GitPort {
   async log() {
     return [];
   }
+  async upstream() {
+    return null;
+  }
   async branches() {
     return [];
   }

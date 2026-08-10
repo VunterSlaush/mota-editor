@@ -634,6 +634,32 @@ describe("buildInsights billed spend", () => {
     expect(report.billed?.bySession[0].costUsd).toBeCloseTo(10);
   });
 
+  it("totals the bill per vendor, dearest first", () => {
+    const other = session({
+      sessionId: "s2",
+      provider: "codex",
+      providerSessionId: "provider-2",
+      turns: [turn()],
+    });
+    const report = build([logged, other], {
+      billed: [
+        billed({ requestId: "r1" }),
+        billed({ requestId: "r2", model: "claude-haiku-4-5-20251001" }),
+        billed({ requestId: "r3", sessionId: "provider-2", model: "gpt-5" }),
+      ],
+    });
+    const rows = report.billed?.byProvider ?? [];
+    expect(rows.map((p) => p.provider)).toEqual(["claude", "codex"]);
+    // $5 opus + $1 haiku, both billed to claude.
+    expect(rows[0].costUsd).toBeCloseTo(6);
+    expect(rows[0].requests).toBe(2);
+    expect(rows[0].tokens.inputTokens).toBe(2_000_000);
+    // Every request lands in exactly one row, so the rows add up.
+    expect(rows.reduce((sum, p) => sum + p.costUsd, 0)).toBeCloseTo(
+      report.billed?.costUsd ?? 0,
+    );
+  });
+
   it("groups by the full model ids the vendor reports", () => {
     const report = build([logged], {
       billed: [

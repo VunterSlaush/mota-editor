@@ -25,6 +25,14 @@ export interface GitBranch {
   readonly remote?: boolean;
 }
 
+/** How far the current branch has drifted from the branch it tracks:
+ *  `behind` is what a pull would bring down, `ahead` what a push would
+ *  send up. Both are counted against the last fetch, not the remote. */
+export interface GitDivergence {
+  readonly behind: number;
+  readonly ahead: number;
+}
+
 /** One checkout of the repository. `branch` is "" on a detached HEAD. */
 export interface GitWorktree {
   readonly path: string;
@@ -53,6 +61,12 @@ export interface GitPort {
   branches(projectPath: string): Promise<GitBranch[]>;
   /** The `origin` remote's URL, or "" when the repo has none. */
   remoteUrl(projectPath: string): Promise<string>;
+  /**
+   * Commits waiting to be pulled and pushed, or null when there is
+   * nothing to compare against — no upstream, a detached HEAD, or no
+   * commits yet. All normal states, none of them an error.
+   */
+  upstream(projectPath: string): Promise<GitDivergence | null>;
   /**
    * Every file git knows about — tracked plus untracked-and-not-ignored
    * — as project-relative paths. Empty for a folder that is not a

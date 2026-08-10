@@ -15,6 +15,7 @@ import type {
   GitBranch,
   GitChange,
   GitCommit,
+  GitDivergence,
   GitPort,
   GitWorktree,
   WorktreeAddMode,
@@ -338,6 +339,9 @@ export class DemoGit implements GitPort {
   }
   async remoteUrl(): Promise<string> {
     return "git@github.com:mota/mota-editor.git";
+  }
+  async upstream(): Promise<GitDivergence> {
+    return { behind: 1, ahead: 2 };
   }
   async listFiles(): Promise<string[]> {
     return [

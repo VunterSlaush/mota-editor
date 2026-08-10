@@ -115,6 +115,14 @@ function priceFor(provider: string, model: string | undefined): PriceEntry | nul
   );
 }
 
+/** Money for display: "$12.40", and "<$0.01" rather than a bare "$0.00"
+ *  for spend too small to round to a cent but real enough to have
+ *  happened. */
+export function formatUsd(usd: number): string {
+  if (usd > 0 && usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
+}
+
 /** Rough cost in USD for a token count; null when the rate is unknown. */
 export function estimateCostUsd(
   tokens: number,
