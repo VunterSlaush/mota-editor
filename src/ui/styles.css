@@ -2219,6 +2219,20 @@ body {
   flex: none;
 }
 
+/* Commits waiting on Pull/Push. Sized to survive the label clipping:
+   the count is the reason to click the button, so it outranks the word. */
+.changes__pending {
+  flex: none;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Turns slowly while the agent works, to say "this view is live". */
 .changes__watching {
   animation: changes-watching 2.4s linear infinite;

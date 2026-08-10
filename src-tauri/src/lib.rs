@@ -77,6 +77,7 @@ pub fn run() {
             git::git_unstage,
             git::git_commit,
             git::git_branches,
+            git::git_upstream,
             git::git_checkout,
             git::git_push,
             git::git_pull,

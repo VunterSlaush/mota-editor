@@ -3,6 +3,7 @@ import type {
   GitBranch,
   GitChange,
   GitCommit,
+  GitDivergence,
   GitPort,
   GitWorktree,
   WorktreeAddMode,
@@ -25,6 +26,10 @@ export class TauriGitStatus implements GitPort {
 
   async remoteUrl(projectPath: string): Promise<string> {
     return invoke<string>("git_remote_url", { projectPath });
+  }
+
+  async upstream(projectPath: string): Promise<GitDivergence | null> {
+    return invoke<GitDivergence | null>("git_upstream", { projectPath });
   }
 
   async listFiles(projectPath: string): Promise<string[]> {

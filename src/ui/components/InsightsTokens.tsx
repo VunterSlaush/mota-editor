@@ -1,12 +1,8 @@
 import { totalBilledTokens } from "../../core/entities/billing";
 import type { BilledSpend, InsightsReport } from "../../core/entities/insights";
+import { formatUsd } from "../../core/entities/modelPricing";
 import { formatTokens } from "../../core/entities/tokens";
 import { BarList, DayBarChart, SplitBar, StatTile } from "./InsightsCharts";
-
-function formatUsd(usd: number): string {
-  if (usd > 0 && usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
-}
 
 /** Estimated money always carries the "≈"; exact money never does. */
 function formatCost(usd: number | null): string {
@@ -22,9 +18,9 @@ function formatPercent(fraction: number): string {
  * Money, said as what it is: list-price arithmetic over the tokens the
  * vendor reported. On a subscription nothing here is charged per token,
  * so an unqualified dollar figure would be read as a bill that does not
- * exist.
+ * exist. Shared with the Usage section, which shows the same totals.
  */
-function listPrice(usd: number): string {
+export function listPrice(usd: number): string {
   return `${formatUsd(usd)} at list price`;
 }
 

@@ -109,6 +109,10 @@ export function ChangesPanel({
   // is not. Only the refresh stays live.
   const mutationsDisabled = busy || working !== null;
   const currentBranch = changes?.branches.find((b) => b.current)?.name ?? "";
+  // Counted against the last fetch — the numbers move when Fetch runs,
+  // not when the remote does.
+  const behind = changes?.divergence?.behind ?? 0;
+  const ahead = changes?.divergence?.ahead ?? 0;
   const canCommit =
     !mutationsDisabled &&
     (changes?.staged.length ?? 0) > 0 &&
@@ -194,17 +198,21 @@ export function ChangesPanel({
           type="button"
           className="changes__action"
           disabled={mutationsDisabled}
+          title={pendingTitle("pull", behind)}
           onClick={() => void run("pull", onPull)}
         >
           {verbIcon("pull", ArrowLineDown)} Pull
+          <PendingCount count={behind} />
         </button>
         <button
           type="button"
           className="changes__action"
           disabled={mutationsDisabled}
+          title={pendingTitle("push", ahead)}
           onClick={() => void run("push", onPush)}
         >
           {verbIcon("push", ArrowLineUp)} Push
+          <PendingCount count={ahead} />
         </button>
         <button
           type="button"
@@ -323,6 +331,28 @@ export function ChangesPanel({
       )}
     </aside>
   );
+}
+
+/** The commits a verb has waiting, on its button; nothing at zero, so a
+ *  branch in sync stays quiet. */
+function PendingCount({ count }: { count: number }) {
+  if (count === 0) return null;
+  return <span className="changes__pending">{count}</span>;
+}
+
+/** What the Pull/Push button promises, said in commits. "Since the last
+ *  fetch" is not pedantry: these counts come from local refs, so a
+ *  branch can read as in sync while the remote has moved on. */
+function pendingTitle(verb: "pull" | "push", count: number): string {
+  const commits = `${String(count)} ${count === 1 ? "commit" : "commits"}`;
+  if (verb === "pull") {
+    return count === 0
+      ? "Pull — nothing new since the last fetch"
+      : `Pull ${commits} from the upstream (as of the last fetch)`;
+  }
+  return count === 0
+    ? "Push — nothing waiting to be pushed"
+    : `Push ${commits} to the upstream`;
 }
 
 /** A titled, collapsible group with its item count in the header. */

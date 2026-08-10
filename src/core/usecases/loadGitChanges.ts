@@ -1,4 +1,10 @@
-import type { GitBranch, GitChange, GitCommit, GitPort } from "../ports/gitPort";
+import type {
+  GitBranch,
+  GitChange,
+  GitCommit,
+  GitDivergence,
+  GitPort,
+} from "../ports/gitPort";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 
@@ -12,6 +18,8 @@ export interface GitChanges {
   readonly branches: readonly GitBranch[];
   /** The `origin` URL, "" when there is none — commits link off it. */
   readonly remote: string;
+  /** Commits to pull and to push; null when the branch tracks nothing. */
+  readonly divergence: GitDivergence | null;
 }
 
 /**
@@ -31,11 +39,12 @@ export class LoadGitChanges {
 
     try {
       const path = tab.project.path;
-      const [changes, commits, branches, remote] = await Promise.all([
+      const [changes, commits, branches, remote, divergence] = await Promise.all([
         this.git.changes(path),
         this.git.log(path, COMMIT_LOG_LIMIT).catch(() => []),
         this.git.branches(path).catch(() => []),
         this.git.remoteUrl(path).catch(() => ""),
+        this.git.upstream(path).catch(() => null),
       ]);
       // Cache the current branch on the tab: tooltips and other passive
       // UI read it from state instead of asking git again.
@@ -49,6 +58,7 @@ export class LoadGitChanges {
         commits,
         branches,
         remote,
+        divergence,
       };
     } catch {
       return null;

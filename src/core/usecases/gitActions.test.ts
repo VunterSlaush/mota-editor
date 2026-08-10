@@ -4,6 +4,7 @@ import type {
   GitBranch,
   GitChange,
   GitCommit,
+  GitDivergence,
   GitPort,
   GitWorktree,
   WorktreeAddMode,
@@ -21,6 +22,7 @@ class FakeGit implements GitPort {
   notARepo = false;
   remote = "git@github.com:mota/repo.git";
   failRemoteWith: string | null = null;
+  divergence: GitDivergence | null = { behind: 0, ahead: 0 };
 
   async changes(): Promise<GitChange[]> {
     if (this.notARepo) throw new Error("not a repo");
@@ -29,6 +31,9 @@ class FakeGit implements GitPort {
   async remoteUrl(): Promise<string> {
     if (this.failRemoteWith) throw new Error(this.failRemoteWith);
     return this.remote;
+  }
+  async upstream(): Promise<GitDivergence | null> {
+    return this.divergence;
   }
   async listFiles(): Promise<string[]> {
     return this.files.map((f) => f.path);
@@ -136,6 +141,18 @@ describe("git use cases", () => {
     expect(result?.staged.map((f) => f.path)).toEqual(["a.rs", "c.rs"]);
     expect(result?.unstaged.map((f) => f.path)).toEqual(["b.rs", "c.rs"]);
     expect(result?.commits).toHaveLength(1);
+  });
+
+  it("carries the commits waiting to be pulled and pushed", async () => {
+    const { git, loader } = setup();
+    git.divergence = { behind: 3, ahead: 1 };
+    expect((await loader.execute("t1"))?.divergence).toEqual({ behind: 3, ahead: 1 });
+  });
+
+  it("a branch tracking nothing loads without a divergence", async () => {
+    const { git, loader } = setup();
+    git.divergence = null;
+    expect((await loader.execute("t1"))?.divergence).toBeNull();
   });
 
   it("returns null for folders that are not repositories", async () => {

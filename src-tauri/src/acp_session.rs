@@ -55,6 +55,14 @@ pub struct AcpSessions {
     /// ~100-300MB Node runtime, and a parallel spare helps nobody.
     /// Entries live as long as the tab; a handful of small Arcs.
     booting: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// How many times each tab has been reset ("New chat"). A boot reads
+    /// this when it starts and again before it registers what it built:
+    /// a reset cannot wait for a boot it interrupted (the handshake can
+    /// take a minute), so instead the boot notices it was overtaken and
+    /// throws its session away. Without this, a reset landing mid-boot is
+    /// silently undone — the finished boot re-registers the conversation
+    /// the user just cleared.
+    resets: Mutex<HashMap<String, u64>>,
 }
 
 pub struct AcpSession {
@@ -89,6 +97,11 @@ pub struct AcpSession {
     /// fully disabled then: approving the plan is the user's call.
     plan_mode: AtomicBool,
     turn_active: AtomicBool,
+    /// Set once this session holds something worth restoring: a prompt
+    /// was sent, or a saved conversation was loaded into it. A session
+    /// that was only created has no agent-side state at all — nothing to
+    /// recover, and nothing the agent would recognise if asked.
+    has_conversation: AtomicBool,
     /// Set once the agent process is gone (crashed, killed, shut down).
     /// A dead session must never be handed out again — writes to it can
     /// only fail or hang.
@@ -121,11 +134,30 @@ impl AcpSessions {
     }
 
     pub fn end_session(&self, tab_id: &str) {
+        // Bumped FIRST: a boot running right now must see the reset even
+        // if it finishes before this call returns.
+        {
+            let mut resets = self.resets.lock().unwrap_or_else(PoisonError::into_inner);
+            let count = resets.entry(tab_id.to_owned()).or_insert(0);
+            *count = count.wrapping_add(1);
+        }
         if let Some(session) = self.map.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id) {
             session.shutdown();
         }
         // An intentional reset must not resurrect the old context later.
         self.recovery.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id);
+    }
+
+    /// The tab's reset count — taken when a boot begins and compared
+    /// before it registers anything. A change means "New chat" happened
+    /// in between and the session under construction is already stale.
+    fn reset_mark(&self, tab_id: &str) -> u64 {
+        self.resets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(tab_id)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Kill the tab's agent process but KEEP its conversation restorable.
@@ -148,7 +180,12 @@ impl AcpSessions {
         }
     }
 
-    /// Remember the tab's live agent session for crash recovery.
+    /// Remember the tab's live agent session for crash recovery. Only
+    /// sessions that carry a conversation are worth recording: an agent
+    /// writes nothing to disk until it is prompted, so asking it to
+    /// restore a session that was only ever created fails with "resource
+    /// not found" — an alarming message about an empty context nobody
+    /// wanted back.
     fn record_recovery(&self, tab_id: &str, provider_id: &str, session_id: &str) {
         self.recovery.lock().unwrap_or_else(PoisonError::into_inner).insert(
             tab_id.to_owned(),
@@ -327,6 +364,11 @@ pub async fn start_turn(
     let id = session.request_id();
     let prompt = acp::prompt_request_for_provider(id, &session.sid(), provider_id, &request);
     *session.current_turn.lock().unwrap_or_else(PoisonError::into_inner) = Some(id);
+    // From here the session has a conversation in it — record it for
+    // recovery BEFORE sending, so an agent that dies on this very prompt
+    // is still restorable.
+    session.has_conversation.store(true, Ordering::SeqCst);
+    sessions.record_recovery(tab_id, provider_id, &session.sid());
 
     let app_for_task = app.clone();
     let tab = tab_id.to_owned();
@@ -522,6 +564,9 @@ async fn ensure_session(
     // adapter process in parallel.
     let boot_lock = sessions.boot_lock(tab_id);
     let _booting = boot_lock.lock().await;
+    // Taken under the boot lock, so a caller that arrives AFTER a reset
+    // reads the new value and a boot interrupted BY one reads the old.
+    let mark = sessions.reset_mark(tab_id);
 
     // Set only when a LIVE conversation is retired to apply a settings
     // change — the one respawn the user caused and pays for.
@@ -542,10 +587,14 @@ async fn ensure_session(
         // only real once the agent has been handed it. But start over
         // does NOT mean start from zero — remember the live conversation
         // so the recovery path below resumes it into the fresh agent.
-        // (A dead session keeps whatever recovery entry it recorded at
-        // creation; a changed provider is filtered out by
-        // `recoverable_session`, which matches on provider id.)
-        if !existing.dead.load(Ordering::SeqCst) {
+        // (A dead session keeps the recovery entry its last prompt
+        // recorded; a changed provider is filtered out by
+        // `recoverable_session`, which matches on provider id. A session
+        // never prompted in has nothing to remember, and asking for it
+        // back is the "resource not found" the user should never see.)
+        if !existing.dead.load(Ordering::SeqCst)
+            && existing.has_conversation.load(Ordering::SeqCst)
+        {
             let sid = existing.sid();
             if !sid.is_empty() {
                 sessions.record_recovery(tab_id, &existing.provider_id, &sid);
@@ -565,6 +614,7 @@ async fn ensure_session(
     let session = boot_agent(app, tab_id, provider_id, spec, true).await.inspect_err(|_| {
         emit_stage(app, tab_id, "ready"); // never leave the chip stuck
     })?;
+    discard_if_reset(app, sessions, tab_id, &session, mark)?;
 
     // Recovery: when the previous process died — or was retired by a
     // model/effort reconfigure — with a conversation in it, try to reload
@@ -601,6 +651,8 @@ async fn ensure_session(
             };
             match restored {
                 Ok(()) => {
+                    discard_if_reset(app, sessions, tab_id, &session, mark)?;
+                    session.has_conversation.store(true, Ordering::SeqCst);
                     adopt_session(app, tab_id, &session, old_id.clone());
                     if let Some(reason) = reconfigured {
                         runner::emit(
@@ -668,7 +720,11 @@ async fn ensure_session(
         return Err(AcpStartError::Failed("The agent returned no session id.".to_owned()));
     };
 
-    sessions.record_recovery(tab_id, provider_id, &session_id);
+    discard_if_reset(app, sessions, tab_id, &session, mark)?;
+    // No recovery entry yet: a session the agent has never been prompted
+    // in exists only in this process, and asking a fresh agent to restore
+    // it fails. `start_turn` records it the moment there is something to
+    // restore.
     adopt_session(app, tab_id, &session, session_id);
     // Kept for validating `session/set_mode` requests — NOT emitted as a
     // ModeChanged: the user's picker choice is applied right after this
@@ -684,6 +740,30 @@ async fn ensure_session(
         .insert(tab_id.to_owned(), Arc::clone(&session));
     emit_stage(app, tab_id, "ready");
     Ok(session)
+}
+
+/// Throw away a session built for a conversation the user has since
+/// reset. "New chat" cannot wait for an in-flight boot — the handshake
+/// runs to two minutes — so it bumps the tab's reset count and this
+/// checks it at every point a session would become the tab's. Registering
+/// one anyway is what made a New chat land on the old conversation: the
+/// screen was blank, the agent still remembered everything, and the id it
+/// left behind was later offered for a recovery that could only fail.
+fn discard_if_reset(
+    app: &AppHandle,
+    sessions: &AcpSessions,
+    tab_id: &str,
+    session: &Arc<AcpSession>,
+    mark: u64,
+) -> Result<(), AcpStartError> {
+    if sessions.reset_mark(tab_id) == mark {
+        return Ok(());
+    }
+    session.shutdown();
+    emit_stage(app, tab_id, "ready");
+    Err(AcpStartError::Failed(
+        "The chat was reset while the agent was starting.".to_owned(),
+    ))
 }
 
 /// Spawn the provider's ACP adapter and complete `initialize` — the
@@ -730,6 +810,7 @@ async fn boot_agent(
         bypass: AtomicBool::new(false),
         plan_mode: AtomicBool::new(false),
         turn_active: AtomicBool::new(false),
+        has_conversation: AtomicBool::new(false),
         dead: AtomicBool::new(false),
         replaying: AtomicBool::new(false),
         caps: Mutex::new(acp::AgentCaps::default()),
@@ -963,6 +1044,7 @@ pub async fn load_native_session(
     // its own to show — resume skips the replay, so without one the
     // conversation would come back as a blank screen.
     if prefer_resume && try_resume(&session, session_id, spec).await {
+        session.has_conversation.store(true, Ordering::SeqCst);
         adopt_session(&app, tab_id, &session, session_id.to_owned());
         sessions.record_recovery(tab_id, provider_id, session_id);
         return Ok(false);
@@ -978,6 +1060,7 @@ pub async fn load_native_session(
             LOAD_TIMEOUT,
         )
         .await?;
+    session.has_conversation.store(true, Ordering::SeqCst);
     adopt_session(&app, tab_id, &session, session_id.to_owned());
     sessions.record_recovery(tab_id, provider_id, session_id);
     Ok(true)
