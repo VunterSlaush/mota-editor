@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { newProject } from "../entities/project";
 import type {
   AgentGateway,
@@ -37,12 +37,6 @@ class FakeAgentGateway implements AgentGateway {
   }
 
   subscribeSessionEvents(): void {}
-
-  /** The agent-initiated lane's sink, so a test can play a follow-up. */
-  agentInitiated: ((tabId: string, event: AgentTurnEvent) => void) | null = null;
-  subscribeAgentInitiated(onEvent: (tabId: string, event: AgentTurnEvent) => void): void {
-    this.agentInitiated = onEvent;
-  }
 
   async readTerminalOutput(): Promise<null> {
     return null;
@@ -1094,137 +1088,5 @@ describe("SendPrompt turn meta", () => {
     const message = store.getState().tabs[0].messages.find((m) => m.role === "user");
     expect(message?.turn?.stopReason).toBe("cancelled");
     expect(message?.turn?.durationMs).toBeGreaterThanOrEqual(0);
-  });
-});
-
-describe("a follow-up the agent starts on its own", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  /** Play a turn, then let the agent come back with no prompt to answer. */
-  async function afterATurn() {
-    const made = setup([{ kind: "completed", isError: false }]);
-    await made.useCase.execute("t1", "watch CI and tell me");
-    const say = (event: AgentTurnEvent) => made.gateway.agentInitiated?.("t1", event);
-    return { ...made, say };
-  }
-
-  it("puts what the agent said into the conversation", async () => {
-    const { store, say } = await afterATurn();
-
-    say({ kind: "assistant", text: "CI finished: 3 tests failed." });
-
-    const last = tabOf(store).messages.at(-1);
-    expect(last?.role).toBe("assistant");
-    expect(last?.text).toBe("CI finished: 3 tests failed.");
-  });
-
-  it("marks the tab busy while it runs, so Stop is reachable", async () => {
-    const { store, say } = await afterATurn();
-
-    say({ kind: "tool", name: "bash", detail: "gh run view" });
-
-    expect(tabOf(store).busy).toBe(true);
-  });
-
-  it("lets the tab go idle again once the agent stops talking", async () => {
-    const { store, say } = await afterATurn();
-
-    say({ kind: "assistant", text: "CI is green." });
-    await vi.advanceTimersByTimeAsync(3000);
-
-    expect(tabOf(store).busy).toBe(false);
-  });
-
-  it("delivers what the user typed while the follow-up held the tab", async () => {
-    const { gateway, useCase, say } = await afterATurn();
-
-    say({ kind: "assistant", text: "CI failed." });
-    await useCase.execute("t1", "fix it then");
-    expect(gateway.requests).toHaveLength(1); // queued behind the follow-up
-
-    await vi.advanceTimersByTimeAsync(3000);
-
-    expect(gateway.requests).toHaveLength(2);
-    expect(gateway.requests[1].prompt).toBe("fix it then");
-  });
-
-  it("keeps its hands off the busy flag when a real turn started meanwhile", async () => {
-    const { store, gateway, useCase, say } = await afterATurn();
-
-    say({ kind: "assistant", text: "CI failed." });
-    gateway.script = []; // a turn that does not finish on its own
-    await vi.advanceTimersByTimeAsync(3000);
-    await useCase.execute("t1", "fix it then");
-    expect(tabOf(store).busy).toBe(true);
-
-    // The follow-up's own settle must not mark that running turn idle.
-    say({ kind: "assistant", text: "one more thing" });
-    await vi.advanceTimersByTimeAsync(3000);
-
-    expect(tabOf(store).busy).toBe(true);
-  });
-
-  it("shows an approval it asks for, and answers it", async () => {
-    const { store, gateway, say } = await afterATurn();
-
-    say(TOOL_APPROVAL);
-    const approval = tabOf(store).messages.at(-1);
-    expect(approval?.approval?.requestId).toBe("r1");
-
-    await gateway.respondPermission("t1", "r1", "allow");
-    expect(gateway.permissionResponses).toEqual([{ requestId: "r1", optionId: "allow" }]);
-  });
-
-  it("gets the user's eyes on it and saves it once the agent goes quiet", async () => {
-    const { transcripts, notifications, say } = await afterATurn();
-    const savedByTheTurn = transcripts.saved.length;
-
-    say({ kind: "assistant", text: "CI is green." });
-    const notifiedByTheTurn = notifications.calls.length;
-    // Nothing yet: the agent may still be mid-sentence.
-    expect(transcripts.saved.length).toBe(savedByTheTurn);
-
-    await vi.advanceTimersByTimeAsync(3000);
-
-    expect(notifications.calls.length).toBe(notifiedByTheTurn + 1);
-    const saved = transcripts.saved.at(-1);
-    expect(transcripts.saved.length).toBe(savedByTheTurn + 1);
-    expect(saved?.messages.at(-1)?.text).toBe("CI is green.");
-  });
-
-  it("stays quiet for a stretch that only reported token usage", async () => {
-    const { notifications, transcripts, say } = await afterATurn();
-    const before = {
-      notified: notifications.calls.length,
-      saved: transcripts.saved.length,
-    };
-
-    say({ kind: "usage", used: 1000, size: 200000 });
-    await vi.advanceTimersByTimeAsync(3000);
-
-    expect(notifications.calls.length).toBe(before.notified);
-    expect(transcripts.saved.length).toBe(before.saved);
-  });
-
-  it("ignores a follow-up for a tab that is no longer open", async () => {
-    const { store, gateway } = await afterATurn();
-
-    expect(() =>
-      gateway.agentInitiated?.("gone", { kind: "assistant", text: "hello?" }),
-    ).not.toThrow();
-    expect(tabOf(store).messages.some((m) => m.text === "hello?")).toBe(false);
-  });
-
-  it("streams a follow-up's deltas into one message, like any other reply", async () => {
-    const { store, say } = await afterATurn();
-
-    say({ kind: "assistantDelta", text: "CI " });
-    say({ kind: "assistantDelta", text: "is green." });
-    await vi.advanceTimersByTimeAsync(3000);
-
-    const last = tabOf(store).messages.at(-1);
-    expect(last?.role).toBe("assistant");
-    expect(last?.text).toBe("CI is green.");
   });
 });

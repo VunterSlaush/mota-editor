@@ -126,16 +126,6 @@ export interface AgentGateway {
    */
   subscribeSessionEvents(onEvent: (tabId: string, event: AgentTurnEvent) => void): void;
 
-  /**
-   * Receive everything else that arrives for a tab with no turn of ours
-   * in flight: a follow-up cycle the agent started on its own, because a
-   * background task it was watching finished or a wake-up it scheduled
-   * fired. The agent is answering nobody's prompt, so there is no turn
-   * to attribute the work to — but it is still the agent talking, and it
-   * belongs in the conversation. At most one subscriber.
-   */
-  subscribeAgentInitiated(onEvent: (tabId: string, event: AgentTurnEvent) => void): void;
-
   /** Cancel the in-flight turn for a tab, if any. */
   cancelTurn(tabId: string): Promise<void>;
 
