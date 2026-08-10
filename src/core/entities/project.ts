@@ -25,6 +25,11 @@ export interface Project {
    * resumed across turns (and across app restarts where supported).
    */
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
+  /**
+   * When this folder is a linked git worktree, the path of the main
+   * checkout it belongs to. Absent for ordinary folders.
+   */
+  readonly worktreeOf?: string;
 }
 
 export function projectNameFromPath(path: string): string {
@@ -46,7 +51,27 @@ export interface ProjectDefaults {
   readonly effort?: string;
 }
 
-export function newProject(id: string, path: string, defaults: ProjectDefaults): Project {
+/**
+ * What an existing tab would seed a new one with — for opening a
+ * worktree beside the tab it was forked from, where the app's global
+ * defaults are usually the wrong answer.
+ */
+export function defaultsFromProject(project: Project): ProjectDefaults {
+  return {
+    provider: project.provider,
+    mode: project.mode,
+    permission: project.permission,
+    model: project.model,
+    effort: project.effort,
+  };
+}
+
+export function newProject(
+  id: string,
+  path: string,
+  defaults: ProjectDefaults,
+  worktreeOf?: string,
+): Project {
   return {
     id,
     path,
@@ -58,5 +83,6 @@ export function newProject(id: string, path: string, defaults: ProjectDefaults):
     effort: defaults.effort,
     verbose: true,
     providerSessions: {},
+    worktreeOf,
   };
 }

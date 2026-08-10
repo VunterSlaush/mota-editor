@@ -20,7 +20,24 @@ export function App({ context }: { context: AppContext }) {
   const tab = activeTab(state);
   const [sidebarView, setSidebarView] = useState<SidebarView | null>("changes");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [supportsCow, setSupportsCow] = useState<boolean | null>(null);
   const projectPath = tab?.project.path ?? "";
+
+  // Asked once per project, and only lazily: the probe writes a file to
+  // find out, so it is not something to do on every settings render.
+  useEffect(() => {
+    if (!settingsOpen || !projectPath) return;
+    let cancelled = false;
+    context.worktreeProvisioning
+      .supportsCow(projectPath)
+      .then((can) => {
+        if (!cancelled) setSupportsCow(can);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [context, settingsOpen, projectPath]);
 
   // The theme is a document-level attribute: the CSS palettes hang off
   // `[data-theme]`, so one line here restyles everything at once.
@@ -145,6 +162,25 @@ export function App({ context }: { context: AppContext }) {
           onGitDiff={(path, staged, untracked) =>
             context.gitActions.diff(tab.project.id, path, staged, untracked)
           }
+          loadWorktrees={() => context.worktrees.list(tab.project.id)}
+          onOpenWorktree={(path, mainPath) =>
+            void context.worktrees.open(path, mainPath, tab.project.id)
+          }
+          onCreateWorktree={(branch, mode) =>
+            context.worktrees.create(tab.project.id, branch, mode)
+          }
+          onRetryPreparing={() =>
+            void context.worktrees.provision(
+              tab.project.path,
+              tab.project.worktreeOf ?? tab.project.path,
+            )
+          }
+          onCheckWorktreeRemoval={(path) =>
+            context.removeWorktree.check(tab.project.id, path)
+          }
+          onRemoveWorktree={(path, mode) =>
+            context.removeWorktree.execute(tab.project.id, path, mode)
+          }
           onOpenFile={(path) => openFileExternally(tab.project.path, path)}
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}
@@ -171,6 +207,7 @@ export function App({ context }: { context: AppContext }) {
           loadInsights={context.loadInsights}
           tabs={state.tabs}
           newId={context.newId}
+          supportsCow={supportsCow}
           onClose={closeSettings}
         />
       )}

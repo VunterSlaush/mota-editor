@@ -9,6 +9,7 @@ import {
   DemoProviderProbe,
   DemoTranscriptStore,
   DemoWorkspaceStore,
+  DemoWorktreeProvisioning,
 } from "../adapters/demo/demoAdapters";
 import { isTauriRuntime } from "../adapters/tauri/runtime";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
@@ -21,9 +22,11 @@ import { TauriPastedImageStore } from "../adapters/tauri/tauriPastedImageStore";
 import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
+import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
 import type { ProviderProbe } from "../core/ports/providerProbe";
 import type { FilePicker, PastedImageStore } from "../core/ports/workspacePort";
+import type { WorktreeProvisioning } from "../core/ports/worktreeProvisioning";
 import { Store } from "../core/state/store";
 import { ApplyCommandConfig } from "../core/usecases/applyCommandConfig";
 import { CancelTurn } from "../core/usecases/cancelTurn";
@@ -51,6 +54,7 @@ import {
   SwitchTab,
   UpdateSettings,
 } from "../core/usecases/switchTab";
+import { RemoveWorktree, Worktrees } from "../core/usecases/worktrees";
 
 /**
  * Composition root — the one place where concrete adapters are chosen and
@@ -72,6 +76,10 @@ export interface AppContext {
   readonly selectVerbose: SelectVerbose;
   readonly loadGitChanges: LoadGitChanges;
   readonly gitActions: GitActions;
+  readonly worktrees: Worktrees;
+  /** Exposed for the settings panel, which asks what a copy would cost. */
+  readonly worktreeProvisioning: WorktreeProvisioning;
+  readonly removeWorktree: RemoveWorktree;
   readonly sessionHistory: SessionHistory;
   readonly updateSettings: UpdateSettings;
   readonly sendPrompt: SendPrompt;
@@ -110,6 +118,9 @@ export function createAppContext(): AppContext {
     ? new TauriTranscriptStore()
     : new DemoTranscriptStore();
   const notifications = inTauri ? new TauriNotifications() : new DemoNotifications();
+  const worktreeProvisioning = inTauri
+    ? new TauriWorktreeProvisioning()
+    : new DemoWorktreeProvisioning();
   const newId = () => crypto.randomUUID();
 
   // Session-level events (warm-up stages, agent mode switches) arrive
@@ -118,6 +129,9 @@ export function createAppContext(): AppContext {
 
   // Shared: the settings a slash command applies are the same use cases
   // the toolbar drives, so both routes persist and restart identically.
+  // Removing a worktree closes its tab, and closing a tab is exactly
+  // what CloseProject does — so it is shared rather than reimplemented.
+  const closeProject = new CloseProject(store, agentGateway, workspaceStore);
   const selectMode = new SelectMode(store, workspaceStore);
   const selectPermission = new SelectPermission(store, workspaceStore);
   const selectEffort = new SelectEffort(store, workspaceStore, agentGateway);
@@ -131,8 +145,9 @@ export function createAppContext(): AppContext {
       workspaceStore,
       agentGateway,
       newId,
+      gitPort,
     ),
-    closeProject: new CloseProject(store, agentGateway, workspaceStore),
+    closeProject,
     switchTab: new SwitchTab(store, workspaceStore),
     reorderTabs: new ReorderTabs(store, workspaceStore),
     selectProvider: new SelectProvider(store, workspaceStore, agentGateway),
@@ -143,6 +158,21 @@ export function createAppContext(): AppContext {
     selectVerbose: new SelectVerbose(store, workspaceStore),
     loadGitChanges: new LoadGitChanges(store, gitPort),
     gitActions: new GitActions(store, gitPort),
+    worktrees: new Worktrees(
+      store,
+      gitPort,
+      workspaceStore,
+      agentGateway,
+      newId,
+      worktreeProvisioning,
+    ),
+    worktreeProvisioning,
+    removeWorktree: new RemoveWorktree(
+      store,
+      gitPort,
+      worktreeProvisioning,
+      closeProject,
+    ),
     sendPrompt: new SendPrompt(
       store,
       agentGateway,
