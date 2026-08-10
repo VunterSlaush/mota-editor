@@ -1582,6 +1582,106 @@ body {
   border-color: var(--accent);
 }
 
+/* Removing a worktree: the trash on the row, then the confirm beneath. */
+.worktree-picker__remove {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.worktree-picker__remove:hover {
+  color: var(--error);
+}
+
+.worktree-picker__confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  font-size: 12px;
+}
+
+.worktree-picker__confirm-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-dim);
+}
+
+.worktree-picker__confirm-no,
+.worktree-picker__confirm-yes {
+  flex: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+.worktree-picker__confirm-yes {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.worktree-picker__confirm-yes:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A worktree stocking itself, and the chip that offers a retry. */
+.worktree-preparing {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: transparent;
+  font-family: inherit;
+}
+
+.worktree-preparing--failed {
+  color: var(--error);
+  border-color: var(--error);
+  cursor: pointer;
+}
+
+/* ---- Settings: Worktrees section ---- */
+.worktree-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.worktree-path-row .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.worktree-path-row__side {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.worktree-path-row__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ---- Providers section ---- */
 .provider-row {
   display: flex;

@@ -1,6 +1,7 @@
 import type { CommandInfo } from "../../core/entities/command";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
+import type { ProvisionEntry } from "../../core/entities/worktree";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -14,6 +15,7 @@ import type {
   GitPort,
   GitWorktree,
   WorktreeAddMode,
+  WorktreeRemoveMode,
 } from "../../core/ports/gitPort";
 import type { NotificationPort } from "../../core/ports/notificationPort";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
@@ -29,6 +31,11 @@ import type {
   PersistedWorkspace,
   WorkspaceStore,
 } from "../../core/ports/workspacePort";
+import type {
+  DiskUsage,
+  ProvisionReport,
+  WorktreeProvisioning,
+} from "../../core/ports/worktreeProvisioning";
 
 /**
  * Demo adapters — in-memory implementations of every port, used when the
@@ -409,6 +416,7 @@ export class DemoGit implements GitPort {
     worktreePath: string,
     branch: string,
     _mode: WorktreeAddMode,
+    _remote: string,
   ): Promise<string> {
     this.worktreeList.push({
       path: worktreePath,
@@ -424,6 +432,71 @@ export class DemoGit implements GitPort {
       this.worktreeOrigins.get(projectPath) ?? projectPath,
     );
     return `Preparing worktree (checking out '${branch}')`;
+  }
+
+  async worktreeRemove(
+    _projectPath: string,
+    worktreePath: string,
+    _mode: WorktreeRemoveMode,
+  ): Promise<string> {
+    const at = this.worktreeList.findIndex((w) => w.path === worktreePath);
+    if (at !== -1) this.worktreeList.splice(at, 1);
+    this.worktreeOrigins.delete(worktreePath);
+    return `Removing worktree ${worktreePath}`;
+  }
+
+  async worktreePrune(): Promise<string> {
+    return "";
+  }
+
+  async branchesMerged(): Promise<GitBranch[]> {
+    return [{ name: "dev", current: false, remote: false }];
+  }
+}
+
+/**
+ * Provisioning without a disk: every folder reports as copied, and the
+ * sizes are plausible constants so the UI has something to lay out.
+ */
+export class DemoWorktreeProvisioning implements WorktreeProvisioning {
+  async provision(
+    _mainPath: string,
+    worktreePath: string,
+    entries: readonly ProvisionEntry[],
+  ): Promise<ProvisionReport> {
+    await delay(600);
+    return {
+      worktreePath,
+      entries: entries.map((entry) => ({
+        path: entry.path,
+        strategy: entry.strategy,
+        outcome: entry.strategy === "share" ? "linked" : "copied",
+        message: "",
+      })),
+      ok: true,
+    };
+  }
+
+  async unprovision(_worktreePath: string, paths: readonly string[]) {
+    return [...paths];
+  }
+
+  async supportsCow() {
+    return true;
+  }
+
+  async diskUsage(): Promise<DiskUsage> {
+    return {
+      ownBytes: 2_100_000,
+      sharedBytes: 5_140_000_000,
+      apparentBytes: 5_142_100_000,
+      entries: [
+        { path: "src-tauri", bytes: 4_900_000_000, shared: true },
+        { path: "node_modules", bytes: 240_000_000, shared: true },
+        { path: "src", bytes: 2_000_000, shared: false },
+      ],
+      truncated: false,
+    };
   }
 }
 

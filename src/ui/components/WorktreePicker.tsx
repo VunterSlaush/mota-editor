@@ -1,7 +1,12 @@
-import { FolderSimple, GitFork } from "@phosphor-icons/react";
+import { FolderSimple, GitFork, Trash } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import type { RemovalCheck } from "../../core/entities/worktree";
 import { deriveBranchName } from "../../core/entities/worktree";
-import type { GitBranch, WorktreeAddMode } from "../../core/ports/gitPort";
+import type {
+  GitBranch,
+  WorktreeAddMode,
+  WorktreeRemoveMode,
+} from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 
@@ -14,7 +19,16 @@ interface Props {
   currentBranch: string;
   onOpen: (path: string, mainPath: string) => void;
   onCreate: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
+  /** What removing this worktree would cost, asked when Remove is armed. */
+  onCheckRemoval: (path: string) => Promise<RemovalCheck>;
+  onRemove: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
   onClose: () => void;
+}
+
+/** A row armed for removal: the second click is the one that deletes. */
+interface Armed {
+  readonly path: string;
+  readonly check: RemovalCheck;
 }
 
 /** One selectable row: an existing checkout, or a way to make one. */
@@ -37,6 +51,8 @@ export function WorktreePicker({
   currentBranch,
   onOpen,
   onCreate,
+  onCheckRemoval,
+  onRemove,
   onClose,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -44,6 +60,7 @@ export function WorktreePicker({
   const [worktrees, setWorktrees] = useState<readonly WorktreeItem[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [armed, setArmed] = useState<Armed | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => inputRef.current?.focus(), []);
@@ -62,6 +79,25 @@ export function WorktreePicker({
 
   const rows = buildRows(worktrees ?? [], branches, currentBranch, query);
   const mainPath = worktrees?.find((w) => w.main)?.path ?? worktrees?.[0]?.path ?? "";
+
+  /** First click asks git what it would cost; the second click removes. */
+  const arm = async (path: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setArmed({ path, check: await onCheckRemoval(path) });
+    setBusy(false);
+  };
+
+  const confirmRemove = async (check: RemovalCheck) => {
+    if (busy || !armed) return;
+    setBusy(true);
+    const result = await onRemove(armed.path, check.needsForce ? "force" : "safe");
+    setBusy(false);
+    setArmed(null);
+    if (!result.ok) setError(result.message);
+    setWorktrees(await loadWorktrees());
+  };
 
   const act = async (row: Row) => {
     if (busy) return;
@@ -145,7 +181,30 @@ export function WorktreePicker({
                 >
                   <RowLabel row={row} />
                   <RowBadges row={row} />
+                  {row.kind === "worktree" &&
+                    !row.worktree.main &&
+                    !row.worktree.current && (
+                      <button
+                        type="button"
+                        className="worktree-picker__remove"
+                        aria-label={`Remove the worktree at ${row.worktree.path}`}
+                        onClick={(e) => {
+                          e.stopPropagation(); // the row itself opens it
+                          void arm(row.worktree.path);
+                        }}
+                      >
+                        <Trash size={13} aria-hidden="true" />
+                      </button>
+                    )}
                 </div>
+                {armed?.path === (row.kind === "worktree" ? row.worktree.path : "") && (
+                  <RemovalConfirm
+                    check={armed.check}
+                    busy={busy}
+                    onCancel={() => setArmed(null)}
+                    onConfirm={() => void confirmRemove(armed.check)}
+                  />
+                )}
               </div>
             );
           })}
@@ -259,6 +318,50 @@ function RowLabel({ row }: { row: Row }) {
   );
 }
 
+/**
+ * The second half of the two-step: what removal would cost, and the
+ * button that does it. A worktree with uncommitted work says so in the
+ * button itself — "Delete 3 files" is harder to click by reflex than a
+ * bare "Remove", which is the point.
+ */
+function RemovalConfirm({
+  check,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  check: RemovalCheck;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const blocked = check.blockers.some(
+    (b) => b.includes("main checkout") || b.startsWith("Locked") || b.includes("Not a"),
+  );
+  return (
+    <div className="worktree-picker__confirm">
+      <span className="worktree-picker__confirm-text">
+        {check.blockers.length > 0
+          ? check.blockers.join(" ")
+          : "Deletes the folder. The branch and its commits stay."}
+      </span>
+      <button type="button" className="worktree-picker__confirm-no" onClick={onCancel}>
+        Cancel
+      </button>
+      {!blocked && (
+        <button
+          type="button"
+          className="worktree-picker__confirm-yes"
+          disabled={busy}
+          onClick={onConfirm}
+        >
+          {check.needsForce ? "Delete anyway" : "Remove"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function RowBadges({ row }: { row: Row }) {
   if (row.kind === "worktree") {
     const { worktree } = row;
@@ -270,6 +373,7 @@ function RowBadges({ row }: { row: Row }) {
           <span className="branch-picker__current">open</span>
         )}
         {worktree.locked && <span className="branch-picker__remote">locked</span>}
+        {worktree.prunable && <span className="branch-picker__remote">gone</span>}
       </span>
     );
   }

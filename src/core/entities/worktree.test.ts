@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  defaultContainer,
   deriveBranchName,
   deriveWorktreePath,
+  provisionPathProblem,
+  removalCheck,
   samePath,
   sanitizeBranchForPath,
+  shareRisk,
 } from "./worktree";
 
 describe("sanitizeBranchForPath", () => {
@@ -73,5 +77,129 @@ describe("deriveWorktreePath", () => {
     expect(deriveWorktreePath("/repos/app", "///", [])).toBe(
       "/repos/app-worktrees/worktree",
     );
+  });
+
+  it("puts the worktree in the configured container instead", () => {
+    expect(deriveWorktreePath("/repos/app", "dev", [], "/volumes/fast/trees")).toBe(
+      "/volumes/fast/trees/dev",
+    );
+  });
+
+  it("still suffixes collisions inside a configured container", () => {
+    const taken = ["/volumes/fast/trees/dev"];
+    expect(deriveWorktreePath("/repos/app", "dev", taken, "/volumes/fast/trees")).toBe(
+      "/volumes/fast/trees/dev-2",
+    );
+  });
+
+  it("takes the container's own separator, not the repository's", () => {
+    expect(deriveWorktreePath("/repos/app", "dev", [], "C:\\trees")).toBe(
+      "C:\\trees\\dev",
+    );
+  });
+
+  it("treats a blank or whitespace container as unset", () => {
+    expect(deriveWorktreePath("/repos/app", "dev", [], "   ")).toBe(
+      "/repos/app-worktrees/dev",
+    );
+  });
+
+  it("ignores a trailing separator on the container", () => {
+    expect(deriveWorktreePath("/repos/app", "dev", [], "/trees/")).toBe("/trees/dev");
+  });
+});
+
+describe("defaultContainer", () => {
+  it("is the sibling folder the placeholder promises", () => {
+    expect(defaultContainer("/repos/app")).toBe("/repos/app-worktrees");
+    expect(defaultContainer("C:\\repos\\app")).toBe("C:\\repos\\app-worktrees");
+  });
+});
+
+describe("provisionPathProblem", () => {
+  it("accepts an ordinary repository-relative folder", () => {
+    expect(provisionPathProblem("node_modules")).toBeUndefined();
+    expect(provisionPathProblem("src-tauri/target")).toBeUndefined();
+  });
+
+  it("refuses an absolute path, in either platform's spelling", () => {
+    expect(provisionPathProblem("/etc")).toMatch(/relative/);
+    expect(provisionPathProblem("C:\\Windows")).toMatch(/relative/);
+  });
+
+  it("refuses a path that steps outside the worktree", () => {
+    expect(provisionPathProblem("../escape")).toMatch(/outside/);
+    expect(provisionPathProblem("a/../../b")).toMatch(/outside/);
+  });
+
+  it("refuses git's own folder", () => {
+    expect(provisionPathProblem(".git")).toMatch(/Git/);
+    expect(provisionPathProblem(".git/config")).toMatch(/Git/);
+  });
+
+  it("asks for a folder when the row is still blank", () => {
+    expect(provisionPathProblem("")).toMatch(/Needs a folder/);
+    expect(provisionPathProblem("  ")).toMatch(/Needs a folder/);
+  });
+});
+
+describe("removalCheck", () => {
+  const linked = { main: false, locked: false };
+
+  it("calls a merged, clean, unlocked worktree free to reclaim", () => {
+    const check = removalCheck(0, linked, true);
+    expect(check.reclaimable).toBe(true);
+    expect(check.needsForce).toBe(false);
+    expect(check.blockers).toEqual([]);
+  });
+
+  it("does not block an unmerged branch, but does not advertise it either", () => {
+    const check = removalCheck(0, linked, false);
+    expect(check.reclaimable).toBe(false);
+    expect(check.blockers).toEqual([]);
+  });
+
+  it("treats any changed file as work that needs force", () => {
+    const check = removalCheck(3, linked, true);
+    expect(check.needsForce).toBe(true);
+    expect(check.reclaimable).toBe(false);
+    expect(check.blockers).toEqual(["3 uncommitted or untracked files."]);
+  });
+
+  it("counts one file in the singular", () => {
+    expect(removalCheck(1, linked, true).blockers).toEqual([
+      "1 uncommitted or untracked file.",
+    ]);
+  });
+
+  it("blocks the main checkout however clean it is", () => {
+    const check = removalCheck(0, { main: true, locked: false }, true);
+    expect(check.reclaimable).toBe(false);
+    expect(check.blockers[0]).toContain("main checkout");
+  });
+
+  it("blocks a locked worktree rather than offering to force it", () => {
+    const check = removalCheck(0, { main: false, locked: true }, true);
+    expect(check.reclaimable).toBe(false);
+    expect(check.needsForce).toBe(false);
+    expect(check.blockers[0]).toContain("Locked");
+  });
+
+  it("lists the worst reason first when there is more than one", () => {
+    const check = removalCheck(2, { main: true, locked: true }, false);
+    expect(check.blockers).toHaveLength(3);
+    expect(check.blockers[0]).toContain("main checkout");
+  });
+});
+
+describe("shareRisk", () => {
+  it("warns about folders an agent reads", () => {
+    expect(shareRisk("node_modules")).toMatch(/cannot read/);
+    expect(shareRisk("api/vendor")).toMatch(/cannot read/);
+  });
+
+  it("stays quiet about pure build output", () => {
+    expect(shareRisk("src-tauri/target")).toBeUndefined();
+    expect(shareRisk("dist")).toBeUndefined();
   });
 });

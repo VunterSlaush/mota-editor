@@ -6,6 +6,7 @@ import type {
   GitPort,
   GitWorktree,
   WorktreeAddMode,
+  WorktreeRemoveMode,
 } from "../../core/ports/gitPort";
 
 /** Interface adapter — git operations via the Rust backend. */
@@ -76,12 +77,30 @@ export class TauriGitStatus implements GitPort {
     worktreePath: string,
     branch: string,
     mode: WorktreeAddMode,
+    remote: string,
   ): Promise<string> {
     return invoke<string>("git_worktree_add", {
       projectPath,
       worktreePath,
       branch,
       mode,
+      remote,
     });
+  }
+
+  async worktreeRemove(
+    projectPath: string,
+    worktreePath: string,
+    mode: WorktreeRemoveMode,
+  ): Promise<string> {
+    return invoke<string>("git_worktree_remove", { projectPath, worktreePath, mode });
+  }
+
+  async worktreePrune(projectPath: string): Promise<string> {
+    return invoke<string>("git_worktree_prune", { projectPath });
+  }
+
+  async branchesMerged(projectPath: string, base: string): Promise<GitBranch[]> {
+    return invoke<GitBranch[]>("git_branches_merged", { projectPath, base });
   }
 }

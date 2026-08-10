@@ -2,6 +2,7 @@ import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { McpServerConfig } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
+import type { WorktreeSettings } from "../entities/worktree";
 
 /**
  * Ports layer — persistence and OS-interaction boundaries.
@@ -37,6 +38,8 @@ export interface PersistedSettings {
   readonly mcpServers?: readonly McpServerConfig[];
   readonly autoCompactThreshold?: number;
   readonly theme?: string;
+  /** Partial too: a field added after this file was written is defaulted. */
+  readonly worktrees?: Partial<WorktreeSettings>;
 }
 
 export interface PersistedWorkspace {

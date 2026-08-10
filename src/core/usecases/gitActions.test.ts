@@ -94,6 +94,17 @@ class FakeGit implements GitPort {
     this.calls.push(`worktreeAdd:${worktreePath}:${branch}:${mode}`);
     return "Preparing worktree";
   }
+  async worktreeRemove(_p: string, worktreePath: string): Promise<string> {
+    this.calls.push(`worktreeRemove:${worktreePath}`);
+    return "Removing worktree";
+  }
+  async worktreePrune(): Promise<string> {
+    this.calls.push("worktreePrune");
+    return "";
+  }
+  async branchesMerged(): Promise<GitBranch[]> {
+    return [];
+  }
 }
 
 function setup() {

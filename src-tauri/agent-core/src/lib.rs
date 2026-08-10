@@ -13,6 +13,7 @@ pub mod provider;
 pub mod providers;
 pub mod turn;
 pub mod vcs;
+pub mod worktree;
 
 pub use event::{AgentEvent, PermissionOptionInfo};
 pub use provider::{provider_for, Provider, TurnCommand};

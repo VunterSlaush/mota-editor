@@ -2,6 +2,7 @@
 //! Output parsing is pure and lives in `agent_core::vcs`.
 
 use agent_core::vcs::{self, Branch, Commit, GitChange, Worktree};
+use agent_core::worktree;
 
 use crate::runner;
 
@@ -220,7 +221,7 @@ pub async fn git_worktree_list(project_path: String) -> Result<Vec<Worktree>, St
 
 /// Create a worktree at `worktree_path` for `branch`. `mode` picks the
 /// shape: "existing" checks out a local branch, "new" creates the branch
-/// from HEAD, "remote" creates a local tracking branch from origin —
+/// from HEAD, "remote" creates a local tracking branch from `remote` —
 /// `worktree add` does not DWIM remote branches the way `checkout` does.
 #[tauri::command]
 pub async fn git_worktree_add(
@@ -228,24 +229,89 @@ pub async fn git_worktree_add(
     worktree_path: String,
     branch: String,
     mode: String,
+    remote: String,
 ) -> Result<String, String> {
     // Same reasoning as git_checkout: refs and paths that start with `-`
-    // would be parsed as option flags. Legitimate branch names can never
-    // start with `-`, and the app always derives absolute paths.
+    // would be parsed as option flags. Legitimate branch and remote names
+    // can never start with `-`, and the app derives absolute paths.
     if branch.starts_with('-') {
         return Err(format!("Refusing to use suspicious ref name: {branch}"));
+    }
+    if remote.starts_with('-') || remote.is_empty() {
+        return Err(format!("Refusing to use suspicious remote name: {remote}"));
     }
     if worktree_path.starts_with('-') || !std::path::Path::new(&worktree_path).is_absolute() {
         return Err(format!("Worktree path must be absolute: {worktree_path}"));
     }
-    let origin_branch = format!("origin/{branch}");
+    let remote_branch = format!("{remote}/{branch}");
     let args: &[&str] = match mode.as_str() {
         "existing" => &["worktree", "add", "--", &worktree_path, &branch],
         "new" => &["worktree", "add", "-b", &branch, &worktree_path],
-        "remote" => &["worktree", "add", "--track", "-b", &branch, &worktree_path, &origin_branch],
+        "remote" => &["worktree", "add", "--track", "-b", &branch, &worktree_path, &remote_branch],
         other => return Err(format!("Unknown worktree mode: {other}")),
     };
     run_git(&project_path, args).await.map(summary)
+}
+
+/// Remove a linked worktree, deleting its folder. `mode` is "safe" or
+/// "force"; forcing is what git demands when the worktree holds work.
+///
+/// Unlike `add`, this one deletes a directory tree, so the path is not
+/// merely validated but *verified*: it must be one of the checkouts git
+/// itself lists, and not the main one. Without that, any absolute path
+/// handed to this command would be a recursive delete.
+#[tauri::command]
+pub async fn git_worktree_remove(
+    project_path: String,
+    worktree_path: String,
+    mode: String,
+) -> Result<String, String> {
+    let args = worktree::remove_args(&worktree_path, &mode)?;
+    let listed = run_git(&project_path, &["worktree", "list", "--porcelain"]).await?;
+    let known = vcs::parse_worktrees(&listed)
+        .into_iter()
+        .find(|w| same_path(&w.path, &worktree_path))
+        .ok_or_else(|| format!("Not a worktree of this repository: {worktree_path}"))?;
+    if known.main {
+        return Err("The main checkout cannot be removed.".to_owned());
+    }
+    if known.locked && mode != "force" {
+        return Err("This worktree is locked. Unlock it in git first.".to_owned());
+    }
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git(&project_path, &borrowed).await.map(summary)
+}
+
+/// Drop the bookkeeping for worktrees whose folders are already gone.
+#[tauri::command]
+pub async fn git_worktree_prune(project_path: String) -> Result<String, String> {
+    run_git(&project_path, &["worktree", "prune"]).await.map(summary)
+}
+
+/// Branches already merged into `base` — the signal that a worktree's
+/// work is done and its disk is free. `--merged` changes which refs are
+/// listed, not how they are printed, so the existing parser reads it.
+#[tauri::command]
+pub async fn git_branches_merged(
+    project_path: String,
+    base: String,
+) -> Result<Vec<Branch>, String> {
+    if base.starts_with('-') {
+        return Err(format!("Refusing to use suspicious ref name: {base}"));
+    }
+    let out = run_git(
+        &project_path,
+        &["branch", "--merged", &base, "--format=%(HEAD)%09%(refname:short)%09%(refname)"],
+    )
+    .await?;
+    Ok(vcs::parse_branches(&out))
+}
+
+/// Git prints the path it recorded; the app may hold the one the OS
+/// dialog gave back. They name the same folder with different slashes.
+fn same_path(a: &str, b: &str) -> bool {
+    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    norm(a) == norm(b)
 }
 
 fn summary(output: String) -> String {

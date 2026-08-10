@@ -51,6 +51,21 @@ export interface ProjectDefaults {
   readonly effort?: string;
 }
 
+/**
+ * What an existing tab would seed a new one with — for opening a
+ * worktree beside the tab it was forked from, where the app's global
+ * defaults are usually the wrong answer.
+ */
+export function defaultsFromProject(project: Project): ProjectDefaults {
+  return {
+    provider: project.provider,
+    mode: project.mode,
+    permission: project.permission,
+    model: project.model,
+    effort: project.effort,
+  };
+}
+
 export function newProject(
   id: string,
   path: string,

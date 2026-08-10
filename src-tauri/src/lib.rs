@@ -11,6 +11,7 @@ mod provider_probe;
 mod runner;
 mod terminal;
 mod workspace_file;
+mod worktree;
 
 use acp_session::AcpSessions;
 use commands::RunningTurns;
@@ -44,6 +45,7 @@ pub fn run() {
         })
         .manage(RunningTurns::default())
         .manage(AcpSessions::default())
+        .manage(worktree::Provisioning::default())
         .invoke_handler(tauri::generate_handler![
             commands::start_turn,
             commands::warm_session,
@@ -75,6 +77,13 @@ pub fn run() {
             git::git_fetch,
             git::git_worktree_list,
             git::git_worktree_add,
+            git::git_worktree_remove,
+            git::git_worktree_prune,
+            git::git_branches_merged,
+            worktree::worktree_provision,
+            worktree::worktree_unprovision,
+            worktree::worktree_supports_cow,
+            worktree::worktree_disk_usage,
             commands::load_workspace,
             commands::save_workspace,
             history_file::save_session,

@@ -41,6 +41,9 @@ export interface GitWorktree {
  *  create a new one from HEAD, or track a remote-only one from origin. */
 export type WorktreeAddMode = "existing" | "new" | "remote";
 
+/** Whether git may delete a worktree that still holds uncommitted work. */
+export type WorktreeRemoveMode = "safe" | "force";
+
 export interface GitPort {
   /** Changed files; throws when not a git repository. */
   changes(projectPath: string): Promise<GitChange[]>;
@@ -79,11 +82,29 @@ export interface GitPort {
   /** Every checkout of this repository, main first; throws when the
    *  folder is not a git repository. */
   worktrees(projectPath: string): Promise<GitWorktree[]>;
-  /** Create a worktree at an absolute path. Resolves with a summary. */
+  /**
+   * Create a worktree at an absolute path. Resolves with a summary.
+   * `remote` is only consulted by the "remote" mode.
+   */
   worktreeAdd(
     projectPath: string,
     worktreePath: string,
     branch: string,
     mode: WorktreeAddMode,
+    remote: string,
   ): Promise<string>;
+  /**
+   * Delete a linked worktree and its folder. "force" is what git needs
+   * when the worktree still holds work; the backend refuses any path
+   * that is not one of this repository's own linked checkouts.
+   */
+  worktreeRemove(
+    projectPath: string,
+    worktreePath: string,
+    mode: WorktreeRemoveMode,
+  ): Promise<string>;
+  /** Forget worktrees whose folders are already gone. */
+  worktreePrune(projectPath: string): Promise<string>;
+  /** Branches already merged into `base`. */
+  branchesMerged(projectPath: string, base: string): Promise<GitBranch[]>;
 }

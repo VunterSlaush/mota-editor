@@ -5,7 +5,8 @@ import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
 import { agentEditedFiles, countFileChangingTools } from "../../core/entities/tool";
-import type { WorktreeAddMode } from "../../core/ports/gitPort";
+import type { RemovalCheck } from "../../core/entities/worktree";
+import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
 import type { TabState } from "../../core/state/appState";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryListing } from "../../core/usecases/history";
@@ -88,6 +89,10 @@ interface Props {
   loadWorktrees: () => Promise<WorktreeItem[]>;
   onOpenWorktree: (path: string, mainPath: string) => void;
   onCreateWorktree: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
+  /** Try the heavy-folder copy again after it failed. */
+  onRetryPreparing: () => void;
+  onCheckWorktreeRemoval: (path: string) => Promise<RemovalCheck>;
+  onRemoveWorktree: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
   onOpenFile: (path: string) => Promise<string | null>;
   onPickFiles: () => Promise<string[]>;
   /** Save an image pasted into the composer; returns its file path. */
@@ -137,6 +142,9 @@ export function ChatPanel({
   loadWorktrees,
   onOpenWorktree,
   onCreateWorktree,
+  onRetryPreparing,
+  onCheckWorktreeRemoval,
+  onRemoveWorktree,
   onOpenFile,
   onPickFiles,
   onPasteImage,
@@ -271,6 +279,24 @@ export function ChatPanel({
           >
             <GitBranch size={12} aria-hidden="true" />
             {currentBranch}
+          </button>
+        )}
+        {tab.preparing && (
+          <span
+            className="worktree-preparing"
+            title="Copying this worktree's dependencies and build folders into place."
+          >
+            Preparing…
+          </span>
+        )}
+        {tab.preparingProblem && (
+          <button
+            type="button"
+            className="worktree-preparing worktree-preparing--failed"
+            title={`${tab.preparingProblem} — click to try again.`}
+            onClick={onRetryPreparing}
+          >
+            Not prepared
           </button>
         )}
         <div className="chat-panel__controls">
@@ -494,6 +520,8 @@ export function ChatPanel({
           currentBranch={currentBranch ?? ""}
           onOpen={onOpenWorktree}
           onCreate={onCreateWorktree}
+          onCheckRemoval={onCheckWorktreeRemoval}
+          onRemove={onRemoveWorktree}
           onClose={() => setWorktreePickerOpen(false)}
         />
       )}

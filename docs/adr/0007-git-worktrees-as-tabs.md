@@ -1,4 +1,4 @@
-# ADR-0006 — Git worktrees as tabs
+# ADR-0007 — Git worktrees as tabs
 
 - Status: accepted
 - Date: 2026-08-09
@@ -36,6 +36,9 @@ visual cue telling a worktree tab apart from a plain folder tab.
 - **Closing a tab never deletes a worktree.** Removal (`git worktree
   remove`) is deferred: it is destructive, needs a `--force`-on-dirty
   decision UX, and interacts with tabs whose agents are mid-turn.
+  *(Superseded by ADR-0008, which takes removal on — with exactly that
+  `--force` decision and a close-the-tab-first ordering. The hardcoded
+  `origin` above is also now a setting.)*
 
 ## Consequences
 

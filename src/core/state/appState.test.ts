@@ -271,6 +271,20 @@ describe("appState reducer", () => {
     );
   });
 
+  it("a worktree patch replaces that group without disturbing the rest", () => {
+    const state = reduce(initialState, {
+      type: "settings/changed",
+      patch: {
+        worktrees: { ...initialState.settings.worktrees, remote: "upstream" },
+      },
+    });
+    expect(state.settings.worktrees.remote).toBe("upstream");
+    expect(state.settings.worktrees.provisioning).toEqual(
+      initialState.settings.worktrees.provisioning,
+    );
+    expect(state.settings.theme).toBe(initialState.settings.theme);
+  });
+
   it("new tabs start from the defaults, tabs already open do not move", () => {
     let state = open(initialState, "t1", "/a");
     state = reduce(state, {
