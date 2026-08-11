@@ -40,6 +40,9 @@ export class RestoreWorkspace {
         worktreeOf: p.worktreeOf,
       },
       messages: [],
+      // A claim on the transcript this tab was writing to — honoured
+      // only if the agent is still in that conversation. See TabState.
+      restoredHistorySessionId: p.historySessionId,
       busy: false,
       queued: [],
       agentCommands: [],

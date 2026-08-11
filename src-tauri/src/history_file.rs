@@ -20,6 +20,12 @@ pub struct SessionMeta {
     pub title: String,
     pub saved_at: u64,
     pub provider: String,
+    /// The provider's own id for this conversation, when the transcript
+    /// recorded one. `id` is local, so only this can be matched against
+    /// the agent's own session listing — which is what keeps one
+    /// conversation from showing up as two rows in the History panel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_session_id: Option<String>,
     pub message_count: u64,
 }
 
@@ -311,6 +317,13 @@ fn read_meta(path: &std::path::Path) -> Option<SessionMeta> {
         return None;
     }
     let value: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    meta_from_json(&value)
+}
+
+/// The listing header of one transcript. Defensive like `extract_stats`:
+/// the schema is owned by the frontend core, so a missing field is a
+/// default and a malformed file is skipped, never an error.
+fn meta_from_json(value: &Value) -> Option<SessionMeta> {
     Some(SessionMeta {
         id: value.get("id")?.as_str()?.to_owned(),
         title: value
@@ -324,6 +337,10 @@ fn read_meta(path: &std::path::Path) -> Option<SessionMeta> {
             .and_then(Value::as_str)
             .unwrap_or("claude")
             .to_owned(),
+        provider_session_id: value
+            .get("providerSessionId")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         message_count: value
             .get("messages")
             .and_then(Value::as_array)
@@ -419,6 +436,36 @@ mod tests {
     fn files_without_id_are_skipped() {
         assert!(extract_stats("h", &json!({ "messages": [] })).is_none());
         assert!(extract_stats("h", &json!("not an object")).is_none());
+    }
+
+    #[test]
+    fn listed_meta_carries_the_provider_session_id() {
+        let meta = meta_from_json(&json!({
+            "id": "local-1",
+            "title": "plan it",
+            "savedAt": 7,
+            "provider": "claude",
+            "providerSessionId": "agent-9",
+            "messages": [{ "role": "user" }]
+        }))
+        .unwrap();
+        // The only id the agent's own listing can be matched on — without
+        // it one conversation lists twice.
+        assert_eq!(meta.provider_session_id.as_deref(), Some("agent-9"));
+        assert_eq!(meta.id, "local-1");
+        assert_eq!(meta.message_count, 1);
+    }
+
+    #[test]
+    fn meta_defaults_the_fields_an_older_transcript_lacks() {
+        let meta = meta_from_json(&json!({ "id": "local-1" })).unwrap();
+        assert_eq!(meta.title, "Untitled");
+        assert_eq!(meta.provider, "claude");
+        assert_eq!(meta.saved_at, 0);
+        assert_eq!(meta.message_count, 0);
+        assert!(meta.provider_session_id.is_none());
+        // No id at all is not a session we can open.
+        assert!(meta_from_json(&json!({ "title": "x" })).is_none());
     }
 
     #[test]

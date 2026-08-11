@@ -18,6 +18,12 @@ import { startNewChat } from "./startNewChat";
 export interface HistoryItem extends TranscriptMeta {
   /** True when the AGENT lists this session (opening truly resumes). */
   readonly native: boolean;
+  /**
+   * True when we hold our own transcript for it — it paints without an
+   * agent, it is what a resume is painted FROM, and it is ours to
+   * delete. A row can be both: one conversation, two records of it.
+   */
+  readonly local: boolean;
 }
 
 /** The history list plus where it came from. */
@@ -148,12 +154,18 @@ export class SessionHistory {
 
     const local = await this.transcriptStore.list(tab.project.path).catch(() => []);
     if (onRefresh) void this.refreshFromAgent(tabId, local, onRefresh);
-    return { native: false, sessions: local.map((m) => ({ ...m, native: false })) };
+    return {
+      native: false,
+      sessions: local.map((m) => ({ ...m, native: false, local: true })),
+    };
   }
 
   /**
-   * Overlay the agent's own sessions on the local listing. Native ids
-   * win (opening them truly resumes); local-only transcripts stay (the
+   * Overlay the agent's own sessions on the local listing. A native
+   * session and our transcript of it are ONE conversation and must be
+   * one row: they are matched on the provider's session id, the only id
+   * both sides share. Matched rows resume like a native one and still
+   * paint from (and delete) our copy; local-only transcripts stay (the
    * agent may have pruned them, or never owned them); sessions the
    * agent knows and we never saw appear (created outside this app).
    */
@@ -178,16 +190,20 @@ export class SessionHistory {
       );
       // Null = no live session to ask — the local paint stands as is.
       if (!native) return;
-      const localById = new Map(local.map((m) => [m.id, m]));
+      const twins = transcriptsByProviderSession(local);
       const nativeSessions = native
         // One malformed entry must not throw the whole list away.
         .filter((s) => typeof s.sessionId === "string" && s.sessionId !== "")
         .map((s) => {
-          const known = localById.get(s.sessionId);
+          const known = twins.get(s.sessionId);
           const updatedAt = s.updatedAt ? Date.parse(s.updatedAt) : Number.NaN;
           return {
-            id: s.sessionId,
-            title: s.title?.trim() || known?.title || s.sessionId.slice(0, 8),
+            // Our own id when we have a copy: the row then opens, saves
+            // and deletes as that transcript instead of forking a second
+            // one the moment it is opened.
+            id: known?.id ?? s.sessionId,
+            providerSessionId: s.sessionId,
+            title: known?.title || s.title?.trim() || s.sessionId.slice(0, 8),
             // Our transcript is saved only when a MESSAGE is sent, while
             // the agent's `updatedAt` also bumps on a mere open (loading
             // touches its session file). Our timestamp, when we have one,
@@ -196,15 +212,16 @@ export class SessionHistory {
             provider,
             messageCount: known?.messageCount,
             native: true,
+            local: known !== undefined,
           };
         });
       if (nativeSessions.length === 0) return; // nothing beyond the local paint
-      const nativeIds = new Set(nativeSessions.map((s) => s.id));
+      const merged = new Set(nativeSessions.map((s) => s.id));
       const sessions = [
         ...nativeSessions,
         ...local
-          .filter((m) => !nativeIds.has(m.id))
-          .map((m) => ({ ...m, native: false })),
+          .filter((m) => !merged.has(m.id))
+          .map((m) => ({ ...m, native: false, local: true })),
       ].sort((a, b) => b.savedAt - a.savedAt);
       onRefresh({ native: true, sessions });
     } catch (e) {
@@ -219,28 +236,23 @@ export class SessionHistory {
     }
   }
 
-  async open(
-    tabId: string,
-    sessionId: string,
-    native: boolean,
-    /** The item's timestamp as listed, BEFORE this open touches anything. */
-    savedAt = 0,
-  ): Promise<void> {
+  async open(tabId: string, item: HistoryItem): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab || tab.busy) return;
-    if (native) {
-      await this.openNative(tabId, sessionId, savedAt);
+    if (item.native) {
+      await this.openNative(tabId, item);
     } else {
-      await this.openLocal(tabId, sessionId);
+      await this.openLocal(tabId, item.id);
     }
   }
 
   /** True resume: the agent replays and REMEMBERS the conversation. */
-  private async openNative(
-    tabId: string,
-    sessionId: string,
-    savedAt: number,
-  ): Promise<void> {
+  private async openNative(tabId: string, item: HistoryItem): Promise<void> {
+    // Two ids for one conversation: the agent is asked for ITS session,
+    // while the transcript keeps being written under OURS. Opening must
+    // not mint a third record of the same chat.
+    const sessionId = item.providerSessionId ?? item.id;
+    const historyId = item.id;
     const state = this.store.getState();
     const tab = tabById(state, tabId)!;
     const { provider, path, model, effort, mcpOverrides } = tab.project;
@@ -256,7 +268,9 @@ export class SessionHistory {
     // Our own copy of the conversation, when we saved one. It unlocks
     // `session/resume`: the agent attaches its memory WITHOUT the
     // (slow) full replay, because this copy can paint the screen.
-    const localCopy = await this.transcriptStore.load(path, sessionId).catch(() => null);
+    const localCopy = item.local
+      ? await this.transcriptStore.load(path, historyId).catch(() => null)
+      : null;
 
     const replay = new ReplayedSession();
     let resumed = true;
@@ -290,33 +304,40 @@ export class SessionHistory {
           : [
               ...localCopy.messages.map((m, index) => ({
                 ...m,
-                id: `${sessionId}-${index}`,
+                id: `${historyId}-${index}`,
               })),
               ...replay.messages, // the "Resumed" note (and any stragglers)
             ];
       this.store.dispatch({
         type: "chat/transcriptLoaded",
         tabId,
-        sessionId,
+        sessionId: historyId,
         messages,
         plan: replayed ? replay.plan : (localCopy?.plan ?? replay.plan),
+        // The tab is on the agent's session now. Recording it is what
+        // lets the next save stamp the right id — and so what keeps this
+        // conversation ONE row on the next refresh instead of two.
+        providerSessionId: sessionId,
       });
       if (replay.usage) {
         this.store.dispatch({ type: "tab/usageUpdated", tabId, ...replay.usage });
       }
-      // Pin the item where it was: opening must not reorder history, so
-      // the local copy keeps the PRE-open timestamp. Only sending a
-      // message (which saves with a fresh savedAt) moves it to the top.
-      // A resume needs no pin — it painted FROM the local copy, which
-      // already holds its own timestamp.
+      // A session we have no transcript for (started outside this app)
+      // gets one now, pinned where it was listed: opening must not
+      // reorder history — only sending a message does. When we DO have a
+      // copy there is nothing to write: it already holds the
+      // conversation and its own timestamp, and writing a second file
+      // for the same chat is what filled the panel with duplicates.
       const firstUserMessage = replay.messages.find((m) => m.role === "user");
-      if (replayed)
+      if (replayed && !localCopy)
         void this.transcriptStore
           .save(tab.project.path, {
-            id: sessionId,
+            id: historyId,
             title: (firstUserMessage?.text ?? "Untitled").slice(0, 80),
-            savedAt,
+            savedAt: item.savedAt,
             provider,
+            projectPath: path,
+            providerSessionId: sessionId,
             messages: replay.messages,
             plan: replay.plan.length > 0 ? replay.plan : undefined,
           })
@@ -382,4 +403,24 @@ export class SessionHistory {
     if (!tab) return;
     await this.transcriptStore.remove(tab.project.path, sessionId).catch(() => undefined);
   }
+}
+
+/**
+ * Local transcripts by the provider session id each one covers, so a
+ * native listing can find our copy of the same conversation.
+ *
+ * Transcripts written before that id was recorded are indexed by their
+ * own id as a fallback — early builds saved a native session under it,
+ * and those files are the duplicates this lookup exists to absorb. The
+ * newest wins: a conversation split across several transcripts (by a
+ * "new chat", or by an older build) resumes into its latest one.
+ */
+function transcriptsByProviderSession(
+  local: readonly TranscriptMeta[],
+): Map<string, TranscriptMeta> {
+  const byProviderSession = new Map<string, TranscriptMeta>();
+  for (const meta of [...local].sort((a, b) => a.savedAt - b.savedAt)) {
+    byProviderSession.set(meta.providerSessionId ?? meta.id, meta);
+  }
+  return byProviderSession;
 }

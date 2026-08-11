@@ -12,7 +12,7 @@ import type {
 } from "../ports/transcriptStore";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
-import { type HistoryListing, SessionHistory } from "./history";
+import { type HistoryItem, type HistoryListing, SessionHistory } from "./history";
 
 class FakeTranscriptStore implements TranscriptStore {
   transcripts = new Map<string, PersistedTranscript>();
@@ -26,6 +26,7 @@ class FakeTranscriptStore implements TranscriptStore {
       title: t.title,
       savedAt: t.savedAt,
       provider: t.provider,
+      providerSessionId: t.providerSessionId,
       messageCount: t.messages.length,
     }));
   }
@@ -105,8 +106,31 @@ const DEFAULTS = projectDefaults(defaultSettings);
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** A local transcript with just enough shape to list. */
-function meta(id: string, savedAt: number): PersistedTranscript {
-  return { id, title: `chat ${id}`, savedAt, provider: "claude", messages: [] };
+function meta(
+  id: string,
+  savedAt: number,
+  providerSessionId?: string,
+): PersistedTranscript {
+  return {
+    id,
+    title: `chat ${id}`,
+    savedAt,
+    provider: "claude",
+    providerSessionId,
+    messages: [],
+  };
+}
+
+/** A history row as the panel hands it back on click. */
+function row(partial: Partial<HistoryItem> & Pick<HistoryItem, "id">): HistoryItem {
+  return {
+    title: `chat ${partial.id}`,
+    savedAt: 0,
+    provider: "claude",
+    native: false,
+    local: false,
+    ...partial,
+  };
 }
 
 describe("SessionHistory", () => {
@@ -167,6 +191,46 @@ describe("SessionHistory", () => {
     expect(byId.get("shared")?.savedAt).toBe(500);
   });
 
+  it("lists one conversation once: the agent's session merges with our copy of it", async () => {
+    const { transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("local-1", meta("local-1", 500, "agent-9"));
+    gateway.nativeSessions = [
+      {
+        sessionId: "agent-9",
+        title: "The agent's own title",
+        updatedAt: "2026-08-05T10:00:00Z",
+      },
+    ];
+
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
+    });
+
+    expect(refreshed.sessions).toHaveLength(1);
+    const [only] = refreshed.sessions;
+    // Ours to open, save and delete; the agent's to resume.
+    expect(only.id).toBe("local-1");
+    expect(only.providerSessionId).toBe("agent-9");
+    expect(only.native).toBe(true);
+    expect(only.local).toBe(true);
+    expect(only.title).toBe("chat local-1"); // the prompt the user typed
+  });
+
+  it("absorbs the duplicate an older build left: a transcript saved under the agent's id", async () => {
+    const { transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("agent-9", meta("agent-9", 500));
+    gateway.nativeSessions = [
+      { sessionId: "agent-9", updatedAt: "2026-08-05T10:00:00Z" },
+    ];
+
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
+    });
+
+    expect(refreshed.sessions).toHaveLength(1);
+    expect(refreshed.sessions[0].local).toBe(true);
+  });
+
   it("lists newest first and drops entries without a session id", async () => {
     const { gateway, history } = setup();
     gateway.nativeSessions = [
@@ -209,7 +273,7 @@ describe("SessionHistory", () => {
       { kind: "tool", name: "read", detail: "Reading files" },
     ];
 
-    await history.open("t1", "abc-123", true);
+    await history.open("t1", row({ id: "abc-123", native: true }));
 
     const tab = store.getState().tabs[0];
     expect(tab.messages.map((m) => m.role)).toEqual([
@@ -247,7 +311,7 @@ describe("SessionHistory", () => {
       { kind: "assistantDelta", text: "All green." },
     ];
 
-    await history.open("t1", "abc-123", true);
+    await history.open("t1", row({ id: "abc-123", native: true }));
 
     const tab = store.getState().tabs[0];
     expect(tab.messages.map((m) => m.role)).toEqual([
@@ -297,7 +361,7 @@ describe("SessionHistory", () => {
       updates += 1;
     });
 
-    await history.open("t1", "abc-123", true);
+    await history.open("t1", row({ id: "abc-123", native: true }));
 
     // cleared, busy on, the whole transcript, busy off — and nothing per
     // event, or the transcript builds on screen and the view chases the
@@ -311,7 +375,7 @@ describe("SessionHistory", () => {
       throw new Error("session file is gone");
     };
 
-    await history.open("t1", "abc-123", true);
+    await history.open("t1", row({ id: "abc-123", native: true }));
 
     const tab = store.getState().tabs[0];
     expect(tab.historySessionId).toBeUndefined();
@@ -334,7 +398,7 @@ describe("SessionHistory", () => {
     });
     gateway.replayed = false; // the agent attached without a replay
 
-    await history.open("t1", "abc-123", true);
+    await history.open("t1", row({ id: "abc-123", native: true, local: true }));
 
     const tab = store.getState().tabs[0];
     expect(gateway.lastLoad?.preferResume).toBe(true);
@@ -345,11 +409,55 @@ describe("SessionHistory", () => {
     expect(tab.busy).toBe(false);
   });
 
+  it("opening a conversation we already hold writes no second transcript", async () => {
+    const { store, transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("local-1", {
+      ...meta("local-1", 500, "agent-9"),
+      messages: [{ id: "m1", role: "user", text: "plan it" }],
+    });
+    gateway.replay = [{ kind: "userDelta", text: "plan it" }];
+
+    await history.open(
+      "t1",
+      row({
+        id: "local-1",
+        providerSessionId: "agent-9",
+        savedAt: 500,
+        native: true,
+        local: true,
+      }),
+    );
+
+    // The agent is asked for ITS session; the transcript stays ours, and
+    // stays ONE file — a second one is a second row for the same chat.
+    expect(gateway.lastLoad?.sessionId).toBe("agent-9");
+    expect([...transcripts.transcripts.keys()]).toEqual(["local-1"]);
+    const tab = store.getState().tabs[0];
+    expect(tab.historySessionId).toBe("local-1");
+    // Recorded, so the next save stamps the session it really ran in.
+    expect(tab.project.providerSessions.claude).toBe("agent-9");
+  });
+
+  it("adopts a session started outside the app, pinned where it was listed", async () => {
+    const { transcripts, gateway, history } = setup();
+    gateway.replay = [{ kind: "userDelta", text: "plan the feature" }];
+
+    await history.open(
+      "t1",
+      row({ id: "agent-9", providerSessionId: "agent-9", savedAt: 4200, native: true }),
+    );
+
+    const saved = transcripts.transcripts.get("agent-9");
+    expect(saved?.providerSessionId).toBe("agent-9");
+    expect(saved?.savedAt).toBe(4200); // opening must not reorder history
+    expect(saved?.title).toBe("plan the feature");
+  });
+
   it("never asks for a resume without a local copy to paint from", async () => {
     const { gateway, history } = setup();
     gateway.replay = [{ kind: "userDelta", text: "plan the feature" }];
 
-    await history.open("t1", "abc-123", true);
+    await history.open("t1", row({ id: "abc-123", native: true }));
 
     // Resume skips the replay — without our own transcript the screen
     // would come back blank, so the full load must be requested.
@@ -369,7 +477,7 @@ describe("SessionHistory", () => {
       planFilePath: "/home/u/.claude/plans/p.md",
     });
 
-    await history.open("t1", "s1", false);
+    await history.open("t1", row({ id: "s1", local: true }));
 
     const tab = store.getState().tabs[0];
     expect(tab.plan).toHaveLength(1);
@@ -387,7 +495,7 @@ describe("SessionHistory", () => {
       planFilePath: "/gone/p.md",
     });
 
-    await history.open("t1", "s1", false);
+    await history.open("t1", row({ id: "s1", local: true }));
 
     const infos = store.getState().tabs[0].messages.filter((m) => m.role === "info");
     expect(infos.some((m) => m.text.includes("no longer exists"))).toBe(true);

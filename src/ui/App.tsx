@@ -183,9 +183,7 @@ export function App({ context }: { context: AppContext }) {
           loadHistory={(onRefresh) =>
             context.sessionHistory.list(tab.project.id, onRefresh)
           }
-          onOpenSession={(sessionId, native, savedAt) =>
-            context.sessionHistory.open(tab.project.id, sessionId, native, savedAt)
-          }
+          onOpenSession={(item) => context.sessionHistory.open(tab.project.id, item)}
           onDeleteSession={(sessionId) =>
             context.sessionHistory.remove(tab.project.id, sessionId)
           }

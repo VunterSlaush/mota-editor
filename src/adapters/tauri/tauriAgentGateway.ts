@@ -106,13 +106,15 @@ export class TauriAgentGateway implements AgentGateway {
         return;
       }
       // No turn in flight: session-level events (warm-up stages, mode
-      // switches, notices) still matter — a respawn notice in particular
-      // is emitted by warm-up, which is exactly when no turn is running.
-      // Everything else is a stray and drops.
+      // switches, notices, the id of the session that just booted) still
+      // matter — a respawn notice in particular is emitted by warm-up,
+      // which is exactly when no turn is running. Everything else is a
+      // stray and drops.
       if (
         event.kind === "sessionStage" ||
         event.kind === "modeChanged" ||
-        event.kind === "notice"
+        event.kind === "notice" ||
+        event.kind === "session"
       ) {
         this.sessionHandler?.(payload.tabId, event);
       }

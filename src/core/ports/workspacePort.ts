@@ -24,6 +24,12 @@ export interface PersistedProject {
   readonly effort?: string;
   readonly verbose?: boolean;
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
+  /**
+   * The transcript this tab's chat was writing to. Restored so that a
+   * conversation the agent is STILL in keeps appending to its own
+   * history entry instead of starting one per app run.
+   */
+  readonly historySessionId?: string;
   /** Per-project MCP on/off overrides, by server id. */
   readonly mcpOverrides?: ProjectMcpOverrides;
   /** Main-checkout path when this project is a linked git worktree. */

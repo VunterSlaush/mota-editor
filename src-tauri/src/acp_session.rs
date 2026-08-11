@@ -531,7 +531,18 @@ pub async fn warm(
     provider_id: &str,
     spec: &SessionSpec,
 ) {
-    let _ = ensure_session(&app, sessions, tab_id, provider_id, spec).await;
+    let Ok(session) = ensure_session(&app, sessions, tab_id, provider_id, spec).await else {
+        return;
+    };
+    // Say which session this tab is in, even when the answer is the one
+    // it was already in. A REUSED session announces nothing on its own,
+    // so a frontend that reloaded (every hot reload in development, and
+    // any reconnect) would go on writing history against the session it
+    // remembered from before — a conversation the tab may have left.
+    let session_id = session.sid();
+    if !session_id.is_empty() {
+        runner::emit(&app, tab_id, &AgentEvent::SessionStarted { provider_session_id: session_id });
+    }
 }
 
 /// Everything that decides WHICH agent process a tab talks to. Grouped

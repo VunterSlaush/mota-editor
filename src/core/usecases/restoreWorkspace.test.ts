@@ -153,4 +153,44 @@ describe("RestoreWorkspace projects", () => {
 
     expect(state.tabs[0].project.mcpOverrides).toEqual({ s1: false, s2: true });
   });
+
+  it("brings back a CLAIM on the transcript the tab was writing to", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: { claude: "claude-abc" },
+          historySessionId: "old-1",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    // A claim, not the live id: the messages are gone from the screen,
+    // so it is adopted only once the agent proves to be in that same
+    // conversation. Until then the tab is on no transcript at all.
+    expect(state.tabs[0].restoredHistorySessionId).toBe("old-1");
+    expect(state.tabs[0].historySessionId).toBeUndefined();
+  });
+
+  it("persists that claim again, so a second restart does not lose it", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          historySessionId: "old-1",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    // Restarted twice without ever sending a prompt: the claim is still
+    // the only thing pointing at that conversation.
+    expect(toPersisted(state).projects[0].historySessionId).toBe("old-1");
+  });
 });
