@@ -63,7 +63,7 @@ replayed message would land in the live chat a second time.
 ACP reports a stop reason for a prompt, and a follow-up answers none —
 there is no completion event to wait for. The tab still goes **busy**
 while one runs, because the agent really is working and Stop has to be
-reachable; the flag comes down after `FOLLOWUP_SETTLE_MS` (2s) of
+reachable; the flag comes down after `FOLLOWUP_SETTLE_MS` (8s) of
 quiet instead of on a completion that is never coming. On settling, the
 tab is released, anything the user queued behind it is delivered, and —
 if the stretch was more than token-usage bookkeeping — the transcript is
@@ -85,13 +85,17 @@ tracked, and `stopTurn` clears busy itself.
   permission hung with nothing on screen.
 - The fix is frontend-only. No Rust, no protocol change, no new
   dependency: the events were already crossing the process boundary.
-- The 2s settle is a heuristic, and it is the honest cost of a protocol
-  with no out-of-turn idle signal. A follow-up that pauses longer than
-  that mid-cycle will let the tab go idle and then take it busy again.
-  Visible, self-correcting, and preferable to a busy flag with nothing
-  to bring it down.
+- The 8s settle is a heuristic, and it is the honest cost of a protocol
+  with no out-of-turn idle signal. It started at 2s, which a real cycle
+  broke: the model's think time between a tool result and its next word
+  ran 2.4s and 2.7s, so one follow-up settled three times over — three
+  notifications, three transcript saves, and a prompt queued behind it
+  free to drain into the middle of the cycle. A follow-up that pauses
+  longer than 8s mid-cycle will still let the tab go idle and then take
+  it busy again. Visible, self-correcting, and preferable to a busy flag
+  with nothing to bring it down.
 - A stop during a follow-up can still be trailed by a few events, which
-  re-open a stretch for up to 2s. Same shape as a cancelled turn's tail,
+  re-open a stretch for up to 8s. Same shape as a cancelled turn's tail,
   and bounded the same way.
 - Mota gains nothing to schedule *with* — the scheduling lives in the
   agent's own harness, which is the right place for it. Should we ever
