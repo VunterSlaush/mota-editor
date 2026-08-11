@@ -1,6 +1,11 @@
 import { defaultsFromProject, newProject } from "../entities/project";
 import type { RemovalCheck } from "../entities/worktree";
-import { deriveWorktreePath, removalCheck, samePath } from "../entities/worktree";
+import {
+  deriveWorktreePath,
+  effectiveProvisioning,
+  removalCheck,
+  samePath,
+} from "../entities/worktree";
 import type { AgentGateway } from "../ports/agentGateway";
 import type {
   GitPort,
@@ -89,10 +94,17 @@ export class Worktrees {
         : projectDefaults(state.settings);
 
     const worktreeOf = samePath(worktreePath, mainPath) ? undefined : mainPath;
-    this.store.dispatch({
-      type: "tab/opened",
-      project: newProject(this.newId(), worktreePath, defaults, worktreeOf),
-    });
+    // The provisioning list travels regardless of inheritFromSourceTab:
+    // that toggle is a preference, this is correctness — removal must
+    // take back exactly the list this worktree was stocked with, even
+    // after a restart, so the worktree's own project carries it.
+    const project = newProject(
+      this.newId(),
+      worktreePath,
+      { ...defaults, provisioningOverride: source?.project.provisioningOverride },
+      worktreeOf,
+    );
+    this.store.dispatch({ type: "tab/opened", project });
     const activeTabId = this.store.getState().activeTabId;
     if (activeTabId) warmTab(this.store, this.agentGateway, activeTabId);
     await persistWorkspace(this.store.getState(), this.workspaceStore);
@@ -147,9 +159,10 @@ export class Worktrees {
     const state = this.store.getState();
     const tab = state.tabs.find((t) => samePath(t.project.path, worktreePath));
     if (!tab) return;
-    const entries = state.settings.worktrees.provisioning.filter(
-      (e) => e.strategy !== "skip",
-    );
+    const entries = effectiveProvisioning(
+      tab.project.provisioningOverride,
+      state.settings.worktrees.provisioning,
+    ).filter((e) => e.strategy !== "skip");
     if (entries.length === 0) return;
 
     const tabId = tab.project.id;
@@ -255,7 +268,15 @@ export class RemoveWorktree {
     const open = state.tabs.find((t) => samePath(t.project.path, worktreePath));
     if (open) await this.closeProject.execute(open.project.id);
 
-    const paths = state.settings.worktrees.provisioning.map((e) => e.path);
+    // The worktree's own tab carries the list it was stocked with; a
+    // sibling tab of the same repo is the next best witness; the app
+    // default is only a fallback (and unprovision is lstat-safe anyway).
+    const override =
+      open?.project.provisioningOverride ?? tab.project.provisioningOverride;
+    const paths = effectiveProvisioning(
+      override,
+      state.settings.worktrees.provisioning,
+    ).map((e) => e.path);
     await this.provisioning.unprovision(worktreePath, paths).catch(() => []);
 
     try {

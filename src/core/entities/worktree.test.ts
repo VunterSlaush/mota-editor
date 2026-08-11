@@ -3,6 +3,7 @@ import {
   defaultContainer,
   deriveBranchName,
   deriveWorktreePath,
+  effectiveProvisioning,
   folderSuggestions,
   provisionPathProblem,
   removalCheck,
@@ -25,6 +26,23 @@ describe("sanitizeBranchForPath", () => {
   it("collapses runs and trims edge punctuation", () => {
     expect(sanitizeBranchForPath("weird//---name")).toBe("weird-name");
     expect(sanitizeBranchForPath("-lead.trail.")).toBe("lead.trail");
+  });
+});
+
+describe("effectiveProvisioning", () => {
+  const appDefault = [{ path: "node_modules", strategy: "clone" as const }];
+
+  it("follows the app default when the project set nothing", () => {
+    expect(effectiveProvisioning(undefined, appDefault)).toBe(appDefault);
+  });
+
+  it("treats an empty project list as a real answer, not a gap", () => {
+    expect(effectiveProvisioning([], appDefault)).toEqual([]);
+  });
+
+  it("replaces the default entirely rather than merging", () => {
+    const own = [{ path: "dist", strategy: "share" as const }];
+    expect(effectiveProvisioning(own, appDefault)).toEqual(own);
   });
 });
 

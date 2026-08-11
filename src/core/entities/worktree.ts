@@ -32,10 +32,25 @@ export interface WorktreeSettings {
   readonly container: string;
   /** The remote assumed for a branch that only exists remotely. */
   readonly remote: string;
-  /** Heavy folders a new worktree gets, and how. */
+  /**
+   * Heavy folders a new worktree gets, and how — the app-wide default.
+   * A project may carry its own list; see `effectiveProvisioning`.
+   */
   readonly provisioning: readonly ProvisionEntry[];
   /** Seed a worktree's tab from the tab it was opened from. */
   readonly inheritFromSourceTab: boolean;
+}
+
+/**
+ * The list that applies to one project: its own when it set one — an
+ * empty list is a real answer, "prepare nothing here" — and the app
+ * default otherwise. The same tri-state as a project's MCP overrides.
+ */
+export function effectiveProvisioning(
+  override: readonly ProvisionEntry[] | undefined,
+  appDefault: readonly ProvisionEntry[],
+): readonly ProvisionEntry[] {
+  return override ?? appDefault;
 }
 
 /**

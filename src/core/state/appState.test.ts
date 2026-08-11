@@ -412,3 +412,32 @@ describe("tab/planMarkdownUpdated", () => {
     });
   });
 });
+
+describe("tab/provisioningChanged", () => {
+  const change = (
+    state: AppState,
+    provisioning: { path: string; strategy: "share" | "clone" | "skip" }[] | undefined,
+  ) => reduce(state, { type: "tab/provisioningChanged", tabId: "t1", provisioning });
+
+  it("gives the project its own list", () => {
+    const state = change(open(initialState, "t1", "/a"), [
+      { path: "dist", strategy: "clone" },
+    ]);
+    expect(state.tabs[0].project.provisioningOverride).toEqual([
+      { path: "dist", strategy: "clone" },
+    ]);
+  });
+
+  it("keeps an empty list — it means 'prepare nothing here'", () => {
+    const state = change(open(initialState, "t1", "/a"), []);
+    expect(state.tabs[0].project.provisioningOverride).toEqual([]);
+  });
+
+  it("clearing removes the field entirely, not stores an empty list", () => {
+    let state = change(open(initialState, "t1", "/a"), [
+      { path: "dist", strategy: "clone" },
+    ]);
+    state = change(state, undefined);
+    expect("provisioningOverride" in state.tabs[0].project).toBe(false);
+  });
+});

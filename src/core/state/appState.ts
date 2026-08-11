@@ -20,7 +20,7 @@ import type { ProviderId } from "../entities/provider";
 import { DEFAULT_PROVIDER } from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
-import type { WorktreeSettings } from "../entities/worktree";
+import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
 import { defaultWorktreeSettings } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
 
@@ -222,6 +222,12 @@ export type Action =
       serverId: string;
       /** undefined clears the override and follows the provider toggle. */
       enabled: boolean | undefined;
+    }
+  | {
+      type: "tab/provisioningChanged";
+      tabId: string;
+      /** undefined clears the override and follows the app default. */
+      provisioning: readonly ProvisionEntry[] | undefined;
     }
   | { type: "tab/verboseChanged"; tabId: string; verbose: boolean }
   | { type: "tab/commandsUpdated"; tabId: string; commands: readonly CommandInfo[] }
@@ -452,6 +458,20 @@ export function reduce(state: AppState, action: Action): AppState {
         if (action.enabled === undefined) delete overrides[action.serverId];
         else overrides[action.serverId] = action.enabled;
         return { ...tab, project: { ...tab.project, mcpOverrides: overrides } };
+      });
+
+    case "tab/provisioningChanged":
+      // Clearing must REMOVE the key, not store []: absent means "follow
+      // the app default", which an empty list would silently pin.
+      return mapTab(state, action.tabId, (tab) => {
+        const { provisioningOverride: _, ...project } = tab.project;
+        return {
+          ...tab,
+          project:
+            action.provisioning === undefined
+              ? project
+              : { ...project, provisioningOverride: action.provisioning },
+        };
       });
 
     case "tab/verboseChanged":

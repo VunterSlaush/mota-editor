@@ -61,6 +61,7 @@ import { ReorderTabs } from "../core/usecases/reorderTabs";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
 import { ScopeMcpServer } from "../core/usecases/scopeMcpServer";
+import { ScopeWorktreeProvisioning } from "../core/usecases/scopeWorktreeProvisioning";
 import { SendPrompt } from "../core/usecases/sendPrompt";
 import { SessionStatus } from "../core/usecases/sessionStatus";
 import { Shells } from "../core/usecases/shells";
@@ -97,6 +98,7 @@ export interface AppContext {
   readonly discardPendingSpec: DiscardPendingSpec;
   readonly selectVerbose: SelectVerbose;
   readonly scopeMcpServer: ScopeMcpServer;
+  readonly scopeWorktreeProvisioning: ScopeWorktreeProvisioning;
   readonly loadGitChanges: LoadGitChanges;
   readonly gitActions: GitActions;
   readonly worktrees: Worktrees;
@@ -197,6 +199,7 @@ export function createAppContext(): AppContext {
     selectEffort,
     selectVerbose: new SelectVerbose(store, workspaceStore),
     scopeMcpServer: new ScopeMcpServer(store, workspaceStore, agentGateway),
+    scopeWorktreeProvisioning: new ScopeWorktreeProvisioning(store, workspaceStore),
     loadGitChanges: new LoadGitChanges(store, gitPort),
     gitActions: new GitActions(store, gitPort),
     worktrees: new Worktrees(

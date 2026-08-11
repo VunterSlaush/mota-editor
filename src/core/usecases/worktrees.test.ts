@@ -172,7 +172,9 @@ class FakeProvisioning implements WorktreeProvisioning {
       }
     );
   }
-  async unprovision(_p: string, paths: readonly string[]) {
+  unprovisioned: Array<{ path: string; paths: string[] }> = [];
+  async unprovision(path: string, paths: readonly string[]) {
+    this.unprovisioned.push({ path, paths: [...paths] });
     return [...paths];
   }
   async supportsCow() {
@@ -431,6 +433,50 @@ describe("Worktrees provisioning", () => {
     expect(store.getState().tabs[1].preparingProblem).toContain("No space left");
   });
 
+  it("prefers the project's own list over the app default", async () => {
+    const { store, provisioning, worktrees } = await created();
+    store.dispatch({
+      type: "tab/provisioningChanged",
+      tabId: "t1",
+      provisioning: [
+        { path: "dist", strategy: "clone" },
+        { path: "node_modules", strategy: "skip" },
+      ],
+    });
+    await worktrees.create("t1", "dev", "new");
+    await settle();
+
+    expect(provisioning.calls[0].paths).toEqual(["dist"]);
+  });
+
+  it("prepares nothing when the project's own list is empty, whatever the default says", async () => {
+    const { store, provisioning, worktrees } = await created();
+    store.dispatch({ type: "tab/provisioningChanged", tabId: "t1", provisioning: [] });
+    await worktrees.create("t1", "dev", "new");
+    await settle();
+
+    expect(provisioning.calls).toHaveLength(0);
+  });
+
+  it("copies the project's list onto the worktree tab, even without inheriting", async () => {
+    const { store, worktrees } = await created();
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        worktrees: {
+          ...store.getState().settings.worktrees,
+          inheritFromSourceTab: false,
+        },
+      },
+    });
+    const own = [{ path: "dist", strategy: "clone" as const }];
+    store.dispatch({ type: "tab/provisioningChanged", tabId: "t1", provisioning: own });
+    await worktrees.create("t1", "dev", "new");
+    await settle();
+
+    expect(store.getState().tabs[1].project.provisioningOverride).toEqual(own);
+  });
+
   it("marks the tab while it works and clears it after", async () => {
     const { store, provisioning, worktrees } = await created();
     const finish = provisioning.hold();
@@ -543,6 +589,43 @@ describe("RemoveWorktree", () => {
     };
     await remove.execute("t2", "C:/repos/app-worktrees/dev", "safe");
     expect(order).toEqual(["unprovision"]);
+  });
+
+  it("takes back the list the worktree was stocked with, not today's default", async () => {
+    const { store, provisioning, remove } = removal();
+    store.dispatch({
+      type: "tab/provisioningChanged",
+      tabId: "t2",
+      provisioning: [{ path: "dist", strategy: "share" }],
+    });
+    // The default changed since — irrelevant to what this worktree holds.
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        worktrees: {
+          ...defaultSettings.worktrees,
+          provisioning: [{ path: "node_modules", strategy: "clone" }],
+        },
+      },
+    });
+    await remove.execute("t2", "C:/repos/app-worktrees/dev", "safe");
+
+    expect(provisioning.unprovisioned).toEqual([
+      { path: "C:/repos/app-worktrees/dev", paths: ["dist"] },
+    ]);
+  });
+
+  it("falls back to the acting tab's list when the worktree has no tab", async () => {
+    const { store, provisioning, remove } = removal();
+    store.dispatch({ type: "tab/closed", tabId: "t2" });
+    store.dispatch({
+      type: "tab/provisioningChanged",
+      tabId: "t1",
+      provisioning: [{ path: "dist", strategy: "clone" }],
+    });
+    await remove.execute("t1", "C:/repos/app-worktrees/dev", "safe");
+
+    expect(provisioning.unprovisioned[0].paths).toEqual(["dist"]);
   });
 
   it("prunes the leftover bookkeeping once the folder is gone", async () => {
