@@ -12,7 +12,16 @@ import {
   SignIn,
   X,
 } from "@phosphor-icons/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { permissionOptionHint } from "../../core/entities/approval";
 import { formatElapsed } from "../../core/entities/duration";
 import {
@@ -22,6 +31,8 @@ import {
   type TurnMeta,
 } from "../../core/entities/message";
 import { formatTokens } from "../../core/entities/tokens";
+import type { Row, RowStatus, RunSummary } from "../../core/entities/toolRun";
+import { groupToolRuns, segmentQuietRuns } from "../../core/entities/toolRun";
 import { fileName } from "../fileName";
 import { CommandText } from "./CommandText";
 import { Markdown } from "./MarkdownLite";
@@ -95,8 +106,16 @@ export function MessageList({
   const promptRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const [promptScrolledAway, setPromptScrolledAway] = useState(false);
-  const visible = verbose ? messages : messages.filter((m) => !QUIET_ROLES.has(m.role));
-  const rows = groupToolRuns(visible);
+  const visible = useMemo(
+    () => (verbose ? messages : messages.filter((m) => !QUIET_ROLES.has(m.role))),
+    [messages, verbose],
+  );
+  // Message objects inside stay referentially stable, so the memoized
+  // bubbles still bail; only the wrapper items are rebuilt.
+  const items = useMemo(
+    () => segmentQuietRuns(groupToolRuns(visible), busy),
+    [visible, busy],
+  );
   const last = visible[visible.length - 1];
   const askedMessage = lastUserMessage(visible);
   const contentKey = `${visible.length}:${last?.text.length ?? 0}`;
@@ -141,6 +160,40 @@ export function MessageList({
 
   const streamingId = busy && last?.role === "assistant" ? last.id : null;
 
+  // One render path for every row, grouped or not: a collapsed run must
+  // show, expanded, exactly what the transcript would have shown flat.
+  const renderRow = ({ message: m, count, detail, status }: Row) =>
+    m.role === "question" ? (
+      <QuestionCard key={m.id} message={m} onAnswer={onAnswerQuestion} />
+    ) : m.role === "approval" ? (
+      <ApprovalCard
+        key={m.id}
+        message={m}
+        guardedToolCall={findToolCall(messages, m.approval?.toolCallId)}
+        onRespond={onRespondPermission}
+        onShowPlan={onShowPlan}
+        onOpenFile={onOpenFile}
+        onShowAgentDiff={onShowAgentDiff}
+        onReadTerminal={onReadTerminal}
+      />
+    ) : (
+      <MessageBubble
+        key={m.id}
+        message={m}
+        count={count}
+        detail={detail}
+        status={status}
+        commands={commands}
+        streaming={m.id === streamingId}
+        onRetry={!busy && m.role === "error" && m.id === last?.id ? onRetry : undefined}
+        onSignIn={onSignIn}
+        onOpenFile={onOpenFile}
+        onShowAgentDiff={onShowAgentDiff}
+        onReadTerminal={onReadTerminal}
+        innerRef={m.id === askedMessage?.id ? promptRef : undefined}
+      />
+    );
+
   return (
     <div className="message-list-wrap">
       {askedMessage && promptScrolledAway && (
@@ -151,37 +204,19 @@ export function MessageList({
         />
       )}
       <div className="message-list" ref={scrollerRef} onScroll={onScroll}>
-        {rows.map(({ message: m, count, detail, status }) =>
-          m.role === "question" ? (
-            <QuestionCard key={m.id} message={m} onAnswer={onAnswerQuestion} />
-          ) : m.role === "approval" ? (
-            <ApprovalCard
-              key={m.id}
-              message={m}
-              guardedToolCall={findToolCall(messages, m.approval?.toolCallId)}
-              onRespond={onRespondPermission}
-              onShowPlan={onShowPlan}
-              onOpenFile={onOpenFile}
-              onShowAgentDiff={onShowAgentDiff}
-              onReadTerminal={onReadTerminal}
-            />
+        {items.map((item) =>
+          item.kind === "row" ? (
+            renderRow(item.row)
+          ) : item.live ? (
+            // The work happening right now stays visible; it collapses
+            // into its summary the moment the run is over.
+            <Fragment key={item.id}>{item.rows.map(renderRow)}</Fragment>
           ) : (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              count={count}
-              detail={detail}
-              status={status}
-              commands={commands}
-              streaming={m.id === streamingId}
-              onRetry={
-                !busy && m.role === "error" && m.id === last?.id ? onRetry : undefined
-              }
-              onSignIn={onSignIn}
-              onOpenFile={onOpenFile}
-              onShowAgentDiff={onShowAgentDiff}
-              onReadTerminal={onReadTerminal}
-              innerRef={m.id === askedMessage?.id ? promptRef : undefined}
+            <QuietRunGroup
+              key={item.id}
+              summary={item.summary}
+              rows={item.rows}
+              renderRow={renderRow}
             />
           ),
         )}
@@ -206,77 +241,37 @@ export function MessageList({
   );
 }
 
-/** Aggregate lifecycle of a (possibly grouped) tool row. */
-type RowStatus = "running" | "completed" | "failed";
-
-/** A transcript row: one message, standing in for `count` grouped ones. */
-interface Row {
-  readonly message: ChatMessage;
-  readonly count: number;
-  /** Newline-joined details of every run in the group (tool rows only). */
-  readonly detail: string;
-  /** Worst status across the group; undefined for legacy tool rows. */
-  readonly status?: RowStatus;
-}
-
-/** One tool call's contribution to its row's aggregate status. */
-function statusOf(message: ChatMessage): RowStatus | undefined {
-  const status = message.toolCall?.status;
-  if (!status) return undefined;
-  if (status === "failed") return "failed";
-  if (status === "completed") return "completed";
-  return "running"; // pending, in_progress, and unknown strings
-}
-
-/** Failed beats running beats completed: the group shows its worst news. */
-function mergeStatus(a?: RowStatus, b?: RowStatus): RowStatus | undefined {
-  if (a === "failed" || b === "failed") return "failed";
-  if (a === "running" || b === "running") return "running";
-  return a ?? b;
-}
-
 /**
- * Collapse consecutive runs of the same tool into one row with a count.
- * An agent that searches four times in a row would otherwise print four
- * separate "search" lines; one row saying "search ×4" with the four
- * queries stacked under it reads far better. Grouping is by tool name
- * only — the individual details are kept and listed inside the row
- * (exact duplicate details collapse to one line).
+ * A collapsed run of quiet rows — the agent's process folded behind one
+ * dim line ("Ran 3 commands, read 2 files") so the answers around it
+ * keep the room. Expansion is per-group UI state, not message state:
+ * collapsing again must not touch the transcript.
  */
-/** A tool row with reported output/locations is worth its own row —
- *  collapsing it into a group would hide what it brought back. */
-function hasSubstance(message: ChatMessage): boolean {
-  const call = message.toolCall;
-  return Boolean(call && (call.content.length > 0 || call.locations.length > 0));
-}
-
-function groupToolRuns(messages: readonly ChatMessage[]): Row[] {
-  const rows: Row[] = [];
-  for (const message of messages) {
-    const prev = rows[rows.length - 1];
-    if (
-      prev &&
-      message.role === "tool" &&
-      prev.message.role === "tool" &&
-      prev.message.toolName === message.toolName &&
-      !hasSubstance(message) &&
-      !hasSubstance(prev.message)
-    ) {
-      const lines = prev.detail.split("\n");
-      const detail = lines.includes(message.text)
-        ? prev.detail
-        : `${prev.detail}\n${message.text}`;
-      rows[rows.length - 1] = {
-        message: prev.message,
-        count: prev.count + 1,
-        detail,
-        status: mergeStatus(prev.status, statusOf(message)),
-      };
-    } else {
-      rows.push({ message, count: 1, detail: message.text, status: statusOf(message) });
-    }
-  }
-  return rows;
+function QuietRunGroup({
+  summary,
+  rows,
+  renderRow,
+}: {
+  summary: RunSummary;
+  rows: readonly Row[];
+  renderRow: (row: Row) => React.ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="msg msg--quiet-group">
+      <button
+        type="button"
+        className="msg__group-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        {summary.status === "failed" && <ToolStatusIcon status="failed" />}
+        <span className="msg__group-label">{summary.label}</span>
+        {expanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
+      </button>
+      {expanded && <div className="msg__group-body">{rows.map(renderRow)}</div>}
+    </div>
+  );
 }
 
 /** The tool call an approval guards, by the id the agent attached. The
@@ -462,7 +457,7 @@ const ApprovalCard = memo(function ApprovalCard({
 });
 
 /** Spinner while a tool runs; check or cross once it settled. */
-function ToolStatusIcon({ status }: { status: "running" | "completed" | "failed" }) {
+function ToolStatusIcon({ status }: { status: RowStatus }) {
   if (status === "running") {
     return <CircleNotch size={12} className="msg__tool-status msg__tool-status--spin" />;
   }
@@ -499,7 +494,7 @@ const MessageBubble = memo(function MessageBubble({
   /** Newline-joined details of every run in the group (tool rows only). */
   detail?: string;
   /** Aggregate tool-call status; undefined for legacy rows (no icon). */
-  status?: "running" | "completed" | "failed";
+  status?: RowStatus;
   commands: ReadonlySet<string>;
   streaming: boolean;
   /** Set only on the trailing error bubble while idle: offer a retry. */
