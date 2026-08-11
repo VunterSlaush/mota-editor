@@ -93,6 +93,10 @@ interface Props {
   permission: PermissionPolicy;
   model: string;
   effort: string;
+  /** What "default" resolves to for this provider (from Settings →
+   *  Defaults), so the pickers can say it. Empty = the provider's own. */
+  defaultModel: string;
+  defaultEffort: string;
   usage: { readonly used: number; readonly size: number } | undefined;
   /** Fraction of the context window at which auto-compact kicks in. */
   autoCompactThreshold: number;
@@ -134,6 +138,8 @@ export function Composer({
   permission,
   model,
   effort,
+  defaultModel,
+  defaultEffort,
   usage,
   autoCompactThreshold,
   onSend,
@@ -168,9 +174,15 @@ export function Composer({
   };
 
   const effortOptions = EFFORT_OPTIONS[provider];
-  // The empty id is the provider's own default — the way back from a choice.
+  // The empty id is the way back from a choice: the app's configured
+  // default when there is one (named, so the user knows what they get),
+  // otherwise the provider's own.
   const effortPickerOptions: readonly PickerOption<string>[] = [
-    { id: "", label: "Default effort", icon: <Gauge /> },
+    {
+      id: "",
+      label: defaultEffort ? `Default: ${defaultEffort}` : "Default effort",
+      icon: <Gauge />,
+    },
     ...effortOptions.map((level) => ({ id: level, label: level, icon: <Gauge /> })),
   ];
   // The "/..." word being typed at the end of the draft, if any. Typing
@@ -478,6 +490,7 @@ export function Composer({
             <ModelPicker
               provider={provider}
               value={model}
+              defaultModel={defaultModel}
               pendingValue={pendingSpec?.model}
               disabled={busy}
               onChange={onSelectModel}

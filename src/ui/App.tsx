@@ -174,6 +174,8 @@ export function App({ context }: { context: AppContext }) {
           key={tab.project.id}
           tab={tab}
           autoCompactThreshold={state.settings.autoCompactThreshold}
+          defaultModel={state.settings.defaultModel[tab.project.provider] ?? ""}
+          defaultEffort={state.settings.defaultEffort[tab.project.provider] ?? ""}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
           rightPanel={rightPanel}

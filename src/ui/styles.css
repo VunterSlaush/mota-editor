@@ -3470,6 +3470,14 @@ body {
   font-weight: 600;
 }
 
+/* In the composer the token must NOT change text metrics: the caret is
+   drawn by the transparent textarea over this very text in regular
+   weight, and a bolder glyph is a wider glyph — every character after a
+   /command would drift out from under the caret. Colour only. */
+.composer-card__highlight .cmd-token {
+  font-weight: inherit;
+}
+
 /* The user's own bubble is already accent-coloured, so the same accent
    would be invisible there. */
 .msg--user .cmd-token,

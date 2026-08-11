@@ -75,6 +75,10 @@ interface Props {
   tab: TabState;
   /** Fraction of the context window at which auto-compact kicks in. */
   autoCompactThreshold: number;
+  /** The app's default model/effort for this tab's provider, so the
+   *  composer's pickers can name what "default" gets. Empty = provider's own. */
+  defaultModel: string;
+  defaultEffort: string;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
   /** Which right-hand panel is showing. Lifted for the same reason
@@ -148,6 +152,8 @@ interface Props {
 export function ChatPanel({
   tab,
   autoCompactThreshold,
+  defaultModel,
+  defaultEffort,
   sidebarView,
   onSelectRightPanel,
   rightPanel,
@@ -534,6 +540,8 @@ export function ChatPanel({
             permission={tab.project.permission}
             model={tab.project.model ?? ""}
             effort={tab.project.effort ?? ""}
+            defaultModel={defaultModel}
+            defaultEffort={defaultEffort}
             usage={tab.usage}
             autoCompactThreshold={autoCompactThreshold}
             onSend={onSend}

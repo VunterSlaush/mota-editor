@@ -5,6 +5,9 @@ import { OptionPicker, type PickerOption } from "./OptionPicker";
 interface Props {
   provider: ProviderId;
   value: string;
+  /** What "default" resolves to (the app's per-provider default model),
+   *  so the option can say it. Empty/omitted = the provider's own. */
+  defaultModel?: string;
   /** A model chosen mid-conversation and held back until the next chat.
    *  Shown in place of `value` — the user picked it and must see it —
    *  but labelled, so it never passes for what the agent is running. */
@@ -29,6 +32,7 @@ interface Props {
 export function ModelPicker({
   provider,
   value,
+  defaultModel,
   pendingValue,
   disabled,
   onChange,
@@ -40,7 +44,12 @@ export function ModelPicker({
   const suggestions = MODEL_SUGGESTIONS[provider];
   const custom = shown !== "" && !suggestions.includes(shown) ? [shown] : [];
   const label = (model: string) => {
-    const base = model === "" ? "Default model" : model;
+    const base =
+      model === ""
+        ? defaultModel
+          ? `Default: ${defaultModel}`
+          : "Default model"
+        : model;
     return model === pendingValue ? `${base} · next chat` : base;
   };
   const options: readonly PickerOption<string>[] = [
