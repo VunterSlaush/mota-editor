@@ -655,9 +655,20 @@ body {
 }
 
 .msg__group-label {
+  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The live run's ticker: what the agent is doing right now, quieter
+   than the counts so the streaming text never competes with them. */
+.msg__group-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+  opacity: 0.7;
 }
 
 /* The nested rows keep their own tool-accent border — the cue that you

@@ -108,7 +108,8 @@ export type TranscriptItem =
       readonly rows: readonly Row[];
       /** First message id — stable identity for keys and UI state. */
       readonly id: string;
-      /** Tail run of a busy turn: rendered expanded and live. */
+      /** Tail run of a busy turn: still growing — shown with a spinner
+       *  and the current activity, its counts ticking up as it works. */
       readonly live: boolean;
       readonly summary: RunSummary;
     };
@@ -118,8 +119,9 @@ export type TranscriptItem =
  * rows bounded by non-quiet rows or the transcript's ends; even a lone
  * tool line groups, because a single line of process should be just as
  * muted as ten. While the turn is busy and the transcript still ends in
- * quiet rows, that tail run is `live` — the work is happening NOW and
- * hiding it would make the app look stalled.
+ * quiet rows, that tail run is `live` — the work is happening NOW, so
+ * its summary shows a spinner and the current activity instead of
+ * pretending the run is finished.
  */
 export function segmentQuietRuns(rows: readonly Row[], busy: boolean): TranscriptItem[] {
   const items: TranscriptItem[] = [];

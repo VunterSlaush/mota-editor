@@ -13,7 +13,6 @@ import {
   X,
 } from "@phosphor-icons/react";
 import {
-  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -207,15 +206,12 @@ export function MessageList({
         {items.map((item) =>
           item.kind === "row" ? (
             renderRow(item.row)
-          ) : item.live ? (
-            // The work happening right now stays visible; it collapses
-            // into its summary the moment the run is over.
-            <Fragment key={item.id}>{item.rows.map(renderRow)}</Fragment>
           ) : (
             <QuietRunGroup
               key={item.id}
               summary={item.summary}
               rows={item.rows}
+              live={item.live}
               renderRow={renderRow}
             />
           ),
@@ -244,19 +240,25 @@ export function MessageList({
 /**
  * A collapsed run of quiet rows — the agent's process folded behind one
  * dim line ("Ran 3 commands, read 2 files") so the answers around it
- * keep the room. Expansion is per-group UI state, not message state:
- * collapsing again must not touch the transcript.
+ * keep the room. A live group is the run happening right now: its
+ * counts tick up in place, a spinner marks it working, and the latest
+ * activity shows beside the label so the app never looks stalled.
+ * Expansion is per-group UI state, not message state: collapsing again
+ * must not touch the transcript.
  */
 function QuietRunGroup({
   summary,
   rows,
+  live,
   renderRow,
 }: {
   summary: RunSummary;
   rows: readonly Row[];
+  live: boolean;
   renderRow: (row: Row) => React.ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const current = live && !expanded ? currentActivity(rows) : undefined;
   return (
     <div className="msg msg--quiet-group">
       <button
@@ -265,13 +267,26 @@ function QuietRunGroup({
         aria-expanded={expanded}
         onClick={() => setExpanded((open) => !open)}
       >
-        {summary.status === "failed" && <ToolStatusIcon status="failed" />}
+        {live ? (
+          <ToolStatusIcon status="running" />
+        ) : (
+          summary.status === "failed" && <ToolStatusIcon status="failed" />
+        )}
         <span className="msg__group-label">{summary.label}</span>
+        {current && <span className="msg__group-current">{current}</span>}
         {expanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
       </button>
       {expanded && <div className="msg__group-body">{rows.map(renderRow)}</div>}
     </div>
   );
+}
+
+/** The last line of the run's newest row — what the agent is doing at
+ *  this moment, for the collapsed live summary's ticker. */
+function currentActivity(rows: readonly Row[]): string | undefined {
+  const text = rows[rows.length - 1]?.message.text ?? "";
+  const lines = text.split("\n").filter((line) => line.trim() !== "");
+  return lines[lines.length - 1];
 }
 
 /** The tool call an approval guards, by the id the agent attached. The
