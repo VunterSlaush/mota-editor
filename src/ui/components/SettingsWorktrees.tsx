@@ -112,11 +112,13 @@ export function SettingsWorktrees({
         </label>
       </Field>
 
-      <h3 className="settings-section__subtitle">Heavy folders</h3>
+      <h3 className="settings-section__subtitle">Folders to copy or link</h3>
       <p className="settings-section__hint">
-        Git carries none of these into a new worktree, so a fresh worktree cannot build
-        until they are back. This list is the default for every project.{" "}
-        {copyHint(supportsCow)}
+        Git carries none of the ignored heavy folders — node_modules, build output — into
+        a new worktree, so a fresh worktree cannot build until they are back. Each folder
+        listed here is put in place the moment a worktree is created: Copy makes a private
+        copy, Link points a symlink at the main checkout's folder, Skip leaves it out.
+        This list is the default for every project. {copyHint(supportsCow)}
       </p>
 
       <ProvisionList
@@ -358,9 +360,9 @@ function strategyOptions(supportsCow: boolean | null) {
     { id: "clone" as const, label: "Copy", description: copy },
     {
       id: "share" as const,
-      label: "Share",
+      label: "Link",
       description:
-        "One copy for every worktree. Build tools resolve it; the agent cannot read through it.",
+        "A symlink to the main checkout's folder — every worktree shares that one copy. Installs write into it, and the agent cannot read through it.",
     },
     {
       id: "skip" as const,

@@ -189,7 +189,7 @@ export function shareRisk(path: string): string | undefined {
   const segments = path.replace(/\\/g, "/").split("/").filter(Boolean);
   const hit = segments.find((segment) => READ_BY_AGENTS.includes(segment));
   return hit
-    ? `The agent cannot read a shared ${hit}: a link leads outside the worktree. Copy it instead.`
+    ? `The agent cannot read a linked ${hit}: the symlink leads outside the worktree. Copy it instead.`
     : undefined;
 }
 
