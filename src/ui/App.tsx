@@ -5,6 +5,7 @@ import { themeById } from "../core/entities/theme";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import type { ShellSize } from "../core/ports/shellPort";
 import { activeTab } from "../core/state/appState";
+import type { GitChanges } from "../core/usecases/loadGitChanges";
 import type { OpenShellRequest } from "../core/usecases/shells";
 import type { AppContext } from "../wiring/context";
 import type { SidebarView } from "./components/ActivityBar";
@@ -29,6 +30,12 @@ export function App({ context }: { context: AppContext }) {
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [supportsCow, setSupportsCow] = useState<boolean | null>(null);
+  // Last-known git changes per project. ChatPanel remounts on every tab
+  // switch (it is keyed by project id), so its own state starts empty;
+  // seeding from here lets the sidebar paint the previous answer on the
+  // first frame instead of blinking while git is asked again. A ref, not
+  // state: a cache write must not re-render the app.
+  const gitChangesCache = useRef(new Map<string, GitChanges>());
   const projectPath = tab?.project.path ?? "";
 
   // Asked once per project, and only lazily: the probe writes a file to
@@ -176,6 +183,11 @@ export function App({ context }: { context: AppContext }) {
           autoCompactThreshold={state.settings.autoCompactThreshold}
           defaultModel={state.settings.defaultModel[tab.project.provider] ?? ""}
           defaultEffort={state.settings.defaultEffort[tab.project.provider] ?? ""}
+          cachedChanges={gitChangesCache.current.get(tab.project.id) ?? null}
+          onChangesLoaded={(projectId, changes) => {
+            if (changes) gitChangesCache.current.set(projectId, changes);
+            else gitChangesCache.current.delete(projectId);
+          }}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
           rightPanel={rightPanel}

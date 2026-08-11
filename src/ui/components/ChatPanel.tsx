@@ -79,6 +79,12 @@ interface Props {
    *  composer's pickers can name what "default" gets. Empty = provider's own. */
   defaultModel: string;
   defaultEffort: string;
+  /** Last-known git changes for this project, from before the remount a
+   *  tab switch causes. Seeding from it lets the sidebar paint instantly
+   *  instead of blinking through its empty state until git answers. */
+  cachedChanges: GitChanges | null;
+  /** Reports every loaded answer back, so the cache stays current. */
+  onChangesLoaded: (projectId: string, changes: GitChanges | null) => void;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
   /** Which right-hand panel is showing. Lifted for the same reason
@@ -154,6 +160,8 @@ export function ChatPanel({
   autoCompactThreshold,
   defaultModel,
   defaultEffort,
+  cachedChanges,
+  onChangesLoaded,
   sidebarView,
   onSelectRightPanel,
   rightPanel,
@@ -206,8 +214,14 @@ export function ChatPanel({
 }: Props) {
   const providerName = providerById(tab.project.provider).displayName;
   const [fallbackCommands, setFallbackCommands] = useState<readonly CommandInfo[]>([]);
-  const [changes, setChanges] = useState<GitChanges | null>(null);
+  const [changes, setChanges] = useState<GitChanges | null>(cachedChanges);
   const [changesRefreshKey, setChangesRefreshKey] = useState(0);
+  // Every loaded answer goes to the parent's cache too, so the NEXT
+  // remount of this panel has something to paint on its first frame.
+  const applyChanges = (loaded: GitChanges | null) => {
+    setChanges(loaded);
+    onChangesLoaded(tab.project.id, loaded);
+  };
   const [history, setHistory] = useState<HistoryListing>({ native: false, sessions: [] });
   const [historyLoading, setHistoryLoading] = useState(false);
   const sidebar = useDragWidth(270, 180, 520);
@@ -288,7 +302,7 @@ export function ChatPanel({
     let cancelled = false;
     const timer = setTimeout(() => {
       loadGitChanges().then((loaded) => {
-        if (!cancelled) setChanges(loaded);
+        if (!cancelled) applyChanges(loaded);
       });
     }, GIT_RELOAD_DEBOUNCE_MS);
     return () => {
@@ -634,7 +648,7 @@ export function ChatPanel({
             // closes on success, and it must close onto the branch the
             // user just chose — header, tab bar and file list included.
             // The debounced background refresh is too late for that.
-            if (result.ok) setChanges(await loadGitChanges());
+            if (result.ok) applyChanges(await loadGitChanges());
             return result;
           }}
           onClose={() => setBranchPickerOpen(false)}
