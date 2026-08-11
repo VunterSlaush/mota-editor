@@ -20,7 +20,7 @@ import type { ProviderId } from "../entities/provider";
 import { DEFAULT_PROVIDER } from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
-import type { WorktreeSettings } from "../entities/worktree";
+import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
 import { defaultWorktreeSettings } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
 
@@ -58,6 +58,16 @@ export interface TabState {
   readonly planFilePath?: string;
   /** Id of the persisted transcript this conversation writes to. */
   readonly historySessionId?: string;
+  /**
+   * The transcript this tab was writing to when the app last closed —
+   * a CLAIM, not a fact, because the messages are gone from the screen.
+   * It becomes `historySessionId` again only if the agent turns out to
+   * still be in that same conversation (the frontend reloaded but the
+   * backend session survived, which is every hot reload in dev).
+   * Otherwise the next prompt starts a new one, as it should: a fresh
+   * agent session is a fresh chat.
+   */
+  readonly restoredHistorySessionId?: string;
   /** True when a turn finished while the user was on another tab. */
   readonly attention?: boolean;
   /** Set while this worktree's heavy folders are being put in place. */
@@ -223,6 +233,12 @@ export type Action =
       /** undefined clears the override and follows the provider toggle. */
       enabled: boolean | undefined;
     }
+  | {
+      type: "tab/provisioningChanged";
+      tabId: string;
+      /** undefined clears the override and follows the app default. */
+      provisioning: readonly ProvisionEntry[] | undefined;
+    }
   | { type: "tab/verboseChanged"; tabId: string; verbose: boolean }
   | { type: "tab/commandsUpdated"; tabId: string; commands: readonly CommandInfo[] }
   | { type: "tab/planUpdated"; tabId: string; plan: readonly PlanEntry[] }
@@ -279,6 +295,9 @@ export type Action =
       messages: readonly ChatMessage[];
       plan?: readonly PlanEntry[];
       planMarkdown?: string;
+      /** The agent's own id for it, when the load attached to one — the
+       *  tab is on that conversation from here on. */
+      providerSessionId?: string;
     }
   | { type: "chat/cleared"; tabId: string }
   | { type: "chat/approvalResolved"; tabId: string; requestId: string; optionId: string }
@@ -454,6 +473,20 @@ export function reduce(state: AppState, action: Action): AppState {
         return { ...tab, project: { ...tab.project, mcpOverrides: overrides } };
       });
 
+    case "tab/provisioningChanged":
+      // Clearing must REMOVE the key, not store []: absent means "follow
+      // the app default", which an empty list would silently pin.
+      return mapTab(state, action.tabId, (tab) => {
+        const { provisioningOverride: _, ...project } = tab.project;
+        return {
+          ...tab,
+          project:
+            action.provisioning === undefined
+              ? project
+              : { ...project, provisioningOverride: action.provisioning },
+        };
+      });
+
     case "tab/verboseChanged":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
@@ -560,6 +593,9 @@ export function reduce(state: AppState, action: Action): AppState {
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         historySessionId: action.sessionId,
+        // Settled either way: the claim was adopted, or a new transcript
+        // took its place. Nothing left to reconcile.
+        restoredHistorySessionId: undefined,
       }));
 
     // Like chat/toolCallUpdated: exactly one message object changes, so
@@ -580,8 +616,21 @@ export function reduce(state: AppState, action: Action): AppState {
         ...tab,
         messages: action.messages,
         historySessionId: action.sessionId,
+        restoredHistorySessionId: undefined,
         plan: action.plan ?? [],
         planMarkdown: action.planMarkdown,
+        // Landing the conversation and the session it runs in as ONE
+        // update: a transcript is painted in a single render, and the
+        // next save must not stamp the session the tab left behind.
+        project: action.providerSessionId
+          ? {
+              ...tab.project,
+              providerSessions: {
+                ...tab.project.providerSessions,
+                [tab.project.provider]: action.providerSessionId,
+              },
+            }
+          : tab.project,
       }));
 
     case "chat/cleared":
@@ -589,6 +638,7 @@ export function reduce(state: AppState, action: Action): AppState {
         ...tab,
         messages: [],
         historySessionId: undefined,
+        restoredHistorySessionId: undefined,
         plan: [],
         planMarkdown: undefined,
       }));

@@ -113,13 +113,15 @@ export class TauriAgentGateway implements AgentGateway {
         if (event.kind === "completed") this.handlers.delete(payload.tabId);
         return;
       }
-      // Session-level events (warm-up stages, mode switches, notices)
-      // have their own subscriber — a respawn notice in particular is
-      // emitted by warm-up, which is exactly when no turn is running.
+      // No turn in flight: session-level events (warm-up stages, mode
+      // switches, notices, the id of the session that just booted) have
+      // their own subscriber — a respawn notice in particular is emitted
+      // by warm-up, which is exactly when no turn is running.
       if (
         event.kind === "sessionStage" ||
         event.kind === "modeChanged" ||
-        event.kind === "notice"
+        event.kind === "notice" ||
+        event.kind === "session"
       ) {
         this.sessionHandler?.(payload.tabId, event);
         return;

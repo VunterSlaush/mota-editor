@@ -138,9 +138,20 @@ fuss": swapping Tauri for Electron would touch `src/adapters/tauri/`,
 Open tabs, per-tab provider choice, and provider session ids survive
 restarts in one JSON file in the OS app-config directory (see
 `workspace_file.rs`). The backend treats the payload as opaque; its schema
-is owned by the frontend core (`PersistedWorkspace`). Chat transcripts are
-deliberately not persisted in v1 — the provider session id is what lets a
+is owned by the frontend core (`PersistedWorkspace`). Chat messages are
+deliberately not persisted there — the provider session id is what lets a
 conversation resume.
+
+The conversation itself is written to session history after every turn
+(`history_file.rs`, one file per chat). It carries two ids: ours, which
+names the file, and the provider's, which names the agent's own session.
+Both are needed — the History panel lists our transcripts and the agent's
+sessions together, and only the provider id can tell when a row from each
+side is the same conversation. The workspace file also remembers which
+transcript a tab was writing to, so a frontend reload (the backend
+session outlives it) keeps appending to that chat instead of starting a
+new one; the claim is honoured only while the agent is still in the same
+session.
 
 ## Testing strategy
 

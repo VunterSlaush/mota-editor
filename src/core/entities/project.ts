@@ -1,6 +1,7 @@
 import type { AgentMode, PermissionPolicy } from "./agentSettings";
 import type { ProjectMcpOverrides } from "./mcpServer";
 import type { ProviderId } from "./provider";
+import type { ProvisionEntry } from "./worktree";
 
 /**
  * Entities layer — a project is a folder the user works on in one tab.
@@ -34,6 +35,11 @@ export interface Project {
    */
   readonly mcpOverrides?: ProjectMcpOverrides;
   /**
+   * This project's own heavy-folder list for new worktrees. Absent
+   * means follow the app default; the same tri-state as mcpOverrides.
+   */
+  readonly provisioningOverride?: readonly ProvisionEntry[];
+  /**
    * When this folder is a linked git worktree, the path of the main
    * checkout it belongs to. Absent for ordinary folders.
    */
@@ -57,6 +63,7 @@ export interface ProjectDefaults {
   readonly permission: PermissionPolicy;
   readonly model?: string;
   readonly effort?: string;
+  readonly provisioningOverride?: readonly ProvisionEntry[];
 }
 
 /**
@@ -91,6 +98,11 @@ export function newProject(
     effort: defaults.effort,
     verbose: true,
     providerSessions: {},
+    // Only when set: absent means "follow the app default", and a key
+    // holding undefined would read as a decision that was never made.
+    ...(defaults.provisioningOverride
+      ? { provisioningOverride: defaults.provisioningOverride }
+      : {}),
     worktreeOf,
   };
 }

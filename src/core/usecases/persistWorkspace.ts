@@ -18,7 +18,11 @@ export function toPersisted(state: AppState): PersistedWorkspace {
       effort: t.project.effort,
       verbose: t.project.verbose,
       providerSessions: t.project.providerSessions,
+      // The claim survives a restart that never reached a prompt, so a
+      // second restart doesn't lose the conversation the first one kept.
+      historySessionId: t.historySessionId ?? t.restoredHistorySessionId,
       mcpOverrides: t.project.mcpOverrides,
+      provisioningOverride: t.project.provisioningOverride,
       worktreeOf: t.project.worktreeOf,
     })),
     activeTabId: state.activeTabId,

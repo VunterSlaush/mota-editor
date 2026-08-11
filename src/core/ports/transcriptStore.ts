@@ -42,6 +42,13 @@ export interface TranscriptMeta {
   readonly title: string;
   readonly savedAt: number;
   readonly provider: string;
+  /**
+   * The PROVIDER's id for this conversation, when the transcript recorded
+   * one — the only key the agent's own session listing can be matched on
+   * (`id` is local). Absent on transcripts saved before this field
+   * existed, and on providers that never report a session id.
+   */
+  readonly providerSessionId?: string;
   /** Absent when the source (native agent history) doesn't report one —
    *  render nothing rather than a fake 0. */
   readonly messageCount?: number;

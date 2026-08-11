@@ -95,14 +95,17 @@ class FakeNotifications {
 
 class FakeTranscriptStore implements TranscriptStore {
   saved: PersistedTranscript[] = [];
+  /** What a previous run left on disk, by id. */
+  stored = new Map<string, PersistedTranscript>();
   async save(_projectPath: string, transcript: PersistedTranscript) {
     this.saved.push(transcript);
+    this.stored.set(transcript.id, transcript);
   }
   async list(): Promise<TranscriptMeta[]> {
     return [];
   }
-  async load(): Promise<PersistedTranscript | null> {
-    return null;
+  async load(_projectPath: string, id: string): Promise<PersistedTranscript | null> {
+    return this.stored.get(id) ?? null;
   }
   async remove(): Promise<void> {}
   async readPlanFile(_projectPath: string, _path: string): Promise<string | null> {
@@ -529,6 +532,40 @@ describe("SendPrompt notices", () => {
   });
 });
 
+/** A conversation a previous run of the app left on disk. */
+function earlierChat(providerSessionId: string): PersistedTranscript {
+  return {
+    id: "old-1",
+    title: "the first prompt",
+    savedAt: 1,
+    provider: "claude",
+    providerSessionId,
+    messages: [{ id: "m1", role: "user", text: "the first prompt" }],
+  };
+}
+
+/** The tab as a restart hands it back: no messages on screen, only a
+ *  claim on the transcript it was writing to. */
+function restoreTabWith(store: Store, historySessionId: string): void {
+  store.dispatch({
+    type: "workspace/restored",
+    tabs: [
+      {
+        project: newProject("t1", "/work/alpha", DEFAULTS),
+        messages: [],
+        busy: false,
+        queued: [],
+        agentCommands: [],
+        plan: [],
+        shells: [],
+        restoredHistorySessionId: historySessionId,
+      },
+    ],
+    activeTabId: "t1",
+    settings: defaultSettings,
+  });
+}
+
 describe("SendPrompt transcript identity", () => {
   it("saves the provider's session id alongside the local one", async () => {
     // Without this the transcript cannot be matched to the vendor's own
@@ -550,6 +587,59 @@ describe("SendPrompt transcript identity", () => {
     await useCase.execute("t1", "Hello");
 
     expect(transcripts.saved[0].providerSessionId).toBeUndefined();
+  });
+
+  it("rejoins the restored transcript when the agent is still in that conversation", async () => {
+    // The frontend reloaded (every hot reload in dev) while the backend
+    // session lived on: this is ONE conversation and must stay one row.
+    const { store, transcripts, useCase } = setup([
+      { kind: "session", providerSessionId: "claude-abc" },
+      { kind: "completed", isError: false },
+    ]);
+    transcripts.stored.set("old-1", earlierChat("claude-abc"));
+    restoreTabWith(store, "old-1");
+
+    await useCase.execute("t1", "and now the tests");
+    await flush(); // saveTranscript is fire-and-forget
+
+    expect(transcripts.saved[0].id).toBe("old-1");
+    expect(transcripts.saved[0].messages.map((m) => m.text)).toEqual([
+      "the first prompt",
+      "and now the tests",
+    ]);
+    expect(transcripts.saved[0].title).toBe("the first prompt");
+    expect(store.getState().tabs[0].historySessionId).toBe("old-1");
+  });
+
+  it("starts a new transcript when the restored one belongs to another session", async () => {
+    // A real restart boots a NEW agent session: appending to the old
+    // transcript would merge two conversations and lose the first.
+    const { store, transcripts, useCase } = setup([
+      { kind: "session", providerSessionId: "claude-new" },
+      { kind: "completed", isError: false },
+    ]);
+    transcripts.stored.set("old-1", earlierChat("claude-abc"));
+    restoreTabWith(store, "old-1");
+
+    await useCase.execute("t1", "carry on");
+    await flush(); // saveTranscript is fire-and-forget
+
+    expect(transcripts.saved[0].id).not.toBe("old-1");
+    expect(transcripts.saved[0].messages.map((m) => m.text)).toEqual(["carry on"]);
+    expect(transcripts.stored.get("old-1")?.messages).toHaveLength(1); // untouched
+  });
+
+  it("starts a new transcript when the tab has no session id to compare", async () => {
+    const { store, transcripts, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
+    transcripts.stored.set("old-1", earlierChat("claude-abc"));
+    restoreTabWith(store, "old-1");
+
+    await useCase.execute("t1", "carry on");
+    await flush(); // saveTranscript is fire-and-forget
+
+    expect(transcripts.saved[0].id).not.toBe("old-1");
   });
 });
 

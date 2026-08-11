@@ -6,6 +6,7 @@ import {
   AUTH_REQUIRED_CONTEXT,
   approvalMessage,
   assistantMessage,
+  type ChatMessage,
   errorMessage,
   infoMessage,
   questionMessage,
@@ -18,9 +19,9 @@ import { COMPACT_COMMAND, providerById } from "../entities/provider";
 import { estimateTokens } from "../entities/tokens";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
-import type { TranscriptStore } from "../ports/transcriptStore";
+import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
 import type { WorkspaceStore } from "../ports/workspacePort";
-import { tabById } from "../state/appState";
+import { type TabState, tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import type { ApplyCommandConfig } from "./applyCommandConfig";
 import { persistWorkspace } from "./persistWorkspace";
@@ -738,12 +739,16 @@ export class SendPrompt {
     if (!tab || tab.messages.length === 0) return;
 
     let sessionId = tab.historySessionId;
+    let earlier: readonly ChatMessage[] = [];
     if (!sessionId) {
-      sessionId = this.newId();
+      const resumed = await this.restoredTranscript(tab);
+      sessionId = resumed?.id ?? this.newId();
+      earlier = resumed?.messages ?? [];
       this.store.dispatch({ type: "chat/historySessionAssigned", tabId, sessionId });
     }
 
-    const firstUserMessage = tab.messages.find((m) => m.role === "user");
+    const messages = [...earlier, ...tab.messages];
+    const firstUserMessage = messages.find((m) => m.role === "user");
     await this.transcriptStore
       .save(tab.project.path, {
         id: sessionId,
@@ -754,11 +759,35 @@ export class SendPrompt {
         // Recorded by the "session" event earlier in this same turn, so
         // it is already in the tab by the time the save runs.
         providerSessionId: tab.project.providerSessions[tab.project.provider],
-        messages: tab.messages,
+        messages,
         plan: tab.plan.length > 0 ? tab.plan : undefined,
         planFilePath: tab.planFilePath, // path only — content read on reopen
       })
       .catch(() => undefined); // history is best-effort, never load-bearing
+  }
+
+  /**
+   * The transcript a restored tab may rejoin: the one it was writing to
+   * before the app was reloaded, IF the agent is still in that same
+   * conversation. Null when there is nothing to rejoin — the caller then
+   * starts a new one.
+   *
+   * The frontend forgets its chat on every reload while the backend
+   * session lives on, which in development is several times an hour.
+   * Without this the same conversation is cut into a fresh History entry
+   * each time — the "every prompt becomes a history item" bug. The
+   * session ids must MATCH: a genuine restart boots a new agent session,
+   * and appending a different conversation to this transcript (or worse,
+   * overwriting it with only the messages since the reload) would lose
+   * the one it holds.
+   */
+  private async restoredTranscript(tab: TabState): Promise<PersistedTranscript | null> {
+    const live = tab.project.providerSessions[tab.project.provider];
+    if (!tab.restoredHistorySessionId || !live) return null;
+    const stored = await this.transcriptStore
+      .load(tab.project.path, tab.restoredHistorySessionId)
+      .catch(() => null);
+    return stored?.providerSessionId === live ? stored : null;
   }
 }
 

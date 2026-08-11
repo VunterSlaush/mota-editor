@@ -189,29 +189,32 @@ export function ChangesPanel({
           // Fetch moves no files, so it is safe even mid-turn — the only
           // remote verb the running agent can't be disturbed by.
           disabled={working !== null}
+          aria-label="Fetch"
           title="Fetch and prune remote-tracking branches"
           onClick={() => void run("fetch", onFetch)}
         >
-          {verbIcon("fetch", ArrowsClockwise)} Fetch
+          {verbIcon("fetch", ArrowsClockwise)}
         </button>
         <button
           type="button"
           className="changes__action"
           disabled={mutationsDisabled}
+          aria-label="Pull"
           title={pendingTitle("pull", behind)}
           onClick={() => void run("pull", onPull)}
         >
-          {verbIcon("pull", ArrowLineDown)} Pull
+          {verbIcon("pull", ArrowLineDown)}
           <PendingCount count={behind} />
         </button>
         <button
           type="button"
           className="changes__action"
           disabled={mutationsDisabled}
+          aria-label="Push"
           title={pendingTitle("push", ahead)}
           onClick={() => void run("push", onPush)}
         >
-          {verbIcon("push", ArrowLineUp)} Push
+          {verbIcon("push", ArrowLineUp)}
           <PendingCount count={ahead} />
         </button>
         <button

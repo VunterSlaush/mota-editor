@@ -174,6 +174,8 @@ export function App({ context }: { context: AppContext }) {
           key={tab.project.id}
           tab={tab}
           autoCompactThreshold={state.settings.autoCompactThreshold}
+          defaultModel={state.settings.defaultModel[tab.project.provider] ?? ""}
+          defaultEffort={state.settings.defaultEffort[tab.project.provider] ?? ""}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
           rightPanel={rightPanel}
@@ -183,9 +185,7 @@ export function App({ context }: { context: AppContext }) {
           loadHistory={(onRefresh) =>
             context.sessionHistory.list(tab.project.id, onRefresh)
           }
-          onOpenSession={(sessionId, native, savedAt) =>
-            context.sessionHistory.open(tab.project.id, sessionId, native, savedAt)
-          }
+          onOpenSession={(item) => context.sessionHistory.open(tab.project.id, item)}
           onDeleteSession={(sessionId) =>
             context.sessionHistory.remove(tab.project.id, sessionId)
           }
@@ -284,6 +284,10 @@ export function App({ context }: { context: AppContext }) {
           onScopeMcpServer={(serverId, enabled) => {
             if (tab)
               void context.scopeMcpServer.execute(tab.project.id, serverId, enabled);
+          }}
+          onScopeProvisioning={(entries) => {
+            if (tab)
+              void context.scopeWorktreeProvisioning.execute(tab.project.id, entries);
           }}
           newId={context.newId}
           supportsCow={supportsCow}

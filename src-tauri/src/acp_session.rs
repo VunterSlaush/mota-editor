@@ -93,6 +93,14 @@ pub struct AcpSession {
     /// leave the tab stuck busy forever.
     current_turn: Mutex<Option<i64>>,
     bypass: AtomicBool,
+    /// Auto permissions: the agent's own native auto mode judges what is
+    /// safe where it has one; otherwise EDIT requests are approved
+    /// unasked and everything else still reaches the user.
+    auto: AtomicBool,
+    /// True when the agent acknowledged native `auto` mode this turn —
+    /// a permission request arriving then means "this one is risky", so
+    /// the app must not second-guess it with its own approvals.
+    native_auto: AtomicBool,
     /// True while the current turn runs in plan mode — auto-approval is
     /// fully disabled then: approving the plan is the user's call.
     plan_mode: AtomicBool,
@@ -346,11 +354,18 @@ pub async fn start_turn(
         request.permission == agent_core::Permission::Bypass,
         Ordering::SeqCst,
     );
+    session.auto.store(
+        request.permission == agent_core::Permission::Auto,
+        Ordering::SeqCst,
+    );
     session
         .plan_mode
         .store(request.mode == agent_core::Mode::Plan, Ordering::SeqCst);
 
-    apply_mode(&session, provider_id, request.mode).await;
+    let applied = apply_mode(&session, provider_id, request.mode, request.permission).await;
+    session
+        .native_auto
+        .store(applied == Some("auto"), Ordering::SeqCst);
 
     // Last look before the point of no return: once the prompt is
     // written, stopping is the agent's cooperation (`session/cancel`);
@@ -407,25 +422,33 @@ fn clear_running_turn(app: &AppHandle, tab_id: &str) {
     crate::commands::remove_running_turn(&turns, tab_id);
 }
 
-/// Ask the agent to switch to the mode's native session mode, if any.
-/// Best-effort: an agent that rejects the mode still runs the turn (the
-/// prompt preamble covers non-native modes).
-async fn apply_mode(session: &Arc<AcpSession>, provider_id: &str, mode: agent_core::Mode) {
-    let Some(mode_id) = acp::native_mode_id(provider_id, mode) else {
-        return;
-    };
+/// Ask the agent to switch to the turn's native session mode, if any,
+/// and return the mode id it acknowledged. Best-effort: an agent that
+/// rejects the mode still runs the turn (the prompt preamble covers
+/// non-native modes), it just returns None here.
+async fn apply_mode(
+    session: &Arc<AcpSession>,
+    provider_id: &str,
+    mode: agent_core::Mode,
+    permission: agent_core::Permission,
+) -> Option<&'static str> {
+    let mode_id = acp::native_mode_id(provider_id, mode, permission)?;
     // Only name modes the agent actually offered; an adapter that renamed
     // its ids gets no bogus request (empty list = agent reported none,
     // send untested as before).
     {
         let available = session.available_modes.lock().unwrap_or_else(PoisonError::into_inner);
         if !available.is_empty() && !available.iter().any(|m| m == mode_id) {
-            return;
+            return None;
         }
     }
     let id = session.request_id();
     let message = acp::set_mode_request(id, &session.sid(), mode_id);
-    let _ = session.call_with_timeout(message, id, SET_MODE_TIMEOUT).await;
+    session
+        .call_with_timeout(message, id, SET_MODE_TIMEOUT)
+        .await
+        .ok()
+        .map(|_| mode_id)
 }
 
 /// How long a cancelled turn may take to acknowledge before the
@@ -531,7 +554,18 @@ pub async fn warm(
     provider_id: &str,
     spec: &SessionSpec,
 ) {
-    let _ = ensure_session(&app, sessions, tab_id, provider_id, spec).await;
+    let Ok(session) = ensure_session(&app, sessions, tab_id, provider_id, spec).await else {
+        return;
+    };
+    // Say which session this tab is in, even when the answer is the one
+    // it was already in. A REUSED session announces nothing on its own,
+    // so a frontend that reloaded (every hot reload in development, and
+    // any reconnect) would go on writing history against the session it
+    // remembered from before — a conversation the tab may have left.
+    let session_id = session.sid();
+    if !session_id.is_empty() {
+        runner::emit(&app, tab_id, &AgentEvent::SessionStarted { provider_session_id: session_id });
+    }
 }
 
 /// Everything that decides WHICH agent process a tab talks to. Grouped
@@ -808,6 +842,8 @@ async fn boot_agent(
         pending_questions: Mutex::new(Vec::new()),
         current_turn: Mutex::new(None),
         bypass: AtomicBool::new(false),
+        auto: AtomicBool::new(false),
+        native_auto: AtomicBool::new(false),
         plan_mode: AtomicBool::new(false),
         turn_active: AtomicBool::new(false),
         has_conversation: AtomicBool::new(false),
@@ -1327,12 +1363,20 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
             tool_call_id,
             tool_kind,
         }) => {
-            // Bypass auto-approves ordinary tool requests — but NEVER a
-            // plan approval, and nothing at all while in plan mode. When
-            // the agent offers no allow option, bypass_choice is None and
-            // the request falls through to the user.
+            // Bypass auto-approves ordinary tool requests. Auto leaves
+            // the judgment to the agent's native auto mode where one took
+            // hold — a request arriving then means "this one is risky,
+            // ask" and must reach the user untouched; only without a
+            // native tier does the app approve EDITs itself. Never a plan
+            // approval, and nothing at all while in plan mode. When the
+            // agent offers no allow option, bypass_choice is None and the
+            // request falls through to the user.
             let is_plan = acp::is_plan_approval(&title, &options, tool_kind.as_deref());
-            let may_auto_approve = session.bypass.load(Ordering::SeqCst)
+            let auto_edit_fallback = session.auto.load(Ordering::SeqCst)
+                && !session.native_auto.load(Ordering::SeqCst)
+                && tool_kind.as_deref() == Some("edit");
+            let may_auto_approve = (session.bypass.load(Ordering::SeqCst)
+                || auto_edit_fallback)
                 && !session.plan_mode.load(Ordering::SeqCst)
                 && !is_plan;
             if may_auto_approve {

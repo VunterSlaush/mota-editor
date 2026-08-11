@@ -13,7 +13,7 @@ use crate::event::{
     QuestionOptionInfo, ToolContent, ToolLocation,
 };
 use crate::provider::truncate;
-use crate::turn::{mode_preamble, Mode, TurnRequest};
+use crate::turn::{mode_preamble, Mode, Permission, TurnRequest};
 
 pub const PROTOCOL_VERSION: u64 = 1;
 
@@ -190,9 +190,17 @@ pub fn is_auth_failure(message: &str) -> bool {
 
 /// The agent-defined session-mode id that natively enforces our mode,
 /// per provider (verified against each adapter's advertised modes).
-pub fn native_mode_id(provider_id: &str, mode: Mode) -> Option<&'static str> {
+pub fn native_mode_id(
+    provider_id: &str,
+    mode: Mode,
+    permission: Permission,
+) -> Option<&'static str> {
     match (provider_id, mode) {
         ("claude", Mode::Plan) => Some("plan"),
+        // Claude's native `auto`: its own permission system approves what
+        // it calls safe and asks about the rest — exactly the app's Auto
+        // policy, judged by the CLI instead of approximated here.
+        ("claude", _) if permission == Permission::Auto => Some("auto"),
         ("claude", _) => Some("default"),
         ("codex", Mode::Plan) => Some("read-only"),
         ("codex", _) => Some("agent"),
@@ -202,7 +210,7 @@ pub fn native_mode_id(provider_id: &str, mode: Mode) -> Option<&'static str> {
 
 /// Whether plan mode is natively enforced over ACP for this provider.
 pub fn plan_is_native(provider_id: &str) -> bool {
-    native_mode_id(provider_id, Mode::Plan).is_some()
+    native_mode_id(provider_id, Mode::Plan, Permission::Manual).is_some()
 }
 
 // ---- Outgoing messages (client → agent) ----
@@ -1794,11 +1802,17 @@ mod tests {
 
     #[test]
     fn native_mode_ids_match_the_adapters() {
-        assert_eq!(native_mode_id("claude", Mode::Plan), Some("plan"));
-        assert_eq!(native_mode_id("claude", Mode::Agent), Some("default"));
-        assert_eq!(native_mode_id("codex", Mode::Plan), Some("read-only"));
-        assert_eq!(native_mode_id("codex", Mode::Debug), Some("agent"));
-        assert_eq!(native_mode_id("gemini", Mode::Plan), None);
+        let manual = Permission::Manual;
+        assert_eq!(native_mode_id("claude", Mode::Plan, manual), Some("plan"));
+        assert_eq!(native_mode_id("claude", Mode::Agent, manual), Some("default"));
+        assert_eq!(native_mode_id("codex", Mode::Plan, manual), Some("read-only"));
+        assert_eq!(native_mode_id("codex", Mode::Debug, manual), Some("agent"));
+        assert_eq!(native_mode_id("gemini", Mode::Plan, manual), None);
+        // Auto rides Claude's native auto mode; plan still wins, and the
+        // other adapters offer no such tier.
+        assert_eq!(native_mode_id("claude", Mode::Agent, Permission::Auto), Some("auto"));
+        assert_eq!(native_mode_id("claude", Mode::Plan, Permission::Auto), Some("plan"));
+        assert_eq!(native_mode_id("codex", Mode::Agent, Permission::Auto), Some("agent"));
     }
 
     #[test]

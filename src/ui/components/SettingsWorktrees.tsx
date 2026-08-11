@@ -2,16 +2,21 @@ import { Plus, Trash } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { ProvisionEntry, ProvisionStrategy } from "../../core/entities/worktree";
 import {
+  effectiveProvisioning,
   folderSuggestions,
   provisionPathProblem,
   shareRisk,
 } from "../../core/entities/worktree";
-import type { AppSettings } from "../../core/state/appState";
+import type { AppSettings, TabState } from "../../core/state/appState";
 import { OptionPicker } from "./OptionPicker";
 
 interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
+  /** The tab whose project the per-project list scopes; null with none open. */
+  activeTab: TabState | null;
+  /** Give the active project its own list; undefined follows the default. */
+  onScopeProvisioning: (entries: readonly ProvisionEntry[] | undefined) => void;
   /**
    * Whether the disk can copy-on-write, which decides what Copy costs.
    * Null while unknown — the wording then promises nothing either way.
@@ -28,30 +33,20 @@ interface Props {
 /**
  * UI — worktree preferences: where new worktrees land, which remote a
  * remote-only branch comes from, what a worktree tab inherits, and how
- * the heavy folders git does not carry get stocked.
+ * the heavy folders git does not carry get stocked — as an app default,
+ * with the open project able to carry its own list instead.
  */
 export function SettingsWorktrees({
   settings,
   onChange,
+  activeTab,
+  onScopeProvisioning,
   supportsCow = null,
   loadFolders,
 }: Props) {
   const worktrees = settings.worktrees;
   const patch = (changes: Partial<AppSettings["worktrees"]>) =>
     onChange({ worktrees: { ...worktrees, ...changes } });
-
-  // Rows are addressed by position, not by path: a path being typed
-  // changes on every keystroke, and a row that changes identity mid-word
-  // is remounted by React and loses the caret.
-  const entries = worktrees.provisioning;
-  const replace = (next: readonly ProvisionEntry[]) => patch({ provisioning: next });
-  const update = (index: number, changes: Partial<ProvisionEntry>) =>
-    replace(entries.map((e, i) => (i === index ? { ...e, ...changes } : e)));
-  // A second blank row would be indistinguishable from the first.
-  const add = () => {
-    if (entries.some((e) => !e.path.trim())) return;
-    replace([...entries, { path: "", strategy: "clone" }]);
-  };
 
   // Read once per opening of this section: a folder scan is disk work,
   // and the answer does not change while someone types into it.
@@ -68,6 +63,8 @@ export function SettingsWorktrees({
       cancelled = true;
     };
   }, [loadFolders]);
+
+  const override = activeTab?.project.provisioningOverride;
 
   return (
     <div className="settings-section">
@@ -115,12 +112,94 @@ export function SettingsWorktrees({
         </label>
       </Field>
 
-      <h3 className="settings-section__subtitle">Heavy folders</h3>
+      <h3 className="settings-section__subtitle">Folders to copy or link</h3>
       <p className="settings-section__hint">
-        Git carries none of these into a new worktree, so a fresh worktree cannot build
-        until they are back. {copyHint(supportsCow)}
+        Git carries none of the ignored heavy folders — node_modules, build output — into
+        a new worktree, so a fresh worktree cannot build until they are back. Each folder
+        listed here is put in place the moment a worktree is created: Copy makes a private
+        copy, Link points a symlink at the main checkout's folder, Skip leaves it out.
+        This list is the default for every project. {copyHint(supportsCow)}
       </p>
 
+      <ProvisionList
+        entries={worktrees.provisioning}
+        onChange={(next) => patch({ provisioning: next })}
+        candidates={candidates}
+        supportsCow={supportsCow}
+      />
+
+      {activeTab && (
+        <>
+          <h3 className="settings-section__subtitle">In {activeTab.project.name}</h3>
+          <div className="tool-row__project-choices">
+            <label className="tool-row__toggle">
+              <input
+                type="radio"
+                name="provisioning-scope"
+                checked={override === undefined}
+                onChange={() => onScopeProvisioning(undefined)}
+              />
+              Follow default ({folderCount(worktrees.provisioning.length)})
+            </label>
+            <label className="tool-row__toggle">
+              <input
+                type="radio"
+                name="provisioning-scope"
+                checked={override !== undefined}
+                onChange={() =>
+                  // Seed from what applies today, so customizing starts
+                  // as a copy to edit rather than a blank slate.
+                  onScopeProvisioning(
+                    effectiveProvisioning(override, worktrees.provisioning),
+                  )
+                }
+              />
+              Customize for this project
+            </label>
+          </div>
+          {override !== undefined && (
+            <ProvisionList
+              entries={override}
+              onChange={onScopeProvisioning}
+              candidates={candidates}
+              supportsCow={supportsCow}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * UI — one editable heavy-folder list: the rows, their warnings, and the
+ * add button. Shared by the app default and the per-project list, which
+ * differ only in where a change is written.
+ */
+function ProvisionList({
+  entries,
+  onChange,
+  candidates,
+  supportsCow,
+}: {
+  entries: readonly ProvisionEntry[];
+  onChange: (next: readonly ProvisionEntry[]) => void;
+  candidates: readonly string[];
+  supportsCow: boolean | null;
+}) {
+  // Rows are addressed by position, not by path: a path being typed
+  // changes on every keystroke, and a row that changes identity mid-word
+  // is remounted by React and loses the caret.
+  const update = (index: number, changes: Partial<ProvisionEntry>) =>
+    onChange(entries.map((e, i) => (i === index ? { ...e, ...changes } : e)));
+  // A second blank row would be indistinguishable from the first.
+  const add = () => {
+    if (entries.some((e) => !e.path.trim())) return;
+    onChange([...entries, { path: "", strategy: "clone" }]);
+  };
+
+  return (
+    <>
       {entries.length === 0 && (
         <p className="settings-section__hint">
           Nothing is prepared — new worktrees start empty.
@@ -152,7 +231,7 @@ export function SettingsWorktrees({
                 type="button"
                 className="tool-row__remove"
                 aria-label={`Stop preparing ${entry.path || "this folder"}`}
-                onClick={() => replace(entries.filter((_, i) => i !== index))}
+                onClick={() => onChange(entries.filter((_, i) => i !== index))}
               >
                 <Trash size={14} />
               </button>
@@ -165,7 +244,7 @@ export function SettingsWorktrees({
       <button type="button" className="tool-add" onClick={add}>
         <Plus size={14} /> Add a folder
       </button>
-    </div>
+    </>
   );
 }
 
@@ -281,9 +360,9 @@ function strategyOptions(supportsCow: boolean | null) {
     { id: "clone" as const, label: "Copy", description: copy },
     {
       id: "share" as const,
-      label: "Share",
+      label: "Link",
       description:
-        "One copy for every worktree. Build tools resolve it; the agent cannot read through it.",
+        "A symlink to the main checkout's folder — every worktree shares that one copy. Installs write into it, and the agent cannot read through it.",
     },
     {
       id: "skip" as const,
@@ -291,6 +370,10 @@ function strategyOptions(supportsCow: boolean | null) {
       description: "Leave it out and install or build in the worktree yourself.",
     },
   ];
+}
+
+function folderCount(count: number): string {
+  return count === 1 ? "1 folder" : `${count} folders`;
 }
 
 function copyHint(supportsCow: boolean | null): string {

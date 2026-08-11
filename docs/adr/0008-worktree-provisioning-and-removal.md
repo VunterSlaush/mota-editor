@@ -3,6 +3,7 @@
 - Status: accepted
 - Date: 2026-08-09
 - Amends: ADR-0007 (git worktrees as tabs)
+- Amended: 2026-08-11 (the list resolves per project; see below)
 
 ## Context
 
@@ -24,7 +25,22 @@ hardcoded.
 
 `AppSettings.worktrees.provisioning` is a list of repository-relative
 folders, each `share`, `clone`, or `skip`. Defaults: `node_modules` →
-`clone`, `src-tauri/target` → `skip`.
+`clone`, `src-tauri/target` → `skip`. (Since superseded: the list now
+starts empty and the settings section suggests the folders it finds on
+disk — which folders are heavy is a property of the repository, not of
+this app.)
+
+**Amended 2026-08-11 — the list resolves per project.** Which folders
+are heavy is a property of the repository, so the app-wide list is only
+a default: a project may carry its own in
+`Project.provisioningOverride`, persisted on `PersistedProject`
+alongside `mcpOverrides` and with the same tri-state — absent follows
+the default, a set list (even an empty one) replaces it. The pure
+resolver is `effectiveProvisioning` in the worktree entity. A new
+worktree's own project carries a copy of the list it was stocked with,
+regardless of `inheritFromSourceTab` (that toggle is preference, the
+copy is correctness), so removal can take exactly those links back even
+after an app restart or a changed default.
 
 The two strategies are not interchangeable, and the reason is
 **ADR-0005's `confine_to_project`**: it canonicalizes every path the

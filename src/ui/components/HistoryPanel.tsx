@@ -10,7 +10,7 @@ interface Props {
   error?: string;
   activeSessionId?: string;
   busy: boolean;
-  onOpen: (sessionId: string, native: boolean, savedAt: number) => void;
+  onOpen: (item: HistoryItem) => void;
   onDelete: (sessionId: string) => void;
   onNewChat: () => void;
 }
@@ -60,7 +60,7 @@ export function HistoryPanel({
             className={`history__item ${
               session.id === activeSessionId ? "history__item--active" : ""
             }`}
-            onClick={() => !busy && onOpen(session.id, session.native, session.savedAt)}
+            onClick={() => !busy && onOpen(session)}
             title={
               session.messageCount !== undefined
                 ? `${session.messageCount} messages · ${session.provider}`
@@ -71,7 +71,8 @@ export function HistoryPanel({
             <div className="history__meta">
               <span>{formatWhen(session.savedAt)}</span>
               <span className="history__provider">{session.provider}</span>
-              {!session.native && (
+              {/* Ours to delete only when the copy on disk is ours. */}
+              {session.local && (
                 <button
                   type="button"
                   className="history__delete"

@@ -10,7 +10,7 @@ import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPo
 import type { ShellSize } from "../../core/ports/shellPort";
 import type { TabState } from "../../core/state/appState";
 import type { GitActionResult } from "../../core/usecases/gitActions";
-import type { HistoryListing } from "../../core/usecases/history";
+import type { HistoryItem, HistoryListing } from "../../core/usecases/history";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
@@ -75,6 +75,10 @@ interface Props {
   tab: TabState;
   /** Fraction of the context window at which auto-compact kicks in. */
   autoCompactThreshold: number;
+  /** The app's default model/effort for this tab's provider, so the
+   *  composer's pickers can name what "default" gets. Empty = provider's own. */
+  defaultModel: string;
+  defaultEffort: string;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
   /** Which right-hand panel is showing. Lifted for the same reason
@@ -86,7 +90,7 @@ interface Props {
   /** Resolves with the instant local listing; `onRefresh` delivers the
    *  merged native listing later, when a live agent could be asked. */
   loadHistory: (onRefresh: (listing: HistoryListing) => void) => Promise<HistoryListing>;
-  onOpenSession: (sessionId: string, native: boolean, savedAt: number) => Promise<void>;
+  onOpenSession: (item: HistoryItem) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
   onNewChat: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
@@ -148,6 +152,8 @@ interface Props {
 export function ChatPanel({
   tab,
   autoCompactThreshold,
+  defaultModel,
+  defaultEffort,
   sidebarView,
   onSelectRightPanel,
   rightPanel,
@@ -463,9 +469,7 @@ export function ChatPanel({
                   error={history.error}
                   activeSessionId={tab.historySessionId}
                   busy={tab.busy}
-                  onOpen={(id, native, savedAt) =>
-                    void onOpenSession(id, native, savedAt)
-                  }
+                  onOpen={(item) => void onOpenSession(item)}
                   onDelete={(id) =>
                     void onDeleteSession(id).then(() =>
                       setHistory({
@@ -536,6 +540,8 @@ export function ChatPanel({
             permission={tab.project.permission}
             model={tab.project.model ?? ""}
             effort={tab.project.effort ?? ""}
+            defaultModel={defaultModel}
+            defaultEffort={defaultEffort}
             usage={tab.usage}
             autoCompactThreshold={autoCompactThreshold}
             onSend={onSend}
@@ -622,8 +628,14 @@ export function ChatPanel({
       {branchPickerOpen && changes && (
         <BranchPicker
           branches={changes.branches}
-          onPick={(branch) => {
-            void onGitCheckout(branch).then(() => setChangesRefreshKey((k) => k + 1));
+          onPick={async (branch) => {
+            const result = await onGitCheckout(branch);
+            // Re-read git BEFORE handing the outcome back: the picker
+            // closes on success, and it must close onto the branch the
+            // user just chose — header, tab bar and file list included.
+            // The debounced background refresh is too late for that.
+            if (result.ok) setChanges(await loadGitChanges());
+            return result;
           }}
           onClose={() => setBranchPickerOpen(false)}
         />
