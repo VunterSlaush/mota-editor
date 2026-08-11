@@ -622,7 +622,11 @@ export function ChatPanel({
           branches={changes.branches}
           onPick={async (branch) => {
             const result = await onGitCheckout(branch);
-            setChangesRefreshKey((k) => k + 1);
+            // Re-read git BEFORE handing the outcome back: the picker
+            // closes on success, and it must close onto the branch the
+            // user just chose — header, tab bar and file list included.
+            // The debounced background refresh is too late for that.
+            if (result.ok) setChanges(await loadGitChanges());
             return result;
           }}
           onClose={() => setBranchPickerOpen(false)}

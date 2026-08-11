@@ -1,9 +1,12 @@
+import { CircleNotch } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import type { GitBranch } from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 
 interface Props {
   branches: readonly GitBranch[];
+  /** Resolves once the checkout AND the git refresh behind it are done,
+   *  so the picker is the thing that waits — not the app underneath. */
   onPick: (branch: string) => Promise<GitActionResult>;
   onClose: () => void;
 }
@@ -15,6 +18,11 @@ interface Props {
  * A checkout git refuses — uncommitted changes are the everyday case —
  * keeps the modal open with git's own reason on it, because closing on
  * failure left the user on the old branch with nothing said.
+ *
+ * A checkout that WORKS takes time: git rewrites the working tree, and
+ * the app re-reads it. The picker stays up and says so for all of it —
+ * a modal that vanishes onto a screen still showing the old branch is
+ * what made switching feel like nothing had happened.
  */
 export function BranchPicker({ branches, onPick, onClose }: Props) {
   const [query, setQuery] = useState("");
@@ -23,7 +31,11 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => inputRef.current?.focus(), []);
+  // On open, and again when a refused checkout hands the picker back:
+  // the search box is disabled mid-checkout, which drops focus with it.
+  useEffect(() => {
+    if (!checkingOut) inputRef.current?.focus();
+  }, [checkingOut]);
 
   const filtered = branches.filter((b) =>
     b.name.toLowerCase().includes(query.trim().toLowerCase()),
@@ -67,9 +79,10 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
   return (
     <div className="modal-overlay" onMouseDown={close}>
       <div
-        className="branch-picker"
+        className={`branch-picker ${checkingOut ? "branch-picker--busy" : ""}`}
         role="dialog"
         aria-label="Checkout branch"
+        aria-busy={checkingOut !== null}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <input
@@ -77,12 +90,23 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
           className="branch-picker__search"
           placeholder="Search branches…"
           value={query}
+          disabled={checkingOut !== null}
           onChange={(e) => {
             setQuery(e.target.value);
             setSelectedIndex(0);
           }}
           onKeyDown={onKeyDown}
         />
+        {checkingOut && (
+          <p className="branch-picker__status" role="status">
+            <CircleNotch
+              size={12}
+              className="branch-picker__spinner"
+              aria-hidden="true"
+            />
+            Switching to {checkingOut}…
+          </p>
+        )}
         {error && (
           <p className="branch-picker__error" role="alert">
             {error}
@@ -104,9 +128,6 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
               onClick={() => void pick(branch)}
             >
               <span className="branch-picker__name"> {branch.name}</span>
-              {checkingOut === branch.name && (
-                <span className="branch-picker__current">checking out…</span>
-              )}
               {branch.current && <span className="branch-picker__current">current</span>}
               {branch.remote && <span className="branch-picker__remote">remote</span>}
             </div>
