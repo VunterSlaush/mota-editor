@@ -94,6 +94,14 @@ export class TauriAgentGateway implements AgentGateway {
    */
   private readonly handlers = new Map<string, (event: AgentTurnEvent) => void>();
   private sessionHandler: ((tabId: string, event: AgentTurnEvent) => void) | null = null;
+  private agentInitiatedHandler: ((tabId: string, event: AgentTurnEvent) => void) | null =
+    null;
+  /**
+   * Tabs replaying a history session. A replay streams through its own
+   * temporary listener AND this one, so the agent-initiated lane has to
+   * stand down or every replayed message lands in the live chat twice.
+   */
+  private readonly replaying = new Set<string>();
   private listening: Promise<UnlistenFn> | null = null;
 
   private async ensureListener(): Promise<void> {
@@ -106,10 +114,9 @@ export class TauriAgentGateway implements AgentGateway {
         return;
       }
       // No turn in flight: session-level events (warm-up stages, mode
-      // switches, notices, the id of the session that just booted) still
-      // matter — a respawn notice in particular is emitted by warm-up,
-      // which is exactly when no turn is running. Everything else is a
-      // stray and drops.
+      // switches, notices, the id of the session that just booted) have
+      // their own subscriber — a respawn notice in particular is emitted
+      // by warm-up, which is exactly when no turn is running.
       if (
         event.kind === "sessionStage" ||
         event.kind === "modeChanged" ||
@@ -117,6 +124,14 @@ export class TauriAgentGateway implements AgentGateway {
         event.kind === "session"
       ) {
         this.sessionHandler?.(payload.tabId, event);
+        return;
+      }
+      // Anything else with no turn of ours in flight is the agent
+      // speaking on its own — a follow-up cycle after a background task
+      // it was watching finished. Dropping it, as this used to, is what
+      // made "I'll check back when CI is done" never arrive.
+      if (!this.replaying.has(payload.tabId)) {
+        this.agentInitiatedHandler?.(payload.tabId, event);
       }
     });
     await this.listening;
@@ -125,6 +140,13 @@ export class TauriAgentGateway implements AgentGateway {
   subscribeSessionEvents(onEvent: (tabId: string, event: AgentTurnEvent) => void): void {
     this.sessionHandler = onEvent;
     // Warm-up stages can arrive before any turn ever starts.
+    void this.ensureListener();
+  }
+
+  subscribeAgentInitiated(onEvent: (tabId: string, event: AgentTurnEvent) => void): void {
+    this.agentInitiatedHandler = onEvent;
+    // A follow-up can land in any quiet stretch, including before this
+    // tab's first turn — the listener has to be up either way.
     void this.ensureListener();
   }
 
@@ -255,8 +277,11 @@ export class TauriAgentGateway implements AgentGateway {
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<{ replayed: boolean }> {
     // A stale per-tab handler (e.g. left by a cancelled headless turn)
-    // must not also fold the replay into the live chat.
+    // must not also fold the replay into the live chat, and neither must
+    // the agent-initiated lane, which is exactly where a turn-less
+    // stream of events would otherwise go.
     this.handlers.delete(request.tabId);
+    this.replaying.add(request.tabId);
     const unlisten = await listen<WireEvent>("agent-event", ({ payload }) => {
       if (payload.tabId !== request.tabId) return;
       onEvent(toDomainEvent(payload.event));
@@ -278,6 +303,7 @@ export class TauriAgentGateway implements AgentGateway {
       return { replayed };
     } finally {
       unlisten();
+      this.replaying.delete(request.tabId);
     }
   }
 }

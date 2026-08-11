@@ -12,6 +12,7 @@ class FakeGateway implements AgentGateway {
   subscribeSessionEvents(onEvent: (tabId: string, event: AgentTurnEvent) => void) {
     this.emit = onEvent;
   }
+  subscribeAgentInitiated() {}
   async startTurn() {}
   async cancelTurn() {}
   async respondPermission() {}
