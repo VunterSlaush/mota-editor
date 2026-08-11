@@ -2371,8 +2371,9 @@ body {
 
 .changes__action {
   flex: 1;
-  /* Fetch/Pull/Push plus the refresh icon in a sidebar that drags down
-     to 180px: let the labels clip rather than overflow the panel. */
+  /* Fetch/Pull/Push are icon-only (the title says the rest), but Commit
+     & Push keeps its label — in a sidebar that drags down to 180px, let
+     that label clip rather than overflow the panel. */
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
