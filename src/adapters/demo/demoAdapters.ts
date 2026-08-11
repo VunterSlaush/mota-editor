@@ -78,6 +78,10 @@ export class DemoAgentGateway implements AgentGateway {
 
   subscribeSessionEvents(): void {} // demo sessions have no warm-up
 
+  // Nothing here schedules anything, so the demo agent never comes
+  // back on its own. The real gateway is where this lane matters.
+  subscribeAgentInitiated(): void {}
+
   async readTerminalOutput(): Promise<null> {
     return null; // demo agents own no terminals
   }

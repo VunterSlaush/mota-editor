@@ -36,10 +36,26 @@ export type IdGenerator = () => string;
  */
 const DELTA_FLUSH_MS = 33;
 
+/**
+ * A follow-up the agent starts on its own has no end to wait for: a stop
+ * reason answers a prompt, and this cycle answers none. A stretch of
+ * quiet this long is taken as the end of one — long enough to outlast
+ * the gap between a tool call and its result, short enough that the
+ * transcript is saved while the user is still around to see it.
+ */
+const FOLLOWUP_SETTLE_MS = 2_000;
+
 interface DeltaBuffer {
   role: "assistant" | "thought";
   text: string;
   timer: ReturnType<typeof setTimeout>;
+}
+
+/** One agent-initiated stretch, open until the events stop coming. */
+interface Followup {
+  timer: ReturnType<typeof setTimeout>;
+  /** Something the user would want to look at landed, not just usage. */
+  notable: boolean;
 }
 
 /**
@@ -57,7 +73,11 @@ export class SendPrompt {
     private readonly notifications: NotificationPort,
     private readonly applyCommandConfig: ApplyCommandConfig,
     private readonly newId: IdGenerator,
-  ) {}
+  ) {
+    agentGateway.subscribeAgentInitiated((tabId, event) =>
+      this.onAgentInitiated(tabId, event),
+    );
+  }
 
   async execute(
     tabId: string,
@@ -180,8 +200,75 @@ export class SendPrompt {
    */
   private readonly generation = new Map<string, number>();
 
+  /** Agent-initiated stretches, by tab. See `onAgentInitiated`. */
+  private readonly followups = new Map<string, Followup>();
+
   private onEvent(tabId: string, event: AgentTurnEvent, turn: number): void {
     if (turn !== this.generation.get(tabId)) return; // a superseded turn's tail
+    this.dispatchEvent(tabId, event);
+  }
+
+  /**
+   * An event with no turn of ours in flight: the agent came back on its
+   * own — a background task it was watching finished, or a wake-up it
+   * scheduled fired. It folds into the conversation exactly like a
+   * turn's own events, because to the reader it IS the agent talking.
+   *
+   * The tab goes busy for it — the agent really is working, and Stop has
+   * to be reachable while it does — but nothing will ever announce the
+   * end: a stop reason answers a prompt, and this cycle answers none. So
+   * the flag comes down on quiet, in `settleFollowup`, rather than on a
+   * completion that is never coming.
+   */
+  private onAgentInitiated(tabId: string, event: AgentTurnEvent): void {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return;
+
+    const open = this.followups.get(tabId);
+    if (!open && !tab.busy) {
+      this.store.dispatch({
+        type: "chat/busyChanged",
+        tabId,
+        busy: true,
+        at: Date.now(),
+      });
+    }
+    this.dispatchEvent(tabId, event);
+
+    if (open) clearTimeout(open.timer);
+    this.followups.set(tabId, {
+      notable: (open?.notable ?? false) || showsUpInTheChat(event),
+      timer: setTimeout(() => this.settleFollowup(tabId), FOLLOWUP_SETTLE_MS),
+    });
+  }
+
+  /**
+   * The agent has gone quiet again. Let the tab go idle, then save what
+   * was said and get the user's eyes on it — a follow-up lands with
+   * nobody watching by definition, which is the whole reason the agent
+   * scheduled one.
+   */
+  private settleFollowup(tabId: string): void {
+    const open = this.followups.get(tabId);
+    if (!open) return;
+    this.followups.delete(tabId);
+    this.flushDeltas(tabId);
+    // A turn of ours started in the meantime: it owns the busy flag now,
+    // and its own completion does the telling, saving and draining.
+    if (this.inflight.has(tabId)) return;
+
+    this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
+    // Anything typed while the follow-up held the tab queued behind it,
+    // and no completion is coming to release it.
+    this.drainQueue(tabId);
+    // A stretch of nothing but usage updates is not news.
+    if (!open.notable) return;
+    this.requestAttention(tabId);
+    void persistWorkspace(this.store.getState(), this.workspaceStore);
+    void this.saveTranscript(tabId);
+  }
+
+  private dispatchEvent(tabId: string, event: AgentTurnEvent): void {
     // Deltas coalesce; everything else flushes first so ordering holds
     // (a tool row must land after the text that preceded it).
     if (event.kind === "assistantDelta" || event.kind === "thoughtDelta") {
@@ -674,6 +761,27 @@ function effectiveText(prompt: string, attachments: readonly string[]): string |
   if (trimmed.length > 0) return trimmed;
   if (attachments.length > 0) return "Please review the attached files.";
   return null;
+}
+
+/**
+ * Whether this event is something the user would want to be told about.
+ * Usage and session bookkeeping are not: a follow-up that only reported
+ * a token count is not worth a notification and a tab-bar dot.
+ */
+function showsUpInTheChat(event: AgentTurnEvent): boolean {
+  switch (event.kind) {
+    case "assistant":
+    case "assistantDelta":
+    case "thoughtDelta":
+    case "tool":
+    case "toolCall":
+    case "permission":
+    case "question":
+    case "error":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function describeFailure(providerName: string, e: unknown): string {
