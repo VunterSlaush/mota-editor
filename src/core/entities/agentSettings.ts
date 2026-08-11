@@ -4,7 +4,7 @@ import type { ProviderId } from "./provider";
  * Entities layer — per-tab agent behavior settings.
  */
 export type AgentMode = "agent" | "plan" | "debug";
-export type PermissionPolicy = "manual" | "bypass";
+export type PermissionPolicy = "manual" | "auto" | "bypass";
 
 export interface OptionDescriptor<T extends string> {
   readonly id: T;
@@ -37,6 +37,11 @@ export const PERMISSIONS: readonly OptionDescriptor<PermissionPolicy>[] = [
     label: "Manual approval",
     description:
       "Safe defaults — the agent's risky actions are denied or sandboxed by its CLI.",
+  },
+  {
+    id: "auto",
+    label: "Auto",
+    description: "The agent works freely and asks only when an action looks risky.",
   },
   {
     id: "bypass",

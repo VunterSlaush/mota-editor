@@ -21,6 +21,10 @@ pub enum Permission {
     /// runs cannot prompt interactively; see ADR-0004.)
     #[default]
     Manual,
+    /// The agent runs freely and asks only about risky actions. Maps to
+    /// the vendor's own auto tier where it has one (Claude's native
+    /// `auto` mode); otherwise the nearest accept-edits equivalent.
+    Auto,
     /// The vendor's explicit bypass flag: the agent acts without asking.
     Bypass,
 }
@@ -181,6 +185,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Permission>("\"bypass\"").unwrap(),
             Permission::Bypass
+        );
+        assert_eq!(
+            serde_json::from_str::<Permission>("\"auto\"").unwrap(),
+            Permission::Auto
         );
     }
 }

@@ -8,8 +8,9 @@ use crate::turn::{effective_prompt, external_attachment_dirs, Permission, TurnRe
 /// `gemini -p <prompt> --output-format json`
 ///
 /// Mode mapping: plan and debug are prompt preambles. Permission bypass
-/// maps to `--yolo`; manual keeps gemini's default approvals. Attachment
-/// folders outside the project are granted via `--include-directories`.
+/// maps to `--yolo`, auto to `--approval-mode auto_edit`; manual keeps
+/// gemini's default approvals. Attachment folders outside the project
+/// are granted via `--include-directories`.
 ///
 /// The JSON output (`{"response": "...", "stats": ...}`) may span multiple
 /// lines, so most parsing happens in [`Provider::parse_final`] over the
@@ -34,8 +35,13 @@ impl Provider for Gemini {
             args.push("--model".to_owned());
             args.push(model.to_owned());
         }
-        if request.permission == Permission::Bypass {
-            args.push("--yolo".to_owned());
+        match request.permission {
+            Permission::Bypass => args.push("--yolo".to_owned()),
+            Permission::Auto => {
+                args.push("--approval-mode".to_owned());
+                args.push("auto_edit".to_owned());
+            }
+            Permission::Manual => {}
         }
         let external_dirs = external_attachment_dirs(request);
         if !external_dirs.is_empty() {
@@ -108,6 +114,15 @@ mod tests {
     fn bypass_permission_adds_yolo() {
         let request = TurnRequest { permission: Permission::Bypass, ..test_request("go") };
         assert!(Gemini.build_command(&request).args.contains(&"--yolo".to_owned()));
+    }
+
+    #[test]
+    fn auto_permission_adds_auto_edit_approvals() {
+        let request = TurnRequest { permission: Permission::Auto, ..test_request("go") };
+        let args = Gemini.build_command(&request).args;
+        assert!(args.contains(&"--approval-mode".to_owned()));
+        assert!(args.contains(&"auto_edit".to_owned()));
+        assert!(!args.contains(&"--yolo".to_owned()));
     }
 
     #[test]

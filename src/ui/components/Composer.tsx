@@ -5,6 +5,7 @@ import {
   Gauge,
   Lightning,
   Paperclip,
+  PencilSimple,
   Plus,
   Robot,
   ShieldCheck,
@@ -63,6 +64,7 @@ const MODE_ICONS: Record<AgentMode, ReactNode> = {
 
 const PERMISSION_ICONS: Record<PermissionPolicy, ReactNode> = {
   manual: <ShieldCheck />,
+  auto: <PencilSimple />,
   bypass: <Lightning />,
 };
 

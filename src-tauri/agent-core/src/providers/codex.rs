@@ -10,8 +10,8 @@ use crate::turn::{effective_prompt, Mode, Permission, TurnRequest};
 /// Mode mapping: plan is the preamble PLUS a mechanically enforced
 /// `--sandbox read-only` (and wins over bypass — a plan never writes);
 /// debug is a preamble. Permission bypass maps to
-/// `--dangerously-bypass-approvals-and-sandbox`; manual keeps codex's
-/// default sandbox.
+/// `--dangerously-bypass-approvals-and-sandbox`, auto to `--full-auto`
+/// (workspace-write sandbox); manual keeps codex's default sandbox.
 ///
 /// Stream reference: newline-delimited JSON. Current format uses
 /// `thread.started` / `item.completed` / `turn.completed`; older builds
@@ -52,6 +52,11 @@ impl Provider for Codex {
             }
             (_, Permission::Bypass) => {
                 args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+            }
+            (_, Permission::Auto) => {
+                // Codex's accept-edits tier: writes stay inside the
+                // workspace, the sandbox still guards everything else.
+                args.push("--full-auto".to_owned());
             }
             (_, Permission::Manual) => {}
         }
@@ -197,6 +202,26 @@ mod tests {
             .build_command(&request)
             .args
             .contains(&"--dangerously-bypass-approvals-and-sandbox".to_owned()));
+    }
+
+    #[test]
+    fn auto_permission_adds_full_auto() {
+        let request = TurnRequest { permission: Permission::Auto, ..test_request("go") };
+        let args = Codex.build_command(&request).args;
+        assert!(args.contains(&"--full-auto".to_owned()));
+        assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_owned()));
+    }
+
+    #[test]
+    fn plan_mode_stays_read_only_over_auto() {
+        let request = TurnRequest {
+            mode: Mode::Plan,
+            permission: Permission::Auto,
+            ..test_request("plan it")
+        };
+        let args = Codex.build_command(&request).args;
+        assert!(args.contains(&"read-only".to_owned()));
+        assert!(!args.contains(&"--full-auto".to_owned()));
     }
 
     #[test]

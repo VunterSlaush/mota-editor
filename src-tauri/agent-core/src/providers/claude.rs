@@ -9,9 +9,10 @@ use crate::turn::{effective_prompt, external_attachment_dirs, Mode, Permission, 
 ///
 /// Mode mapping: plan is native (`--permission-mode plan`); debug is a
 /// prompt preamble. Permission bypass maps to
-/// `--dangerously-skip-permissions` (ignored in plan mode — plan never
-/// writes). Attachment folders outside the project are granted via
-/// `--add-dir`.
+/// `--dangerously-skip-permissions`, auto to `--permission-mode auto` —
+/// the CLI's own permission system approves safe actions and asks about
+/// risky ones (both ignored in plan mode — plan never writes).
+/// Attachment folders outside the project are granted via `--add-dir`.
 ///
 /// Stream reference: newline-delimited JSON objects with a `type` field —
 /// `system/init` (carries `session_id`), `assistant` (message content
@@ -37,6 +38,10 @@ impl Provider for Claude {
                 args.push("plan".to_owned());
             }
             (_, Permission::Bypass) => args.push("--dangerously-skip-permissions".to_owned()),
+            (_, Permission::Auto) => {
+                args.push("--permission-mode".to_owned());
+                args.push("auto".to_owned());
+            }
             (_, Permission::Manual) => {}
         }
         if let Some(model) = request.model.as_deref() {
@@ -165,6 +170,27 @@ mod tests {
             .build_command(&request)
             .args
             .contains(&"--dangerously-skip-permissions".to_owned()));
+    }
+
+    #[test]
+    fn auto_permission_maps_to_the_native_auto_mode() {
+        let request = TurnRequest { permission: Permission::Auto, ..test_request("go") };
+        let args = Claude.build_command(&request).args;
+        assert!(args.contains(&"--permission-mode".to_owned()));
+        assert!(args.contains(&"auto".to_owned()));
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+    }
+
+    #[test]
+    fn plan_mode_wins_over_auto_permission() {
+        let request = TurnRequest {
+            mode: Mode::Plan,
+            permission: Permission::Auto,
+            ..test_request("plan it")
+        };
+        let args = Claude.build_command(&request).args;
+        assert!(args.contains(&"plan".to_owned()));
+        assert!(!args.contains(&"auto".to_owned()));
     }
 
     #[test]
