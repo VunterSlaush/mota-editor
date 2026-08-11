@@ -22,6 +22,7 @@ export function toPersisted(state: AppState): PersistedWorkspace {
       // second restart doesn't lose the conversation the first one kept.
       historySessionId: t.historySessionId ?? t.restoredHistorySessionId,
       mcpOverrides: t.project.mcpOverrides,
+      provisioningOverride: t.project.provisioningOverride,
       worktreeOf: t.project.worktreeOf,
     })),
     activeTabId: state.activeTabId,

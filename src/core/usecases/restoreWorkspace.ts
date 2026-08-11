@@ -37,6 +37,7 @@ export class RestoreWorkspace {
         verbose: p.verbose ?? true,
         providerSessions: p.providerSessions,
         mcpOverrides: p.mcpOverrides,
+        provisioningOverride: p.provisioningOverride,
         worktreeOf: p.worktreeOf,
       },
       messages: [],

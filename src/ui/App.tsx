@@ -283,6 +283,10 @@ export function App({ context }: { context: AppContext }) {
             if (tab)
               void context.scopeMcpServer.execute(tab.project.id, serverId, enabled);
           }}
+          onScopeProvisioning={(entries) => {
+            if (tab)
+              void context.scopeWorktreeProvisioning.execute(tab.project.id, entries);
+          }}
           newId={context.newId}
           supportsCow={supportsCow}
           loadFolders={projectPath ? loadFolders : undefined}

@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
+import type { ProvisionEntry } from "../../core/entities/worktree";
 import type { McpProbe } from "../../core/ports/mcpProbe";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
@@ -53,6 +54,8 @@ interface Props {
   activeTab: TabState | null;
   mcpProbe: McpProbe;
   onScopeMcpServer: (serverId: string, enabled: boolean | undefined) => void;
+  /** The active project's own heavy-folder list; undefined follows the default. */
+  onScopeProvisioning: (entries: readonly ProvisionEntry[] | undefined) => void;
   newId: () => string;
   /** Whether this disk clones; null until the probe answers. */
   supportsCow: boolean | null;
@@ -90,6 +93,7 @@ export function SettingsModal({
   activeTab,
   mcpProbe,
   onScopeMcpServer,
+  onScopeProvisioning,
   newId,
   supportsCow,
   loadFolders,
@@ -159,6 +163,8 @@ export function SettingsModal({
             <SettingsWorktrees
               settings={settings}
               onChange={onChange}
+              activeTab={activeTab}
+              onScopeProvisioning={onScopeProvisioning}
               supportsCow={supportsCow}
               loadFolders={loadFolders}
             />

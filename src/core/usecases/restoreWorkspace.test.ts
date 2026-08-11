@@ -193,4 +193,28 @@ describe("RestoreWorkspace projects", () => {
     // the only thing pointing at that conversation.
     expect(toPersisted(state).projects[0].historySessionId).toBe("old-1");
   });
+
+  it("brings a project's own provisioning list back, and it survives a round-trip", async () => {
+    const provisioningOverride = [{ path: "dist", strategy: "share" as const }];
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha-worktrees/dev",
+          provider: "claude",
+          providerSessions: {},
+          provisioningOverride,
+          worktreeOf: "/work/alpha",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.provisioningOverride).toEqual(provisioningOverride);
+    // Persisting what was restored keeps the list — a worktree removed in
+    // a later session must still know what it was stocked with.
+    expect(toPersisted(state).projects[0].provisioningOverride).toEqual(
+      provisioningOverride,
+    );
+  });
 });
