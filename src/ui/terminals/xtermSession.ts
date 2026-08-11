@@ -62,15 +62,24 @@ export function createXtermSession(
   let lastSize: ShellSize = { cols: term.cols, rows: term.rows };
   const ghost = createGhost(term);
 
-  // Right arrow accepts, the way every shell that does this binds it.
-  // Safe to take: a suggestion only exists when the cursor is at the end
-  // of a line we have followed exactly, and there the shell would do
-  // nothing with the key anyway. With no suggestion showing it falls
-  // through untouched.
+  // Right arrow accepts, the way every shell that does this binds it —
+  // and so does Tab, because a greyed-out completion under the cursor is
+  // what a person is reaching for when they press it. Left to the shell,
+  // Tab ran its own completion and inserted something else entirely.
+  //
+  // Both are safe to take: a suggestion only exists when the cursor is at
+  // the end of a line we have followed exactly, so Right arrow would move
+  // into nothing and Tab would be completing an argument we can see is
+  // not there. With no suggestion showing they fall through untouched,
+  // and the shell's completion is exactly as it was.
+  const ACCEPT_KEYS = ["ArrowRight", "Tab"];
   term.attachCustomKeyEventHandler((e) => {
-    if (e.type !== "keydown" || e.key !== "ArrowRight") return true;
+    if (e.type !== "keydown" || !ACCEPT_KEYS.includes(e.key)) return true;
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return true;
     if (!ghost.showing()) return true;
+    // Tab is focus traversal to the browser; nothing else stops it from
+    // walking off the terminal once xterm has been told to ignore the key.
+    e.preventDefault();
     handlers.onAcceptSuggestion();
     return false;
   });

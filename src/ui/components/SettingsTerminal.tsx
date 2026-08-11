@@ -60,7 +60,7 @@ export function SettingsTerminal({ settings, onChange }: Props) {
 
       <Field
         label="Suggestions"
-        hint="Greys in the rest of a command you run often; → accepts it. Ranked by how often you have run it, seeded from your shell's own history."
+        hint="Greys in the rest of a command you run often; Tab or → accepts it. Ranked by how often you have run it, seeded from your shell's own history."
       >
         <label className="verbose-toggle">
           <input

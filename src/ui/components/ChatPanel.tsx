@@ -622,8 +622,10 @@ export function ChatPanel({
       {branchPickerOpen && changes && (
         <BranchPicker
           branches={changes.branches}
-          onPick={(branch) => {
-            void onGitCheckout(branch).then(() => setChangesRefreshKey((k) => k + 1));
+          onPick={async (branch) => {
+            const result = await onGitCheckout(branch);
+            setChangesRefreshKey((k) => k + 1);
+            return result;
           }}
           onClose={() => setBranchPickerOpen(false)}
         />

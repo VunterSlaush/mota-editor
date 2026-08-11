@@ -140,12 +140,16 @@ next prompt. A missing suggestion is a shrug. A suggestion computed from
 a line we had wrong would insert text the user never typed, and that is
 the failure the shape of `InputLine` exists to make impossible.
 
-**Accepting types the rest in.** Right arrow sends the remaining
+**Accepting types the rest in.** Right arrow and Tab send the remaining
 characters as keystrokes rather than reaching into the shell's buffer,
-so both line editors end up believing the same thing. It is only
+so both line editors end up believing the same thing. Both are only
 intercepted while a suggestion is showing — which is only when the
-cursor is at the end of a line we followed exactly, and where the key
-would have done nothing anyway.
+cursor is at the end of a line we followed exactly, and where Right
+arrow would have done nothing anyway. Tab is the key a person actually
+reaches for with a completion greyed in under the cursor; left to the
+shell it ran its own completion and inserted something else entirely.
+With no suggestion showing it still goes straight through, so the
+shell's own completion is untouched.
 
 **The corpus is the shell's own history file, read and never written.**
 The shell keeps it current, including commands run in our terminal, so a

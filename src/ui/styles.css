@@ -1573,15 +1573,25 @@ body {
   padding: 22px 26px 140px;
 }
 
+/* Sits on the section heading's line rather than floating in the corner,
+   so it reads as part of the panel it closes. Square and centred: the
+   old padding-only box put the glyph off-centre. The background is the
+   modal's own — invisible at rest, but it keeps the body's text from
+   scrolling out from under a transparent button. */
 .settings-modal__close {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 18px;
+  /* Clear of the body's scrollbar, which the old 10px sat underneath. */
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border: none;
-  background: transparent;
+  background: var(--bg-raised);
   color: var(--text-dim);
-  border-radius: 6px;
-  padding: 4px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -2236,6 +2246,18 @@ body {
   padding: 0 5px;
 }
 
+/* Why the checkout didn't happen, in git's own words — the picker stays
+   open behind it so the next attempt is one click away. */
+.branch-picker__error {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--error);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .branch-picker__empty {
   padding: 12px 14px;
   color: var(--text-dim);
@@ -2352,17 +2374,13 @@ body {
   flex: none;
 }
 
-/* Commits waiting on Pull/Push. Sized to survive the label clipping:
-   the count is the reason to click the button, so it outranks the word. */
+/* Commits waiting on Pull/Push. A bare number, not a badge: the pill
+   cost more width than the label it was competing with. */
 .changes__pending {
   flex: none;
-  min-width: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 10px;
-  line-height: 16px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
