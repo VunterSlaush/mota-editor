@@ -51,8 +51,15 @@ interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
+  /** Same list, but for any open project — the Optimization section
+   *  offers every tab's project, not just the active one. */
+  loadProjectCommands: (
+    projectPath: string,
+    provider: ProviderId,
+  ) => Promise<CommandInfo[]>;
   /** Distills a slash command into a reviewable one-call script. */
   optimizeCommand: (
+    projectPath: string,
     provider: ProviderId,
     commandName: string,
   ) => Promise<OptimizeOutcome>;
@@ -106,6 +113,7 @@ export function SettingsModal({
   settings,
   onChange,
   loadCommands,
+  loadProjectCommands,
   optimizeCommand,
   loadCommandSavings,
   probeProvider,
@@ -172,7 +180,9 @@ export function SettingsModal({
             <SettingsOptimization
               settings={settings}
               onChange={onChange}
-              loadCommands={loadCommands}
+              tabs={tabs}
+              activeTab={activeTab}
+              loadCommands={loadProjectCommands}
               optimize={optimizeCommand}
               loadSavings={loadCommandSavings}
             />

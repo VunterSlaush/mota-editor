@@ -9,16 +9,23 @@ import {
 import type { CommandSavings } from "../../core/entities/insights";
 import { PROVIDERS, type ProviderId } from "../../core/entities/provider";
 import { formatTokens } from "../../core/entities/tokens";
-import type { AppSettings } from "../../core/state/appState";
+import type { AppSettings, TabState } from "../../core/state/appState";
 import type { OptimizeOutcome } from "../../core/usecases/optimizeCommand";
 import { OptionPicker } from "./OptionPicker";
 
 interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
-  loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
+  /** The open tabs — each one's project is offered in the picker. */
+  tabs: readonly TabState[];
+  activeTab: TabState | null;
+  loadCommands: (projectPath: string, provider: ProviderId) => Promise<CommandInfo[]>;
   /** Runs the analysis turn — a real agent process, so per click only. */
-  optimize: (provider: ProviderId, commandName: string) => Promise<OptimizeOutcome>;
+  optimize: (
+    projectPath: string,
+    provider: ProviderId,
+    commandName: string,
+  ) => Promise<OptimizeOutcome>;
   loadSavings: (
     provider: ProviderId,
     command: string,
@@ -46,24 +53,31 @@ const GROUPS: readonly { source: CommandSource; label: string }[] = [
 export function SettingsOptimization({
   settings,
   onChange,
+  tabs,
+  activeTab,
   loadCommands,
   optimize,
   loadSavings,
 }: Props) {
   const [provider, setProvider] = useState<ProviderId>(settings.defaultProvider);
+  // Project commands live in the chosen project's folders; scoping to the
+  // active tab silently would hide every other open project's commands.
+  const [projectPath, setProjectPath] = useState(
+    activeTab?.project.path ?? tabs[0]?.project.path ?? "",
+  );
   const [commands, setCommands] = useState<readonly CommandInfo[]>([]);
   const [activity, setActivity] = useState<Record<string, RowActivity>>({});
   const [savings, setSavings] = useState<Record<string, CommandSavings>>({});
 
   useEffect(() => {
     let cancelled = false;
-    loadCommands(provider).then((loaded) => {
+    loadCommands(projectPath, provider).then((loaded) => {
       if (!cancelled) setCommands(loaded.filter((c) => c.source !== "builtin"));
     });
     return () => {
       cancelled = true;
     };
-  }, [provider, loadCommands]);
+  }, [projectPath, provider, loadCommands]);
 
   const optimizations = settings.commandOptimizations;
   const recordFor = (name: string): CommandOptimization | undefined =>
@@ -98,7 +112,7 @@ export function SettingsOptimization({
 
   const analyze = async (name: string) => {
     setRow(name, { kind: "analyzing" });
-    const outcome = await optimize(provider, name);
+    const outcome = await optimize(projectPath, provider, name);
     if (outcome.kind === "failed") {
       setRow(name, { kind: "error", error: outcome.error });
       return;
@@ -167,9 +181,41 @@ export function SettingsOptimization({
         </div>
       </div>
 
+      {tabs.length > 0 && (
+        <div className="settings-field">
+          <div className="settings-field__text">
+            <span className="settings-field__label">Project</span>
+            <span className="settings-field__hint">
+              Whose command and skill folders are scanned. Your user commands show for
+              every project.
+            </span>
+          </div>
+          <div className="settings-field__control">
+            <OptionPicker
+              ariaLabel="Project whose commands are shown"
+              placement="bottom"
+              disabled={tabs.length === 1}
+              value={projectPath}
+              options={tabs.map((t) => ({
+                id: t.project.path,
+                label: t.project.name,
+              }))}
+              onChange={setProjectPath}
+            />
+          </div>
+        </div>
+      )}
+
       {commands.length === 0 && (
         <p className="settings-section__hint">
           No custom commands found for this provider yet.
+        </p>
+      )}
+
+      {commands.length > 0 && !commands.some((c) => c.source === "project") && (
+        <p className="settings-section__hint">
+          This project has no commands of its own — no .claude/commands or .claude/skills
+          folder — so everything below comes from your home folder.
         </p>
       )}
 
