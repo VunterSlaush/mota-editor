@@ -441,6 +441,7 @@ export class DemoGit implements GitPort {
     branch: string,
     _mode: WorktreeAddMode,
     _remote: string,
+    _base: string,
   ): Promise<string> {
     this.worktreeList.push({
       path: worktreePath,

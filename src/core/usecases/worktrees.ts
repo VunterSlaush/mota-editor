@@ -113,11 +113,15 @@ export class Worktrees {
   /**
    * Create a worktree for `branch` at the derived sibling location and
    * open it. Failures come back as messages for the picker to show.
+   *
+   * `base` is where a brand-new branch starts, and only "new" mode reads
+   * it: empty leaves the start point to git, which is this tab's HEAD.
    */
   async create(
     tabId: string,
     branch: string,
     mode: WorktreeAddMode,
+    base = "",
   ): Promise<GitActionResult> {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
@@ -138,6 +142,7 @@ export class Worktrees {
         branch,
         mode,
         remote,
+        base,
       );
       await this.open(target, mainPath, tabId);
       // Stocking the worktree is not part of creating it: the tab is

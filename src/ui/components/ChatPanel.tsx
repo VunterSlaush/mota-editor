@@ -145,7 +145,11 @@ interface Props {
   /** The repo's checkouts, for the worktree picker. */
   loadWorktrees: () => Promise<WorktreeItem[]>;
   onOpenWorktree: (path: string, mainPath: string) => void;
-  onCreateWorktree: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
+  onCreateWorktree: (
+    branch: string,
+    mode: WorktreeAddMode,
+    base: string,
+  ) => Promise<GitActionResult>;
   /** Try the heavy-folder copy again after it failed. */
   onRetryPreparing: () => void;
   onCheckWorktreeRemoval: (path: string) => Promise<RemovalCheck>;

@@ -37,7 +37,13 @@ class FakeGit implements GitPort {
   worktreeList: GitWorktree[] = [];
   notARepo = false;
   failWorktreeAddWith: string | null = null;
-  added: Array<{ path: string; branch: string; mode: string; remote: string }> = [];
+  added: Array<{
+    path: string;
+    branch: string;
+    mode: string;
+    remote: string;
+    base: string;
+  }> = [];
 
   async worktrees(): Promise<GitWorktree[]> {
     if (this.notARepo) throw new Error("not a repo");
@@ -49,9 +55,10 @@ class FakeGit implements GitPort {
     branch: string,
     mode: string,
     remote: string,
+    base: string,
   ) {
     if (this.failWorktreeAddWith) throw new Error(this.failWorktreeAddWith);
-    this.added.push({ path, branch, mode, remote });
+    this.added.push({ path, branch, mode, remote, base });
     return "Preparing worktree";
   }
 
@@ -294,6 +301,7 @@ describe("Worktrees.create", () => {
         branch: "feature/login",
         mode: "existing",
         remote: "origin",
+        base: "",
       },
     ]);
     const tabs = store.getState().tabs;
@@ -324,6 +332,20 @@ describe("Worktrees.create", () => {
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
     expect(git.added[0].path).toBe("/volumes/fast/trees/dev");
+  });
+
+  it("starts a new branch at the base the picker chose", async () => {
+    const { git, worktrees } = setup();
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "xxxx", "new", "main");
+    expect(git.added[0]).toMatchObject({ branch: "xxxx", mode: "new", base: "main" });
+  });
+
+  it("leaves the start point to git when no base was chosen", async () => {
+    const { git, worktrees } = setup();
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "xxxx", "new");
+    expect(git.added[0].base).toBe("");
   });
 
   it("tracks remote-only branches from the configured remote", async () => {

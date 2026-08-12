@@ -2053,6 +2053,30 @@ body {
   color: var(--error);
 }
 
+/* Opens the "start the branch at…" step. Quiet until the row is where
+   the eye already is: the fast path is Enter, and this must not read as
+   something you have to answer first. */
+.worktree-picker__base {
+  flex: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.branch-picker__item--selected .worktree-picker__base {
+  border-color: var(--border);
+}
+
+.worktree-picker__base:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .worktree-picker__confirm {
   display: flex;
   align-items: center;
