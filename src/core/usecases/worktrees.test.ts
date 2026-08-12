@@ -75,6 +75,9 @@ class FakeGit implements GitPort {
   async remoteUrl() {
     return "";
   }
+  async currentBranch() {
+    return "";
+  }
   async listFiles() {
     return [];
   }

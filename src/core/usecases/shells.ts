@@ -2,7 +2,7 @@ import type { InputLine } from "../entities/inputLine";
 import { EMPTY_LINE, typeInto } from "../entities/inputLine";
 import type { CommandHistory } from "../entities/shellHistory";
 import { historyFrom, remember, suggestionSuffix } from "../entities/shellHistory";
-import { nextShellTitle } from "../entities/shellSession";
+import { nextShellTitle, shellRunningAfter } from "../entities/shellSession";
 import type { ShellHistorySource } from "../ports/shellHistorySource";
 import type { ShellPort, ShellSize } from "../ports/shellPort";
 import { tabById } from "../state/appState";
@@ -140,8 +140,30 @@ export class Shells {
     for (const command of line.submitted) {
       this.history = remember(this.history, command);
     }
+    this.reportRunning(sessionId, data, line);
     this.warmHistory();
     tracked.suggest(this.suffixFor(sessionId));
+  }
+
+  /**
+   * Tell the store when a command takes the shell or hands it back, so
+   * the terminal button can say so from anywhere in the app. Only on a
+   * change: a keystroke is not news, and every one of them dispatching
+   * would re-render the app for the length of a typed command.
+   */
+  private reportRunning(sessionId: string, data: string, line: InputLine): void {
+    const state = this.store.getState();
+    const tab = state.tabs.find((t) => t.shells.some((s) => s.id === sessionId));
+    const session = tab?.shells.find((s) => s.id === sessionId);
+    if (!tab || !session || session.exit) return;
+    const running = shellRunningAfter(session.running === true, data, line);
+    if (running === (session.running === true)) return;
+    this.store.dispatch({
+      type: "shell/running",
+      tabId: tab.project.id,
+      sessionId,
+      running,
+    });
   }
 
   private suffixFor(sessionId: string): string {

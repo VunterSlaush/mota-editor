@@ -346,6 +346,9 @@ export class DemoGit implements GitPort {
   async remoteUrl(): Promise<string> {
     return "git@github.com:mota/mota-editor.git";
   }
+  async currentBranch(): Promise<string> {
+    return "main";
+  }
   async upstream(): Promise<GitDivergence> {
     return { behind: 1, ahead: 2 };
   }

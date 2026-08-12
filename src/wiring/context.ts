@@ -54,6 +54,7 @@ import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
 import { ListCommands } from "../core/usecases/listCommands";
 import { ListProjectFiles } from "../core/usecases/listProjectFiles";
+import { LoadBranches } from "../core/usecases/loadBranches";
 import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { LoadInsights } from "../core/usecases/loadInsights";
 import { OpenProject } from "../core/usecases/openProject";
@@ -100,6 +101,7 @@ export interface AppContext {
   readonly scopeMcpServer: ScopeMcpServer;
   readonly scopeWorktreeProvisioning: ScopeWorktreeProvisioning;
   readonly loadGitChanges: LoadGitChanges;
+  readonly loadBranches: LoadBranches;
   readonly gitActions: GitActions;
   readonly worktrees: Worktrees;
   /** Exposed for the settings panel, which asks what a copy would cost. */
@@ -201,6 +203,7 @@ export function createAppContext(): AppContext {
     scopeMcpServer: new ScopeMcpServer(store, workspaceStore, agentGateway),
     scopeWorktreeProvisioning: new ScopeWorktreeProvisioning(store, workspaceStore),
     loadGitChanges: new LoadGitChanges(store, gitPort),
+    loadBranches: new LoadBranches(store, gitPort),
     gitActions: new GitActions(store, gitPort),
     worktrees: new Worktrees(
       store,
