@@ -156,36 +156,67 @@ export class SendPrompt {
     const turn = (this.generation.get(tabId) ?? 0) + 1;
     this.generation.set(tabId, turn);
 
-    try {
-      await this.agentGateway.startTurn(
-        {
-          tabId,
-          provider,
-          projectPath: path,
-          prompt: trimmed,
-          mode,
-          permission,
-          model,
-          effort,
-          attachments,
-          resumeSessionId,
-          mcpServers: serversForProvider(
-            this.store.getState().settings.mcpServers,
-            provider,
-            configured.project.mcpOverrides,
-          ),
-        },
-        (event) => this.onEvent(tabId, event, turn),
-      );
-    } catch (e) {
-      // A turn that never started has no outcome to stamp.
-      this.inflight.delete(tabId);
+    const request = {
+      tabId,
+      provider,
+      projectPath: path,
+      prompt: trimmed,
+      mode,
+      permission,
+      model,
+      effort,
+      attachments,
+      resumeSessionId,
+      mcpServers: serversForProvider(
+        this.store.getState().settings.mcpServers,
+        provider,
+        configured.project.mcpOverrides,
+      ),
+    };
+
+    let failure = await this.tryStart(tabId, request, turn);
+    // The agent still had a turn open in a tab this app believes is
+    // idle. That is a desync, not a busy agent — the composer would have
+    // queued the prompt instead of sending it if we thought otherwise —
+    // and left alone it makes the tab permanently unusable. Stopping the
+    // stale turn and sending once more is what the user was asking for
+    // anyway; it is said out loud because something was killed to do it.
+    if (failure !== null && isStaleTurnFailure(failure)) {
+      await this.agentGateway.cancelTurn(tabId).catch(() => undefined);
       this.store.dispatch({
         type: "chat/messageAppended",
         tabId,
-        message: errorMessage(describeFailure(descriptor.displayName, e)),
+        message: infoMessage(
+          "This tab still had a turn open with the agent. Mota stopped it and sent your message.",
+        ),
       });
-      this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
+      failure = await this.tryStart(tabId, request, turn);
+    }
+    if (failure === null) return;
+
+    // A turn that never started has no outcome to stamp.
+    this.inflight.delete(tabId);
+    this.store.dispatch({
+      type: "chat/messageAppended",
+      tabId,
+      message: errorMessage(describeFailure(descriptor.displayName, failure)),
+    });
+    this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
+  }
+
+  /** Start the turn; the failure, or null when it went. */
+  private async tryStart(
+    tabId: string,
+    request: Parameters<AgentGateway["startTurn"]>[0],
+    turn: number,
+  ): Promise<unknown> {
+    try {
+      await this.agentGateway.startTurn(request, (event) =>
+        this.onEvent(tabId, event, turn),
+      );
+      return null;
+    } catch (e) {
+      return e;
     }
   }
 
@@ -821,6 +852,17 @@ function showsUpInTheChat(event: AgentTurnEvent): boolean {
     default:
       return false;
   }
+}
+
+/**
+ * Whether a start failed because the backend still holds a turn for this
+ * tab. Matched on the backend's words because the failure crosses the
+ * boundary as a message and nothing else — the phrase is the contract,
+ * and this test is what keeps the two ends honest about it.
+ */
+export function isStaleTurnFailure(e: unknown): boolean {
+  const message = e instanceof Error ? e.message : String(e);
+  return message.includes("turn is already running");
 }
 
 function describeFailure(providerName: string, e: unknown): string {

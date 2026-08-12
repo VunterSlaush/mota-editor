@@ -22,6 +22,9 @@ class FakeAgentGateway implements AgentGateway {
   requests: AgentTurnRequest[] = [];
   script: AgentTurnEvent[] = [];
   failWith: string | null = null;
+  /** An agent whose stale turn a cancel really does clear, so the retry
+   *  after one goes through. */
+  recoverAfterCancel = false;
   permissionResponses: Array<{ requestId: string; optionId: string }> = [];
   /** The last turn's event sink, kept so a test can deliver a late event. */
   lastOnEvent: ((event: AgentTurnEvent) => void) | null = null;
@@ -51,6 +54,7 @@ class FakeAgentGateway implements AgentGateway {
   cancelled: string[] = [];
   async cancelTurn(tabId: string): Promise<void> {
     this.cancelled.push(tabId);
+    if (this.recoverAfterCancel) this.failWith = null;
   }
 
   async respondQuestion(): Promise<void> {}
@@ -969,6 +973,37 @@ describe("SendPrompt", () => {
     expect(messages[1].role).toBe("error");
     expect(messages[1].text).toContain("Claude");
     expect(messages[1].text).toContain("PATH");
+    expect(store.getState().tabs[0].busy).toBe(false);
+  });
+
+  it("stops a turn the backend still holds and sends the prompt anyway", async () => {
+    // The tab looks idle here — a busy one would have queued the prompt
+    // — so a backend that says otherwise has gone out of sync, and left
+    // alone the tab can never be prompted again.
+    const { store, gateway, useCase } = setup();
+    gateway.failWith = "A turn is already running in this tab.";
+    gateway.recoverAfterCancel = true;
+
+    await useCase.execute("t1", "hello?");
+
+    expect(gateway.cancelled).toEqual(["t1"]);
+    expect(gateway.requests).toHaveLength(1);
+    const messages = store.getState().tabs[0].messages;
+    expect(messages.some((m) => m.role === "error")).toBe(false);
+    expect(messages.some((m) => m.role === "info" && m.text.includes("stopped it"))).toBe(
+      true,
+    );
+  });
+
+  it("gives up rather than looping when the stale turn will not clear", async () => {
+    const { store, gateway, useCase } = setup();
+    gateway.failWith = "A turn is already running in this tab.";
+
+    await useCase.execute("t1", "hello?");
+
+    expect(gateway.cancelled).toEqual(["t1"]);
+    const messages = store.getState().tabs[0].messages;
+    expect(messages[messages.length - 1].role).toBe("error");
     expect(store.getState().tabs[0].busy).toBe(false);
   });
 
