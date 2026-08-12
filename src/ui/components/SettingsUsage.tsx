@@ -224,7 +224,11 @@ export function SettingsUsage({ settings, onChange, tabs, loadInsights }: Props)
         <p className="settings-section__hint">No projects are open.</p>
       )}
       {tabs.map((tab) => {
-        const usage = tab.usage;
+        // A provisional size is the adapter's placeholder, not this
+        // session's window — a bar drawn against it reads as a fact and
+        // would move on its own once the first turn corrects it. Same
+        // rule the composer's gauge follows: no reading until it's real.
+        const usage = tab.usage?.provisional ? undefined : tab.usage;
         const fraction =
           usage && usage.size > 0 ? Math.min(usage.used / usage.size, 1) : 0;
         const over = fraction >= settings.autoCompactThreshold;
@@ -247,7 +251,7 @@ export function SettingsUsage({ settings, onChange, tabs, loadInsights }: Props)
                   />
                 </div>
                 <span className="usage-row__numbers">
-                  {usage.estimated || usage.provisional ? "≈ " : ""}
+                  {usage.estimated ? "≈ " : ""}
                   {formatTokens(usage.used)} / {formatTokens(usage.size)} (
                   {Math.round(fraction * 100)}%)
                 </span>

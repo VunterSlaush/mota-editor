@@ -224,6 +224,7 @@ export function ChatPanel({
   };
   const [history, setHistory] = useState<HistoryListing>({ native: false, sessions: [] });
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const sidebar = useDragWidth(270, 180, 520);
   const planPanel = useDragWidth(420, 280, 760, "left");
   const terminalPanel = useDragWidth(520, 320, 900, "left");
@@ -313,7 +314,8 @@ export function ChatPanel({
   }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
 
   // Refresh the session list when the history view is open and the tab
-  // is idle (a finished turn may have added or updated a session). The
+  // is idle (a finished turn may have added or updated a session), or
+  // whenever the user asks for it with the refresh button. The
   // local listing paints first; the agent's native listing, when a live
   // session can be asked, lands as a second update.
   useEffect(() => {
@@ -337,7 +339,7 @@ export function ChatPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarView, tab.busy, tab.project.id]);
+  }, [sidebarView, tab.busy, tab.project.id, historyRefreshKey]);
 
   // Ctrl+` — the binding every editor uses for this. Registered here
   // rather than in a global map because the app has no shortcut registry
@@ -493,6 +495,7 @@ export function ChatPanel({
                     )
                   }
                   onNewChat={onNewChat}
+                  onRefresh={() => setHistoryRefreshKey((k) => k + 1)}
                 />
               )}
             </div>
