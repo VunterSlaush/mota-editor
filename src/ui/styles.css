@@ -1894,6 +1894,122 @@ body {
   border-color: var(--accent);
 }
 
+/* ---- Settings → Extensions ---- */
+.extension-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.extension-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.extension-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.extension-row__version {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.extension-row__status {
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  color: var(--text-dim);
+}
+
+.extension-row__status--running,
+.extension-row__status--enabled {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.extension-row__status--crashed,
+.extension-row__status--invalid {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.extension-row__status--needs-approval,
+.extension-row__status--incompatible {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.extension-row__description {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.extension-row__permissions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.extension-row__permission {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  color: var(--text-dim);
+}
+
+.extension-row__permission--dangerous {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.extension-row__error {
+  font-size: 12px;
+  color: var(--error);
+  white-space: pre-wrap;
+}
+
+.extension-row__actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
+.extension-row__action {
+  margin-top: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.extension-row__log {
+  flex-basis: 100%;
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+
 /* Removing a worktree: the trash on the row, then the confirm beneath. */
 .worktree-picker__remove {
   border: none;

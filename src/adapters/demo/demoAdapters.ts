@@ -1,6 +1,7 @@
 import type { AppBadge } from "../../core/entities/appBadge";
 import type { BilledRequest } from "../../core/entities/billing";
 import type { CommandInfo } from "../../core/entities/command";
+import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type { ProviderId } from "../../core/entities/provider";
@@ -13,6 +14,10 @@ import type {
 import type { AppBadgePort } from "../../core/ports/appBadgePort";
 import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
+import type {
+  ExtensionHostEvent,
+  ExtensionHostPort,
+} from "../../core/ports/extensionHost";
 import type {
   GitBranch,
   GitChange,
@@ -680,6 +685,109 @@ export class DemoBillingStore implements BillingStore {
 
 export class DemoNotifications implements NotificationPort {
   async turnCompleted(): Promise<void> {}
+  async show(): Promise<void> {}
+}
+
+/**
+ * Browser demo — two canned extensions: one enabled and contributing a
+ * command in both flavors, one awaiting approval with a dangerous
+ * permission, so the settings screen, consent flow and command routing
+ * are all exercisable without the Rust host.
+ */
+export class DemoExtensionHost implements ExtensionHostPort {
+  private listener: ((extensionId: string, event: ExtensionHostEvent) => void) | null =
+    null;
+  private extensions: ExtensionDescriptor[] = [
+    {
+      id: "demo-standup",
+      displayName: "Standup (demo)",
+      version: "0.1.0",
+      description: "Drafts a standup update from your recent sessions.",
+      origin: "user",
+      path: "~/.mota/extensions/demo-standup",
+      permissions: ["commands:register", "notifications"],
+      status: "enabled",
+      commands: [
+        {
+          name: "standup",
+          description: "Draft a standup update",
+          argsHint: "[days]",
+          kind: "prompt",
+          template: "Summarize the last $ARGUMENTS days of work as a standup update.",
+        },
+        {
+          name: "standup-notify",
+          description: "Ping me when the draft is ready",
+          kind: "programmatic",
+        },
+      ],
+      mcpServers: [],
+      events: [],
+    },
+    {
+      id: "demo-deployer",
+      displayName: "Deployer (demo)",
+      version: "0.3.0",
+      description: "Runs your deploy script after a turn completes.",
+      origin: "project",
+      projectPath: "/demo/project",
+      path: "/demo/project/.mota/extensions/demo-deployer",
+      permissions: ["events:subscribe", "shell:exec", "notifications"],
+      status: "needs-approval",
+      commands: [],
+      mcpServers: [],
+      events: ["turn/completed"],
+    },
+  ];
+
+  subscribe(listener: (extensionId: string, event: ExtensionHostEvent) => void): void {
+    this.listener = listener;
+  }
+
+  async list(): Promise<ExtensionDescriptor[]> {
+    await delay(120);
+    return [...this.extensions];
+  }
+
+  async enable(id: string): Promise<ExtensionDescriptor> {
+    await delay(300); // stands in for the native consent dialog
+    this.extensions = this.extensions.map((e) =>
+      e.id === id ? { ...e, status: "enabled" as const } : e,
+    );
+    const enabled = this.extensions.find((e) => e.id === id);
+    if (!enabled) throw new Error(`Unknown extension: ${id}`);
+    this.listener?.(id, { kind: "statusChanged", status: "enabled" });
+    return enabled;
+  }
+
+  async disable(id: string): Promise<void> {
+    this.extensions = this.extensions.map((e) =>
+      e.id === id ? { ...e, status: "disabled" as const } : e,
+    );
+    this.listener?.(id, { kind: "statusChanged", status: "disabled" });
+  }
+
+  async invokeCommand(extensionId: string, command: string): Promise<unknown> {
+    await delay(250);
+    return {
+      actions: [
+        {
+          type: "notify",
+          title: "Standup (demo)",
+          message: `Command /${command} ran in ${extensionId}.`,
+        },
+        { type: "insertPrompt", text: "Here is the standup draft the extension built." },
+      ],
+    };
+  }
+
+  async publishEvent(): Promise<void> {}
+
+  async respond(): Promise<void> {}
+
+  async readLog(): Promise<string> {
+    return "[log] demo extension started\n[log] nothing else to report";
+  }
 }
 
 /**

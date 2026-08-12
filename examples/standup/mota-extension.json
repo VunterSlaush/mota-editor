@@ -1,0 +1,25 @@
+{
+  "name": "standup",
+  "version": "0.1.0",
+  "displayName": "Standup",
+  "description": "Drafts a standup update and pings you when it is ready.",
+  "protocolVersion": 1,
+  "entry": { "command": "node", "args": ["./main.js"] },
+  "permissions": ["commands:register", "notifications"],
+  "contributes": {
+    "commands": [
+      {
+        "name": "standup",
+        "kind": "prompt",
+        "description": "Draft a standup update from recent work",
+        "argsHint": "[days]",
+        "template": "Summarize the last $ARGUMENTS days of work in this repository as a short standup update: what was done, what is next, any blockers."
+      },
+      {
+        "name": "standup-notify",
+        "kind": "programmatic",
+        "description": "Prepare a standup draft and notify me"
+      }
+    ]
+  }
+}

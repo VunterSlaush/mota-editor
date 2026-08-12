@@ -62,7 +62,7 @@ are reviewed against them.
 
 ## Boundaries (the architectural rules, enforced by `npm test`)
 
-These four are checked mechanically by `scripts/architecture.mjs`; breaking
+These are checked mechanically by `scripts/architecture.mjs`; breaking
 one fails the suite and the pre-commit hook, not just the review.
 
 - `src/core/**` imports nothing from `react`, `@tauri-apps/*`, or
@@ -76,6 +76,11 @@ one fails the suite and the pre-commit hook, not just the review.
   broken — stop and fix the boundary instead.
 - All wiring of concrete classes happens in `src/wiring/context.ts` and
   `src-tauri/src/lib.rs`. Nothing else calls a constructor of an adapter.
+- Child processes in `src-tauri/src` spawn through `runner::os_command`
+  (PATH-resolved absolute program, argv vector, never a shell) — a raw
+  `Command::new` outside `runner.rs` needs a reviewed allowlist entry.
+- The extension permission grant table (`extensions.json`) is written by
+  `extension_host.rs` alone, behind its native consent dialog (ADR-0012).
 
 ## Comments & formatting
 

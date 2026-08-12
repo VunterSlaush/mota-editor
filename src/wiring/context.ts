@@ -3,6 +3,7 @@ import {
   DemoAppBadge,
   DemoBillingStore,
   DemoCommandCatalog,
+  DemoExtensionHost,
   DemoFilePicker,
   DemoFolderPicker,
   DemoGit,
@@ -22,6 +23,7 @@ import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
 import { TauriAppBadge } from "../adapters/tauri/tauriAppBadge";
 import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
 import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
+import { TauriExtensionHost } from "../adapters/tauri/tauriExtensionHost";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
 import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
 import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
@@ -56,10 +58,12 @@ import { ListCommands } from "../core/usecases/listCommands";
 import { ListProjectFiles } from "../core/usecases/listProjectFiles";
 import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { LoadInsights } from "../core/usecases/loadInsights";
+import { ManageExtensions } from "../core/usecases/manageExtensions";
 import { OpenProject } from "../core/usecases/openProject";
 import { ReorderTabs } from "../core/usecases/reorderTabs";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
+import { RunExtensionCommand } from "../core/usecases/runExtensionCommand";
 import { ScopeMcpServer } from "../core/usecases/scopeMcpServer";
 import { ScopeWorktreeProvisioning } from "../core/usecases/scopeWorktreeProvisioning";
 import { SendPrompt } from "../core/usecases/sendPrompt";
@@ -114,6 +118,8 @@ export interface AppContext {
   readonly respondQuestion: RespondQuestion;
   readonly listCommands: ListCommands;
   readonly listProjectFiles: ListProjectFiles;
+  /** Installed extensions: list, enable (native consent), disable, log. */
+  readonly manageExtensions: ManageExtensions;
   /** The user's terminals — the panel opens, feeds, and closes them. */
   readonly shells: Shells;
   /** Historical usage report for the settings Insights section. */
@@ -160,6 +166,7 @@ export function createAppContext(): AppContext {
   const worktreeProvisioning = inTauri
     ? new TauriWorktreeProvisioning()
     : new DemoWorktreeProvisioning();
+  const extensionHost = inTauri ? new TauriExtensionHost() : new DemoExtensionHost();
   const newId = () => crypto.randomUUID();
 
   // Session-level events (warm-up stages, agent mode switches) arrive
@@ -175,6 +182,34 @@ export function createAppContext(): AppContext {
   const selectPermission = new SelectPermission(store, workspaceStore);
   const selectEffort = new SelectEffort(store, workspaceStore, agentGateway);
   const selectModel = new SelectModel(store, workspaceStore, agentGateway);
+
+  // Extension commands route out of SendPrompt, and a command's
+  // `startTurn` action routes back in — the knot is tied here, where
+  // both ends exist.
+  const runExtensionCommand = new RunExtensionCommand(
+    store,
+    extensionHost,
+    notifications,
+  );
+  const sendPrompt = new SendPrompt(
+    store,
+    agentGateway,
+    workspaceStore,
+    transcriptStore,
+    notifications,
+    new ApplyCommandConfig(
+      store,
+      selectMode,
+      selectPermission,
+      selectEffort,
+      selectModel,
+    ),
+    newId,
+    runExtensionCommand,
+  );
+  runExtensionCommand.connectTurnStarter((tabId, prompt) =>
+    sendPrompt.execute(tabId, prompt),
+  );
 
   return {
     store,
@@ -217,27 +252,14 @@ export function createAppContext(): AppContext {
       worktreeProvisioning,
       closeProject,
     ),
-    sendPrompt: new SendPrompt(
-      store,
-      agentGateway,
-      workspaceStore,
-      transcriptStore,
-      notifications,
-      new ApplyCommandConfig(
-        store,
-        selectMode,
-        selectPermission,
-        selectEffort,
-        selectModel,
-      ),
-      newId,
-    ),
+    sendPrompt,
     editDraft: new EditDraft(store),
     cancelTurn: new CancelTurn(store, agentGateway),
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
     listProjectFiles: new ListProjectFiles(store, gitPort),
+    manageExtensions: new ManageExtensions(store, extensionHost, notifications),
     shells: new Shells(store, shellPort, shellHistory),
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),

@@ -58,3 +58,10 @@ suites — keep them in the seconds range (FIRST).
 3. Add its descriptor to `src/core/entities/provider.ts` (`PROVIDERS`).
 4. That's all. If you needed to touch anything else, stop — the boundary
    is broken; fix that first.
+
+## Writing an extension (no contribution to this repo needed)
+
+Custom slash commands, agent tools, and automation can ship as an
+**extension** — a folder with a manifest and any script, installed by
+dropping it into `~/.mota/extensions/`. See `docs/EXTENSIONS.md` and the
+working example in `examples/standup/`. The design is ADR-0012.

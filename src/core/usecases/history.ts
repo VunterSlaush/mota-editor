@@ -1,4 +1,3 @@
-import { serversForProvider } from "../entities/mcpServer";
 import {
   type ChatMessage,
   errorMessage,
@@ -12,6 +11,7 @@ import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { agentServers } from "./agentServers";
 import { startNewChat } from "./startNewChat";
 
 /** One history row: a transcript's metadata plus how it opens. */
@@ -186,7 +186,7 @@ export class SessionHistory {
         path,
         model,
         effort,
-        serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
+        agentServers(state, provider, mcpOverrides),
       );
       // Null = no live session to ask — the local paint stands as is.
       if (!native) return;
@@ -256,11 +256,7 @@ export class SessionHistory {
     const state = this.store.getState();
     const tab = tabById(state, tabId)!;
     const { provider, path, model, effort, mcpOverrides } = tab.project;
-    const mcpServers = serversForProvider(
-      state.settings.mcpServers,
-      provider,
-      mcpOverrides,
-    );
+    const mcpServers = agentServers(state, provider, mcpOverrides);
 
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: Date.now() });

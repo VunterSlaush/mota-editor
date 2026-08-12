@@ -54,6 +54,16 @@ export function App({ context }: { context: AppContext }) {
     };
   }, [context, settingsOpen, projectPath]);
 
+  // Extensions load once at startup and again when settings open (the
+  // Reload button covers mid-session installs). The list drives the
+  // command palette and MCP merge, so it must exist before settings do.
+  useEffect(() => {
+    void context.manageExtensions.load();
+  }, [context]);
+  useEffect(() => {
+    if (settingsOpen) void context.manageExtensions.load();
+  }, [context, settingsOpen]);
+
   // The theme is a document-level attribute: the CSS palettes hang off
   // `[data-theme]`, so one line here restyles everything at once.
   useEffect(() => {
@@ -302,6 +312,11 @@ export function App({ context }: { context: AppContext }) {
               void context.scopeWorktreeProvisioning.execute(tab.project.id, entries);
           }}
           newId={context.newId}
+          extensions={state.extensions}
+          onEnableExtension={(id) => void context.manageExtensions.enable(id)}
+          onDisableExtension={(id) => void context.manageExtensions.disable(id)}
+          onReloadExtensions={() => void context.manageExtensions.load()}
+          readExtensionLog={(id) => context.manageExtensions.readLog(id)}
           supportsCow={supportsCow}
           loadFolders={projectPath ? loadFolders : undefined}
           onClose={closeSettings}

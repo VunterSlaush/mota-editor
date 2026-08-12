@@ -129,7 +129,64 @@ const humbleViews = {
   },
 };
 
-export const RULES = [corePurity, compositionRoot, agentCorePurity, humbleViews];
+// --- process spawning --------------------------------------------------
+
+// Every child process in the shell crate goes through `runner::os_command`
+// (PATH-resolved absolute program, argv vector, never a shell). Raw
+// `Command::new` outside runner.rs bypasses that discipline. The allowlist
+// names the reviewed exceptions: OS-verb openers, the login-shell env
+// import, terminal sign-in flows, and the process-tree kill paths (which
+// target PIDs, not programs).
+const SPAWN_ALLOWED = [
+  "src-tauri/src/runner.rs",
+  "src-tauri/src/commands.rs",
+  "src-tauri/src/shell_env.rs",
+  "src-tauri/src/sign_in.rs",
+  "src-tauri/src/shell_session.rs",
+  "src-tauri/src/terminal.rs",
+];
+
+const processSpawnDiscipline = {
+  name: "process-spawn-discipline",
+  check: (file) => {
+    if (!file.path.startsWith("src-tauri/src/")) return [];
+    if (SPAWN_ALLOWED.includes(file.path)) return [];
+    return scan(file.text, (line) => {
+      return (
+        /\bCommand::new\s*\(/.test(line) &&
+        "child processes spawn through runner::os_command, not a raw Command::new"
+      );
+    });
+  },
+};
+
+// --- extension grants ----------------------------------------------------
+
+// The permission grant table is minted only by the extension host (behind
+// its native consent dialog). Any other code path naming the file is a
+// second writer waiting to happen.
+const extensionGrantLocality = {
+  name: "extension-grant-locality",
+  check: (file) => {
+    if (!/^src(-tauri\/src)?\//.test(file.path)) return [];
+    if (file.path === "src-tauri/src/extension_host.rs") return [];
+    return scan(file.text, (line) => {
+      return (
+        line.includes("extensions.json") &&
+        "extensions.json (the grant table) is owned by extension_host.rs alone"
+      );
+    });
+  },
+};
+
+export const RULES = [
+  corePurity,
+  compositionRoot,
+  agentCorePurity,
+  humbleViews,
+  processSpawnDiscipline,
+  extensionGrantLocality,
+];
 
 /**
  * Every boundary violation in the given files.

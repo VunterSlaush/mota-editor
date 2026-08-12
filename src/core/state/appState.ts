@@ -10,6 +10,7 @@ import {
 } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
+import type { ExtensionDescriptor, ExtensionStatus } from "../entities/extension";
 import type { McpServerConfig } from "../entities/mcpServer";
 import type {
   ChatMessage,
@@ -184,6 +185,8 @@ export interface AppState {
   readonly tabs: readonly TabState[];
   readonly activeTabId: string | null;
   readonly settings: AppSettings;
+  /** Installed extensions, as the host last described them. */
+  readonly extensions: readonly ExtensionDescriptor[];
 }
 
 export const defaultSettings: AppSettings = {
@@ -208,6 +211,7 @@ export const initialState: AppState = {
   tabs: [],
   activeTabId: null,
   settings: defaultSettings,
+  extensions: [],
 };
 
 export type Action =
@@ -341,6 +345,13 @@ export type Action =
       provider: ProviderId;
       sessionId: string;
     }
+  | { type: "extensions/loaded"; extensions: readonly ExtensionDescriptor[] }
+  | {
+      type: "extensions/statusChanged";
+      extensionId: string;
+      status: ExtensionStatus;
+      error?: string;
+    }
   | { type: "shell/opened"; tabId: string; session: ShellSession }
   | { type: "shell/selected"; tabId: string; sessionId: string }
   /** The shell died on its own — a `exit` typed, or a crash. */
@@ -352,9 +363,23 @@ export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "workspace/restored":
       return {
+        ...state,
         tabs: action.tabs,
         activeTabId: action.activeTabId,
         settings: action.settings ?? state.settings,
+      };
+
+    case "extensions/loaded":
+      return { ...state, extensions: action.extensions };
+
+    case "extensions/statusChanged":
+      return {
+        ...state,
+        extensions: state.extensions.map((e) =>
+          e.id === action.extensionId
+            ? { ...e, status: action.status, error: action.error }
+            : e,
+        ),
       };
 
     case "settings/changed":

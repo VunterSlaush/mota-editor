@@ -135,6 +135,49 @@ describe("ui and adapters", () => {
   });
 });
 
+describe("process spawn discipline", () => {
+  it("rejects a raw Command::new outside the allowlist", () => {
+    expect(
+      messagesFor(
+        "src-tauri/src/extension_host.rs",
+        `    let child = tokio::process::Command::new("node").spawn();`,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("allows runner.rs and the reviewed exceptions", () => {
+    for (const file of ["src-tauri/src/runner.rs", "src-tauri/src/sign_in.rs"]) {
+      expect(messagesFor(file, `let cmd = Command::new(resolved);`)).toEqual([]);
+    }
+  });
+});
+
+describe("extension grant locality", () => {
+  it("rejects the grant file's name anywhere else", () => {
+    expect(
+      messagesFor(
+        "src-tauri/src/commands.rs",
+        `    let path = dir.join("extensions.json");`,
+      ),
+    ).toHaveLength(1);
+    expect(
+      messagesFor(
+        "src/adapters/tauri/tauriExtensionHost.ts",
+        `const GRANTS = "extensions.json";`,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("allows it in the extension host", () => {
+    expect(
+      messagesFor(
+        "src-tauri/src/extension_host.rs",
+        `    Ok(dir.join("extensions.json"))`,
+      ),
+    ).toEqual([]);
+  });
+});
+
 // --- the real tree -----------------------------------------------------
 
 const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));
@@ -142,6 +185,7 @@ const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));
 const SCANNED_TREES = [
   { directory: "src", extensions: [".ts", ".tsx"] },
   { directory: "src-tauri/agent-core/src", extensions: [".rs"] },
+  { directory: "src-tauri/src", extensions: [".rs"] },
 ];
 const SCANNED_FILES = ["src-tauri/agent-core/Cargo.toml"];
 
