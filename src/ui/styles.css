@@ -396,6 +396,13 @@ body {
 .message-list {
   flex: 1;
   overflow-y: auto;
+  /* Explicit, and load-bearing: `overflow-y: auto` alone makes the other
+     axis `auto` too, so one over-wide line anywhere in the transcript
+     turns the whole conversation into a sideways-scrolling surface —
+     which is what a narrow-enough window (zoom in far enough and any
+     window is narrow) used to do. Wide content scrolls inside its own
+     card instead; see `.md pre` and `.md table`. */
+  overflow-x: hidden;
   padding: 16px 16px 24px;
   display: flex;
   flex-direction: column;
@@ -404,6 +411,7 @@ body {
 
 .msg {
   max-width: 82%;
+  min-width: 0;
   padding: 8px 12px;
   border-radius: 10px;
   line-height: 1.45;
@@ -1384,6 +1392,18 @@ body {
 .md {
   line-height: 1.55;
   font-size: 13px;
+  min-width: 0;
+}
+
+/* An agent writes paths, URLs and identifiers, and none of them contain
+   a space to break at. Left alone one of those runs past the message and
+   out of the column; the width it needs is not a width the window can
+   always give it, so it breaks mid-token instead. */
+.md code,
+.md a,
+.md li,
+.md p {
+  overflow-wrap: anywhere;
 }
 
 .md h1,
@@ -1402,10 +1422,17 @@ body {
   font-size: 15px;
 }
 
+/* A table with more columns than the column has room for scrolls on its
+   own, rather than widening the transcript behind it. `display: block`
+   is what makes a table scrollable at all — as a table it sizes to its
+   content and ignores the overflow. */
 .md table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 10px 0;
-  width: 100%;
   font-size: 12px;
 }
 
