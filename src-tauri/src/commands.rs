@@ -534,7 +534,7 @@ fn image_extension(mime_type: &str) -> &'static str {
     }
 }
 
-fn spawn_error(provider_id: &str, error: &std::io::Error) -> String {
+pub(crate) fn spawn_error(provider_id: &str, error: &std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::NotFound {
         format!("The `{provider_id}` CLI was not found on your PATH.")
     } else {

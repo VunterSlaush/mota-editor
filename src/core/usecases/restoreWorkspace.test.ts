@@ -38,6 +38,14 @@ const CUSTOM_SETTINGS: AppSettings = {
   defaultModel: { claude: "opus", codex: "gpt-5.5" },
   defaultEffort: { claude: "high" },
   commandConfigs: { "claude:/review": { mode: "plan", model: "haiku" } },
+  commandOptimizations: {
+    "claude:/commit-push": {
+      status: "active",
+      script: "git push",
+      sourceHash: "abc123",
+      activatedAt: 1_000,
+    },
+  },
   mcpServers: [
     {
       id: "s1",

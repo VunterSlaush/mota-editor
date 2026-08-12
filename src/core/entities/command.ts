@@ -11,6 +11,12 @@ export interface CommandInfo {
   readonly name: string;
   readonly description: string;
   readonly source: CommandSource;
+  /**
+   * Fingerprint of the command file's current content; absent for
+   * builtins. Compared with an optimization's `sourceHash` to flag a
+   * script whose markdown has since changed.
+   */
+  readonly contentHash?: string;
 }
 
 /**

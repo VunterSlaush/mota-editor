@@ -45,6 +45,62 @@ fn first_content_line(content: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Stable fingerprint of a command file's content (FNV-1a, hex). Kept
+/// with an approved optimization so the settings screen can flag the
+/// row when the markdown moved on; strong enough for change detection,
+/// no crypto crate needed for it.
+pub fn content_hash(content: &str) -> String {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    format!("{hash:016x}")
+}
+
+/// The analysis prompt for distilling a command into a script. Asks for
+/// exactly one fenced JSON verdict; the frontend entity parses it. Kept
+/// here (pure, tested) so the shell only ever assembles a TurnRequest.
+pub fn optimize_prompt(command_name: &str, body: &str) -> String {
+    format!(
+        "You are analyzing the slash command `{command_name}` of an AI coding \
+assistant. Its full instructions are between the <command> tags below. Decide \
+whether it is DETERMINISTIC: a fixed sequence of shell steps that plays out the \
+same way every run, with no judgment beyond filling in a small value.
+
+If it is deterministic, distill it into ONE portable POSIX sh script:
+- Only commands the instructions themselves call for; no interactive prompts, \
+no AI calls, no steps the instructions do not describe.
+- Fail fast: chain steps with `&&` or `set -e`, so a failing step stops the run \
+with a non-zero exit.
+- Where a single value genuinely needs judgment at run time (a commit message, \
+a branch name), leave a `{{{{placeholder}}}}` hole instead of declining.
+
+If any step requires real judgment — writing prose, choosing among designs, \
+reading unfamiliar code, interpreting ambiguous state — or the instructions \
+reference files you cannot see here, it is NOT optimizable; say why in one \
+sentence.
+
+Reply with exactly one fenced JSON block and nothing else:
+
+```json
+{{\"optimizable\": true, \"script\": \"<the sh script>\", \"summary\": \"<one line, what it does>\"}}
+```
+
+or
+
+```json
+{{\"optimizable\": false, \"reason\": \"<one sentence>\"}}
+```
+
+<command>
+{body}
+</command>"
+    )
+}
+
 fn tidy(description: &str) -> String {
     const MAX: usize = 80;
     let one_line = description.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -86,6 +142,24 @@ mod tests {
     fn toml_description_is_extracted() {
         let content = "prompt = \"...\"\ndescription = \"Plan a feature\"\n";
         assert_eq!(toml_description(content).as_deref(), Some("Plan a feature"));
+    }
+
+    #[test]
+    fn content_hash_is_stable_and_content_sensitive() {
+        assert_eq!(content_hash("git push"), content_hash("git push"));
+        assert_ne!(content_hash("git push"), content_hash("git pull"));
+        assert_eq!(content_hash("").len(), 16);
+    }
+
+    #[test]
+    fn optimize_prompt_carries_the_contract_and_the_body() {
+        let prompt = optimize_prompt("/commit-push", "Run npm test, then push.");
+        assert!(prompt.contains("`/commit-push`"));
+        assert!(prompt.contains("Run npm test, then push."));
+        assert!(prompt.contains("\"optimizable\": true"));
+        assert!(prompt.contains("\"optimizable\": false"));
+        assert!(prompt.contains("{{placeholder}}"));
+        assert!(prompt.contains("POSIX sh"));
     }
 
     #[test]

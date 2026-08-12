@@ -2,6 +2,7 @@ import {
   ChartBar,
   Gauge,
   GitFork,
+  Lightning,
   Palette,
   PlugsConnected,
   Sliders,
@@ -12,15 +13,21 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
-import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
+import type {
+  CommandSavings,
+  InsightsRange,
+  InsightsReport,
+} from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
 import type { ProvisionEntry } from "../../core/entities/worktree";
 import type { McpProbe } from "../../core/ports/mcpProbe";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
+import type { OptimizeOutcome } from "../../core/usecases/optimizeCommand";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsInsights } from "./SettingsInsights";
+import { SettingsOptimization } from "./SettingsOptimization";
 import { SettingsProviders } from "./SettingsProviders";
 import { SettingsTerminal } from "./SettingsTerminal";
 import { SettingsTheme } from "./SettingsTheme";
@@ -31,6 +38,7 @@ import { SettingsWorktrees } from "./SettingsWorktrees";
 export type SettingsSection =
   | "defaults"
   | "commands"
+  | "optimization"
   | "tools"
   | "providers"
   | "worktrees"
@@ -43,6 +51,17 @@ interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
+  /** Distills a slash command into a reviewable one-call script. */
+  optimizeCommand: (
+    provider: ProviderId,
+    commandName: string,
+  ) => Promise<OptimizeOutcome>;
+  /** Tokens an optimized command has saved, for its row. */
+  loadCommandSavings: (
+    provider: ProviderId,
+    command: string,
+    activatedAt: number,
+  ) => Promise<CommandSavings>;
   probeProvider: (provider: ProviderId) => Promise<ProviderStatus>;
   /** Opens the provider's own login prompt in a terminal. */
   signInProvider: (provider: ProviderId) => Promise<void>;
@@ -68,6 +87,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
   [
     { id: "defaults", label: "Defaults", Icon: Sliders },
     { id: "commands", label: "Commands", Icon: TerminalWindow },
+    { id: "optimization", label: "Optimization", Icon: Lightning },
     { id: "tools", label: "Tools", Icon: Toolbox },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
     { id: "worktrees", label: "Worktrees", Icon: GitFork },
@@ -86,6 +106,8 @@ export function SettingsModal({
   settings,
   onChange,
   loadCommands,
+  optimizeCommand,
+  loadCommandSavings,
   probeProvider,
   signInProvider,
   loadInsights,
@@ -144,6 +166,15 @@ export function SettingsModal({
               settings={settings}
               onChange={onChange}
               loadCommands={loadCommands}
+            />
+          )}
+          {section === "optimization" && (
+            <SettingsOptimization
+              settings={settings}
+              onChange={onChange}
+              loadCommands={loadCommands}
+              optimize={optimizeCommand}
+              loadSavings={loadCommandSavings}
             />
           )}
           {section === "tools" && (

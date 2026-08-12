@@ -130,6 +130,24 @@ export interface CommandTokenRow {
 }
 
 /**
+ * What optimizing one command has saved so far: its runs before the
+ * activation timestamp are the baseline, its runs after are measured
+ * against that baseline's average. Honest by construction — a script
+ * that saves nothing shows a zero or negative number.
+ */
+export interface CommandSavings {
+  /** null when the command never ran before activation. */
+  readonly baselineAvgTokens: number | null;
+  readonly baselineTurns: number;
+  readonly optimizedTurns: number;
+  readonly optimizedTokens: number;
+  /** baselineAvg × optimizedTurns − actual; null without a baseline. */
+  readonly savedTokens: number | null;
+  /** True when any contributing turn had no vendor log to read. */
+  readonly estimated: boolean;
+}
+
+/**
  * What it costs to OPEN a conversation in one project.
  *
  * The first turn of a chat pays for everything the agent has to be told
@@ -393,6 +411,56 @@ function tokensPerTurn(
     totals[index] += totalBilledTokens(request);
   }
   return new Map(ordered.map((t, i) => [t, { tokens: totals[i], estimated: false }]));
+}
+
+/**
+ * Measure what one command's optimization has saved, splitting its turns
+ * at the activation timestamp. Lives here because it leans on
+ * `tokensPerTurn` — the same billed-first, delta-fallback accounting
+ * every other token ranking uses.
+ */
+export function commandSavings(
+  sessions: readonly SessionStats[],
+  billed: readonly BilledRequest[],
+  provider: string,
+  command: string,
+  activatedAt: number,
+): CommandSavings {
+  let baselineTurns = 0;
+  let baselineTokens = 0;
+  let optimizedTurns = 0;
+  let optimizedTokens = 0;
+  let estimated = false;
+
+  for (const session of sessions) {
+    if (session.provider !== provider) continue;
+    for (const [turn, cost] of tokensPerTurn(session, billed)) {
+      if (turn.command !== command || turn.sentAt <= 0) continue;
+      if (turn.sentAt < activatedAt) {
+        baselineTurns += 1;
+        baselineTokens += cost.tokens;
+      } else {
+        optimizedTurns += 1;
+        optimizedTokens += cost.tokens;
+      }
+      estimated ||= cost.estimated;
+    }
+  }
+
+  const baselineAvgTokens =
+    baselineTurns > 0 ? Math.round(baselineTokens / baselineTurns) : null;
+  const savedTokens =
+    baselineAvgTokens !== null && optimizedTurns > 0
+      ? baselineAvgTokens * optimizedTurns - optimizedTokens
+      : null;
+  return {
+    baselineAvgTokens,
+    baselineTurns,
+    optimizedTurns,
+    optimizedTokens,
+    savedTokens,
+    estimated,
+  };
 }
 
 /**

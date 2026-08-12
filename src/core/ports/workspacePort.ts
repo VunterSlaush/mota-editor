@@ -4,6 +4,7 @@ import type {
   PermissionPolicy,
 } from "../entities/agentSettings";
 import type { CommandConfig } from "../entities/commandConfig";
+import type { CommandOptimization } from "../entities/commandOptimization";
 import type { McpServerConfig, ProjectMcpOverrides } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
@@ -49,6 +50,7 @@ export interface PersistedSettings {
   readonly defaultModel?: Readonly<Partial<Record<ProviderId, string>>>;
   readonly defaultEffort?: Readonly<Partial<Record<ProviderId, string>>>;
   readonly commandConfigs?: Readonly<Record<string, CommandConfig>>;
+  readonly commandOptimizations?: Readonly<Record<string, CommandOptimization>>;
   readonly mcpServers?: readonly McpServerConfig[];
   readonly autoCompactThreshold?: number;
   readonly autoCompact?: AutoCompactPolicy;

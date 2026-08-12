@@ -13,6 +13,7 @@ import type {
 import type { AppBadgePort } from "../../core/ports/appBadgePort";
 import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
+import type { CommandOptimizer, OptimizeRun } from "../../core/ports/commandOptimizer";
 import type {
   GitBranch,
   GitChange,
@@ -297,7 +298,37 @@ export class DemoPastedImageStore implements PastedImageStore {
 
 export class DemoCommandCatalog implements CommandCatalog {
   async listCustomCommands(): Promise<CommandInfo[]> {
-    return [{ name: "/deploy", description: "Ship it to production", source: "project" }];
+    return [
+      {
+        name: "/deploy",
+        description: "Ship it to production",
+        source: "project",
+        contentHash: "demo1",
+      },
+    ];
+  }
+}
+
+/** Browser demo — a canned verdict so the Optimization screen works. */
+export class DemoCommandOptimizer implements CommandOptimizer {
+  async optimize(
+    _projectPath: string,
+    _provider: ProviderId,
+    commandName: string,
+  ): Promise<OptimizeRun> {
+    await delay(1200);
+    const verdict =
+      commandName === "/deploy"
+        ? {
+            optimizable: true,
+            script: 'npm run build && npm run deploy -- --message "{{release_note}}"',
+            summary: "Build, then deploy with a release note",
+          }
+        : { optimizable: false, reason: "This command needs judgment at every step." };
+    return {
+      text: `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
+      contentHash: "demo1",
+    };
   }
 }
 

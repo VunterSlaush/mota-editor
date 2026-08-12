@@ -80,6 +80,8 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     defaultModel: persisted?.defaultModel ?? defaultSettings.defaultModel,
     defaultEffort: persisted?.defaultEffort ?? defaultSettings.defaultEffort,
     commandConfigs: persisted?.commandConfigs ?? defaultSettings.commandConfigs,
+    commandOptimizations:
+      persisted?.commandOptimizations ?? defaultSettings.commandOptimizations,
     mcpServers: persisted?.mcpServers ?? defaultSettings.mcpServers,
     autoCompactThreshold: clampAutoCompactThreshold(
       persisted?.autoCompactThreshold ?? defaultSettings.autoCompactThreshold,

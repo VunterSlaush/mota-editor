@@ -8,6 +8,7 @@ interface WireCommand {
   name: string;
   description: string;
   origin: "project" | "user";
+  contentHash?: string;
 }
 
 /**
@@ -25,10 +26,11 @@ export class TauriCommandCatalog implements CommandCatalog {
     });
     // A backend from before origins reported nothing — assume "project",
     // the more visible group.
-    return wire.map(({ name, description, origin }) => ({
+    return wire.map(({ name, description, origin, contentHash }) => ({
       name,
       description,
       source: origin ?? "project",
+      ...(contentHash ? { contentHash } : {}),
     }));
   }
 }

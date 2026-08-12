@@ -5,7 +5,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use agent_core::commands::{command_name_from_file, markdown_description, toml_description};
+use agent_core::commands::{
+    command_name_from_file, content_hash, markdown_description, toml_description,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -24,6 +26,9 @@ pub struct CustomCommand {
     pub name: String,
     pub description: String,
     pub origin: CommandOrigin,
+    /// Fingerprint of the file content, compared against the hash an
+    /// approved optimization was made from to flag stale rows.
+    pub content_hash: String,
 }
 
 /// Where a provider keeps custom commands, relative to project and home.
@@ -148,6 +153,7 @@ fn collect_skills(dir: &Path, origin: CommandOrigin, commands: &mut Vec<CustomCo
             description: markdown_description(&content)
                 .unwrap_or_else(|| "Custom skill".to_owned()),
             origin,
+            content_hash: content_hash(&content),
         });
     }
 }
@@ -166,5 +172,42 @@ fn read_command(path: &Path, origin: CommandOrigin) -> Option<CustomCommand> {
         name,
         description: description.unwrap_or_else(|| "Custom command".to_owned()),
         origin,
+        content_hash: content_hash(&content),
     })
+}
+
+/// The full text behind a slash command, resolved by name through the
+/// same folders (and with the same precedence) as `discover`, so the
+/// frontend never hands this layer a path.
+pub fn find_command_body(app: &AppHandle, project_path: &str, provider_id: &str, name: &str) -> Option<String> {
+    for (dir, _) in command_dirs(app, project_path, provider_id) {
+        let Some(dir) = resolve_dir(dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_named = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(command_name_from_file)
+                .is_some_and(|n| n == name);
+            if is_named && path.is_file() {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    return Some(content);
+                }
+            }
+        }
+    }
+    // The folder name is joined into a path below; a name that is not a
+    // plain path segment must not become a traversal.
+    let folder = name.strip_prefix('/')?;
+    if folder.is_empty() || folder.contains(['/', '\\']) || folder.contains("..") {
+        return None;
+    }
+    for (dir, _) in skill_dirs(app, project_path, provider_id) {
+        let Some(dir) = resolve_dir(dir) else { continue };
+        if let Ok(content) = fs::read_to_string(dir.join(folder).join("SKILL.md")) {
+            return Some(content);
+        }
+    }
+    None
 }

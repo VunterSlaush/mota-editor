@@ -3,6 +3,7 @@ import {
   DemoAppBadge,
   DemoBillingStore,
   DemoCommandCatalog,
+  DemoCommandOptimizer,
   DemoFilePicker,
   DemoFolderPicker,
   DemoGit,
@@ -22,6 +23,7 @@ import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
 import { TauriAppBadge } from "../adapters/tauri/tauriAppBadge";
 import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
 import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
+import { TauriCommandOptimizer } from "../adapters/tauri/tauriCommandOptimizer";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
 import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
 import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
@@ -35,7 +37,12 @@ import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
 import { TauriZoom } from "../adapters/tauri/tauriZoom";
-import type { InsightsRange, InsightsReport } from "../core/entities/insights";
+import type {
+  CommandSavings,
+  InsightsRange,
+  InsightsReport,
+} from "../core/entities/insights";
+import type { ProviderId } from "../core/entities/provider";
 import type { AppBadgePort } from "../core/ports/appBadgePort";
 import type { McpProbe } from "../core/ports/mcpProbe";
 import type { ProviderProbe } from "../core/ports/providerProbe";
@@ -58,6 +65,7 @@ import { LoadBranches } from "../core/usecases/loadBranches";
 import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { LoadInsights } from "../core/usecases/loadInsights";
 import { OpenProject } from "../core/usecases/openProject";
+import { OptimizeCommand } from "../core/usecases/optimizeCommand";
 import { ReorderTabs } from "../core/usecases/reorderTabs";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
@@ -115,11 +123,19 @@ export interface AppContext {
   readonly respondPermission: RespondPermission;
   readonly respondQuestion: RespondQuestion;
   readonly listCommands: ListCommands;
+  /** Distills a slash command into a reviewable one-call script. */
+  readonly optimizeCommand: OptimizeCommand;
   readonly listProjectFiles: ListProjectFiles;
   /** The user's terminals — the panel opens, feeds, and closes them. */
   readonly shells: Shells;
   /** Historical usage report for the settings Insights section. */
   readonly loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
+  /** Tokens an optimized command has saved, for its settings row. */
+  readonly loadCommandSavings: (
+    provider: ProviderId,
+    command: string,
+    activatedAt: number,
+  ) => Promise<CommandSavings>;
   readonly providerProbe: ProviderProbe;
   /** Measures what an MCP server's tools cost on every request. */
   readonly mcpProbe: McpProbe;
@@ -240,10 +256,19 @@ export function createAppContext(): AppContext {
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
+    optimizeCommand: new OptimizeCommand(
+      inTauri ? new TauriCommandOptimizer() : new DemoCommandOptimizer(),
+    ),
     listProjectFiles: new ListProjectFiles(store, gitPort),
     shells: new Shells(store, shellPort, shellHistory),
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),
+    loadCommandSavings: (provider, command, activatedAt) =>
+      new LoadInsights(store, transcriptStore, billingStore).savings(
+        provider,
+        command,
+        activatedAt,
+      ),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),

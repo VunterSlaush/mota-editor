@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BilledRequest } from "./billing";
 import {
   buildInsights,
+  commandSavings,
   type InsightsOptions,
   type SessionStats,
   type TurnStat,
@@ -694,5 +695,105 @@ describe("buildInsights billed spend", () => {
       "claude-haiku-4-5-20251001",
     ]);
     expect(report.billed?.byModel[1].costUsd).toBeCloseTo(1); // haiku $1/M
+  });
+});
+
+describe("commandSavings", () => {
+  const ACTIVATED = NOW - 5 * DAY;
+  const runs = session({
+    turns: [
+      turn({ command: "/commit-push", sentAt: NOW - 10 * DAY, tokens: 40_000 }),
+      turn({ command: "/commit-push", sentAt: NOW - 9 * DAY, tokens: 20_000 }),
+      turn({ command: "/commit-push", sentAt: NOW - 2 * DAY, tokens: 3_000 }),
+      turn({ command: "/commit-push", sentAt: NOW - DAY, tokens: 5_000 }),
+      turn({ command: "/review", sentAt: NOW - DAY, tokens: 90_000 }),
+    ],
+  });
+
+  it("splits the command's turns at activation and accumulates savings", () => {
+    const savings = commandSavings([runs], [], "claude", "/commit-push", ACTIVATED);
+    expect(savings.baselineTurns).toBe(2);
+    expect(savings.baselineAvgTokens).toBe(30_000);
+    expect(savings.optimizedTurns).toBe(2);
+    expect(savings.optimizedTokens).toBe(8_000);
+    expect(savings.savedTokens).toBe(52_000);
+    expect(savings.estimated).toBe(true); // deltas, no vendor log
+  });
+
+  it("prefers billed tokens and drops the estimate mark when it can", () => {
+    const loggedRuns = session({
+      providerSessionId: "provider-1",
+      turns: [
+        turn({ command: "/commit-push", sentAt: NOW - 10 * DAY, tokens: 40_000 }),
+        turn({ command: "/commit-push", sentAt: NOW - DAY, tokens: 4_000 }),
+      ],
+    });
+    const savings = commandSavings(
+      [loggedRuns],
+      [
+        billed({ requestId: "r1", timestampMs: NOW - 10 * DAY + 1, inputTokens: 50_000 }),
+        billed({ requestId: "r2", timestampMs: NOW - DAY + 1, inputTokens: 2_000 }),
+      ],
+      "claude",
+      "/commit-push",
+      ACTIVATED,
+    );
+    expect(savings.baselineAvgTokens).toBe(50_000);
+    expect(savings.optimizedTokens).toBe(2_000);
+    expect(savings.savedTokens).toBe(48_000);
+    expect(savings.estimated).toBe(false);
+  });
+
+  it("shows a negative number when the optimization does not pay off", () => {
+    const savings = commandSavings(
+      [
+        session({
+          turns: [
+            turn({ command: "/x", sentAt: NOW - 10 * DAY, tokens: 1_000 }),
+            turn({ command: "/x", sentAt: NOW - DAY, tokens: 9_000 }),
+          ],
+        }),
+      ],
+      [],
+      "claude",
+      "/x",
+      ACTIVATED,
+    );
+    expect(savings.savedTokens).toBe(-8_000);
+  });
+
+  it("has no savings figure without a baseline or without optimized runs", () => {
+    const onlyAfter = commandSavings(
+      [session({ turns: [turn({ command: "/x", sentAt: NOW - DAY, tokens: 500 })] })],
+      [],
+      "claude",
+      "/x",
+      ACTIVATED,
+    );
+    expect(onlyAfter.baselineAvgTokens).toBeNull();
+    expect(onlyAfter.savedTokens).toBeNull();
+
+    const onlyBefore = commandSavings(
+      [
+        session({
+          turns: [turn({ command: "/x", sentAt: NOW - 10 * DAY, tokens: 500 })],
+        }),
+      ],
+      [],
+      "claude",
+      "/x",
+      ACTIVATED,
+    );
+    expect(onlyBefore.optimizedTurns).toBe(0);
+    expect(onlyBefore.savedTokens).toBeNull();
+  });
+
+  it("counts only the named provider's sessions", () => {
+    const codexRuns = session({
+      provider: "codex",
+      turns: [turn({ command: "/x", sentAt: NOW - DAY, tokens: 500 })],
+    });
+    const savings = commandSavings([codexRuns], [], "claude", "/x", ACTIVATED);
+    expect(savings.optimizedTurns).toBe(0);
   });
 });

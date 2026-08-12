@@ -10,6 +10,7 @@ import {
 } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
+import type { CommandOptimization } from "../entities/commandOptimization";
 import type { McpServerConfig } from "../entities/mcpServer";
 import type {
   ChatMessage,
@@ -150,6 +151,8 @@ export interface AppSettings {
   readonly defaultEffort: Readonly<Partial<Record<ProviderId, string>>>;
   /** Settings a slash command applies to its tab, by `commandConfigKey`. */
   readonly commandConfigs: Readonly<Record<string, CommandConfig>>;
+  /** Approved one-call scripts for slash commands, by `commandConfigKey`. */
+  readonly commandOptimizations: Readonly<Record<string, CommandOptimization>>;
   /** MCP servers Mota hands to agents, per provider enablement. */
   readonly mcpServers: readonly McpServerConfig[];
   /** Fraction of the context window at which sessions auto-compact. */
@@ -193,6 +196,7 @@ export const defaultSettings: AppSettings = {
   defaultModel: {},
   defaultEffort: {},
   commandConfigs: {},
+  commandOptimizations: {},
   mcpServers: [],
   autoCompactThreshold: DEFAULT_AUTO_COMPACT_THRESHOLD,
   autoCompact: "compact",

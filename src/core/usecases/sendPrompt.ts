@@ -1,6 +1,7 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
 import { dedupeCommands } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
+import { activeOptimization, optimizedPrompt } from "../entities/commandOptimization";
 import { serversForProvider } from "../entities/mcpServer";
 import {
   AUTH_REQUIRED_CONTEXT,
@@ -156,11 +157,24 @@ export class SendPrompt {
     const turn = (this.generation.get(tabId) ?? 0) + 1;
     this.generation.set(tabId, turn);
 
+    // An approved optimization rewrites only what the AGENT receives:
+    // the chat message, transcript and turn stamp above keep the typed
+    // text, so per-command stats keep accruing under the same name.
+    const optimization = command
+      ? activeOptimization(
+          this.store.getState().settings.commandOptimizations,
+          provider,
+          command,
+        )
+      : undefined;
+
     const request = {
       tabId,
       provider,
       projectPath: path,
-      prompt: trimmed,
+      prompt: optimization
+        ? optimizedPrompt(command ?? "", trimmed, optimization)
+        : trimmed,
       mode,
       permission,
       model,

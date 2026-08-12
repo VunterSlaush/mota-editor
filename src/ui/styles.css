@@ -4524,3 +4524,100 @@ body {
   white-space: pre-wrap;
   pointer-events: none;
 }
+
+/* ---- Settings: Optimization section ---- */
+.optimization-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.optimization-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.optimization-row__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.optimization-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+
+.optimization-badge--active {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.optimization-badge--stale {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.optimization-row__savings {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.optimization-row__reason {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.optimization-row__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--error);
+}
+
+.optimization-row__script summary {
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.optimization-row__script pre,
+.optimization-row__editor {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.optimization-row__editor {
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.optimization-row__proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

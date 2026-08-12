@@ -1482,3 +1482,89 @@ describe("a follow-up the agent starts on its own", () => {
     expect(last?.text).toBe("CI is green.");
   });
 });
+
+describe("an optimized command rewrites what the agent receives", () => {
+  const activate = (store: Store) =>
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        commandOptimizations: {
+          "claude:/commit-push": {
+            status: "active",
+            script: "npm test && git push",
+            sourceHash: "abc",
+            activatedAt: 1_000,
+          },
+        },
+      },
+    });
+
+  it("sends the script instructions instead of the typed text", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    activate(store);
+
+    await useCase.execute("t1", "/commit-push mention the gauge fix");
+
+    expect(gateway.requests[0].prompt).toContain("npm test && git push");
+    expect(gateway.requests[0].prompt).toContain("single shell tool call");
+    expect(gateway.requests[0].prompt).toContain("Arguments: mention the gauge fix");
+  });
+
+  it("keeps the typed text in the chat message and its turn stamp", async () => {
+    const { store, useCase } = setup([{ kind: "completed", isError: false }]);
+    activate(store);
+
+    await useCase.execute("t1", "/commit-push");
+
+    const message = tabOf(store).messages[0];
+    expect(message.text).toBe("/commit-push");
+    expect(message.turn?.command).toBe("/commit-push");
+  });
+
+  it("leaves other commands and plain prompts untouched", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    activate(store);
+
+    await useCase.execute("t1", "/review the diff");
+    await useCase.execute("t1", "hello there");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual([
+      "/review the diff",
+      "hello there",
+    ]);
+  });
+
+  it("ignores a declined optimization record", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        commandOptimizations: {
+          "claude:/commit-push": {
+            status: "notOptimizable",
+            reason: "Needs judgment",
+            sourceHash: "abc",
+          },
+        },
+      },
+    });
+
+    await useCase.execute("t1", "/commit-push");
+
+    expect(gateway.requests[0].prompt).toBe("/commit-push");
+  });
+
+  it("rewrites a queued prompt when it is finally sent", async () => {
+    const { store, gateway, useCase } = setup([TOOL_APPROVAL]);
+    activate(store);
+
+    await useCase.execute("t1", "run the tests"); // busy: waiting on approval
+    await useCase.execute("t1", "/commit-push"); // queued
+
+    gateway.script = [{ kind: "completed", isError: false }];
+    gateway.lastOnEvent?.({ kind: "completed", isError: false });
+    await flush();
+
+    expect(gateway.requests.at(-1)?.prompt).toContain("npm test && git push");
+  });
+});

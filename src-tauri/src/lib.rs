@@ -9,6 +9,7 @@ mod command_discovery;
 mod commands;
 mod mcp_probe;
 mod git;
+mod optimize;
 mod history_file;
 mod provider_probe;
 mod runner;
@@ -116,6 +117,7 @@ pub fn run() {
             billing_log::read_billed_usage,
             session_index::list_external_sessions,
             mcp_probe::probe_mcp_server,
+            optimize::optimize_command,
         ])
         .build(tauri::generate_context!())
         .expect("error while running mota-editor")
