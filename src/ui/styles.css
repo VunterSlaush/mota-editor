@@ -3345,6 +3345,50 @@ body {
   white-space: nowrap;
 }
 
+/* ---- Worktrees panel ----
+   The repository's checkouts and what each one's agent is doing. It
+   borrows the Changes panel's rows wholesale; only the leading icon and
+   the trailing state word are its own. */
+.worktrees {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.worktrees__heading {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.worktrees__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+}
+
+/* A worktree whose folder git has yet to prune: nothing to open. */
+.worktrees__item .changes__file:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.worktrees__item .changes__file:disabled:hover .changes__filename {
+  text-decoration: none;
+}
+
+.worktrees__badge {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 /* ---- Thought bubbles ---- */
 .msg--thought {
   align-self: flex-start;
