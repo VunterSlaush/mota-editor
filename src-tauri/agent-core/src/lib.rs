@@ -15,6 +15,7 @@ pub mod history;
 pub mod mcp;
 pub mod provider;
 pub mod providers;
+pub mod session_meta;
 pub mod shell;
 pub mod turn;
 pub mod vcs;

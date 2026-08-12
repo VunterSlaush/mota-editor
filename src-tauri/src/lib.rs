@@ -12,6 +12,7 @@ mod git;
 mod history_file;
 mod provider_probe;
 mod runner;
+mod session_index;
 mod shell_env;
 mod shell_history;
 mod shell_session;
@@ -112,6 +113,7 @@ pub fn run() {
             history_file::delete_session,
             history_file::list_session_stats,
             billing_log::read_billed_usage,
+            session_index::list_external_sessions,
             mcp_probe::probe_mcp_server,
         ])
         .build(tauri::generate_context!())

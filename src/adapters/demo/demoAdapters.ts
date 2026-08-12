@@ -549,6 +549,9 @@ export class DemoTranscriptStore implements TranscriptStore {
       }))
       .sort((a, b) => b.savedAt - a.savedAt);
   }
+  async listExternal() {
+    return []; // no vendor store exists in a browser
+  }
   async load(_p: string, id: string) {
     return this.transcripts.get(id) ?? null;
   }
