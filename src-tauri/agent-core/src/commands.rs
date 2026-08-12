@@ -80,8 +80,12 @@ a branch name), leave a `{{{{placeholder}}}}` hole instead of declining.
 
 If any step requires real judgment — writing prose, choosing among designs, \
 reading unfamiliar code, interpreting ambiguous state — or the instructions \
-reference files you cannot see here, it is NOT optimizable; say why in one \
-sentence.
+reference files you cannot see here, it is NOT optimizable. Say why in one \
+sentence, and list EVERY blocking instruction as a blocker: quote the offending \
+part briefly, and advise how the user could rewrite the command so it stops \
+blocking — remove the step, reduce its judgment to a `{{{{placeholder}}}}` \
+value, or split it into a command of its own. The user will edit the command \
+file with your advice and try again.
 
 Reply with exactly one fenced JSON block and nothing else:
 
@@ -92,7 +96,7 @@ Reply with exactly one fenced JSON block and nothing else:
 or
 
 ```json
-{{\"optimizable\": false, \"reason\": \"<one sentence>\"}}
+{{\"optimizable\": false, \"reason\": \"<one sentence>\", \"blockers\": [{{\"quote\": \"<the blocking instruction, briefly>\", \"advice\": \"<how to change the command so this stops blocking>\"}}]}}
 ```
 
 <command>
@@ -158,6 +162,7 @@ mod tests {
         assert!(prompt.contains("Run npm test, then push."));
         assert!(prompt.contains("\"optimizable\": true"));
         assert!(prompt.contains("\"optimizable\": false"));
+        assert!(prompt.contains("\"blockers\""));
         assert!(prompt.contains("{{placeholder}}"));
         assert!(prompt.contains("POSIX sh"));
     }

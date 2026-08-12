@@ -18,6 +18,8 @@ export interface CommandOptimization {
   readonly summary?: string;
   /** Why the command cannot be optimized, when it cannot. */
   readonly reason?: string;
+  /** The instructions that block automation, each with a way out. */
+  readonly blockers?: readonly OptimizationBlocker[];
   /**
    * Hash of the command markdown when it was analyzed. The approved
    * script never changes when the repo does — this only flags the row
@@ -31,10 +33,27 @@ export interface CommandOptimization {
   readonly activatedAt?: number;
 }
 
+/**
+ * One instruction that keeps a command from being deterministic, paired
+ * with how the user could rewrite it — remove the step, shrink the
+ * judgment to a `{{placeholder}}`, or split it into its own command. A
+ * bare "not optimizable" is a dead end; this is the way forward.
+ */
+export interface OptimizationBlocker {
+  /** The offending part of the command, quoted briefly. */
+  readonly quote: string;
+  /** What to change so it stops blocking. */
+  readonly advice: string;
+}
+
 /** What the analysis run proposes, before the user has seen it. */
 export type OptimizationProposal =
   | { readonly optimizable: true; readonly script: string; readonly summary?: string }
-  | { readonly optimizable: false; readonly reason: string };
+  | {
+      readonly optimizable: false;
+      readonly reason: string;
+      readonly blockers?: readonly OptimizationBlocker[];
+    };
 
 export type OptimizationVerdict =
   | { readonly kind: "proposal"; readonly proposal: OptimizationProposal }
@@ -96,9 +115,14 @@ function validateVerdict(parsed: unknown): OptimizationVerdict {
     if (typeof record.reason !== "string" || record.reason.trim() === "") {
       return { kind: "invalid", error: "A declined verdict must carry a reason." };
     }
+    const blockers = parseBlockers(record.blockers);
     return {
       kind: "proposal",
-      proposal: { optimizable: false, reason: record.reason.trim() },
+      proposal: {
+        optimizable: false,
+        reason: record.reason.trim(),
+        ...(blockers.length > 0 ? { blockers } : {}),
+      },
     };
   }
   if (typeof record.script !== "string" || record.script.trim() === "") {
@@ -117,6 +141,23 @@ function validateVerdict(parsed: unknown): OptimizationVerdict {
         : {}),
     },
   };
+}
+
+/**
+ * Blockers are advice, not the verdict — malformed entries are dropped
+ * rather than failing a reply whose reason is perfectly usable.
+ */
+function parseBlockers(value: unknown): OptimizationBlocker[] {
+  if (!Array.isArray(value)) return [];
+  const blockers: OptimizationBlocker[] = [];
+  for (const entry of value.slice(0, 10)) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { quote, advice } = entry as Record<string, unknown>;
+    if (typeof quote !== "string" || typeof advice !== "string") continue;
+    if (quote.trim() === "" || advice.trim() === "") continue;
+    blockers.push({ quote: quote.trim(), advice: advice.trim() });
+  }
+  return blockers;
 }
 
 /** The live script for a command, if the user approved one. */

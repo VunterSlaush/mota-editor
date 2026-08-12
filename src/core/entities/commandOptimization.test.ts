@@ -37,6 +37,44 @@ describe("optimization verdict parsing", () => {
     });
   });
 
+  it("keeps a declined verdict's blockers, each with a way out", () => {
+    const reply = JSON.stringify({
+      optimizable: false,
+      reason: "Two steps need judgment",
+      blockers: [
+        { quote: "write release notes", advice: "Split into its own command." },
+        { quote: "pick a reviewer", advice: "Replace with a {{reviewer}} placeholder." },
+      ],
+    });
+    const verdict = parseOptimizationVerdict(reply);
+    expect(verdict).toEqual({
+      kind: "proposal",
+      proposal: {
+        optimizable: false,
+        reason: "Two steps need judgment",
+        blockers: [
+          { quote: "write release notes", advice: "Split into its own command." },
+          {
+            quote: "pick a reviewer",
+            advice: "Replace with a {{reviewer}} placeholder.",
+          },
+        ],
+      },
+    });
+  });
+
+  it("drops malformed blockers without failing the verdict", () => {
+    const reply = JSON.stringify({
+      optimizable: false,
+      reason: "Needs judgment",
+      blockers: ["not an object", { quote: "", advice: "empty quote" }, { quote: "x" }],
+    });
+    expect(parseOptimizationVerdict(reply)).toEqual({
+      kind: "proposal",
+      proposal: { optimizable: false, reason: "Needs judgment" },
+    });
+  });
+
   it("rejects a reply with no JSON in it", () => {
     const verdict = parseOptimizationVerdict("I could not analyze this command.");
     expect(verdict.kind).toBe("invalid");

@@ -123,6 +123,7 @@ export function SettingsOptimization({
       write(name, {
         status: "notOptimizable",
         reason: outcome.proposal.reason,
+        ...(outcome.proposal.blockers ? { blockers: outcome.proposal.blockers } : {}),
         sourceHash: outcome.sourceHash,
       });
       setRow(name, { kind: "idle" });
@@ -340,6 +341,23 @@ function OptimizationRow({
       {record?.status === "notOptimizable" && record.reason !== undefined && (
         <p className="optimization-row__reason">{record.reason}</p>
       )}
+
+      {record?.status === "notOptimizable" &&
+        record.blockers !== undefined &&
+        record.blockers.length > 0 && (
+          <div className="optimization-row__blockers">
+            <span className="optimization-row__blockers-title">
+              To make it optimizable, edit the command file:
+            </span>
+            <ul>
+              {record.blockers.map((blocker) => (
+                <li key={blocker.quote}>
+                  <q>{blocker.quote}</q> — {blocker.advice}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
       {record?.status === "active" && (
         <>

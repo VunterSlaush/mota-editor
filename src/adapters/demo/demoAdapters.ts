@@ -324,7 +324,16 @@ export class DemoCommandOptimizer implements CommandOptimizer {
             script: 'npm run build && npm run deploy -- --message "{{release_note}}"',
             summary: "Build, then deploy with a release note",
           }
-        : { optimizable: false, reason: "This command needs judgment at every step." };
+        : {
+            optimizable: false,
+            reason: "This command needs judgment at every step.",
+            blockers: [
+              {
+                quote: "review the diff and decide what matters",
+                advice: "Split the review into its own command; the rest is scriptable.",
+              },
+            ],
+          };
     return {
       text: `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
       contentHash: "demo1",
