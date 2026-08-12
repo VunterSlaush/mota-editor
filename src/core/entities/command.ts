@@ -1,3 +1,7 @@
+import {
+  CREATE_EXTENSION_COMMAND,
+  CREATE_EXTENSION_DESCRIPTION,
+} from "./createExtensionGuide";
 import type { ProviderId } from "./provider";
 
 /**
@@ -16,12 +20,24 @@ export interface CommandInfo {
 }
 
 /**
- * Built-in commands each CLI understands in headless mode. Custom
- * commands (project/user command folders) are discovered at runtime and
- * merged by the ListCommands use case.
+ * Mota's own command, available with every provider: it never reaches
+ * the agent as a slash command — SendPrompt expands it into the full
+ * scaffolding brief (`createExtensionPrompt`) client-side.
+ */
+const CREATE_EXTENSION: CommandInfo = {
+  name: CREATE_EXTENSION_COMMAND,
+  description: CREATE_EXTENSION_DESCRIPTION,
+  source: "builtin",
+};
+
+/**
+ * Built-in commands each CLI understands in headless mode (plus Mota's
+ * own, above). Custom commands (project/user command folders) are
+ * discovered at runtime and merged by the ListCommands use case.
  */
 export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[]>> = {
   claude: [
+    CREATE_EXTENSION,
     {
       name: "/init",
       description: "Create or refresh CLAUDE.md with project guidance",
@@ -39,6 +55,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
   ],
   codex: [
+    CREATE_EXTENSION,
     {
       name: "/init",
       description: "Create AGENTS.md with project guidance",
@@ -46,7 +63,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
-  gemini: [],
+  gemini: [CREATE_EXTENSION],
 };
 
 /**

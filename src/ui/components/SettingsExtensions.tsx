@@ -64,6 +64,11 @@ export function SettingsExtensions({
         informed consent, not a sandbox.
       </p>
 
+      <p className="settings-section__hint">
+        Don't want to write one by hand? Type <code>/create-extension</code> in any chat
+        and describe what you want — the agent scaffolds the folder for you.
+      </p>
+
       <button type="button" className="tool-add" onClick={onReload}>
         <ArrowsClockwise size={14} /> Reload list
       </button>

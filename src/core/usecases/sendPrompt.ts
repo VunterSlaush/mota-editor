@@ -1,6 +1,10 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
 import { dedupeCommands } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
+import {
+  CREATE_EXTENSION_COMMAND,
+  createExtensionPrompt,
+} from "../entities/createExtensionGuide";
 import { expandPromptCommand, findExtensionCommand } from "../entities/extension";
 import {
   AUTH_REQUIRED_CONTEXT,
@@ -162,13 +166,13 @@ export class SendPrompt {
         return;
       }
     }
+    const commandArgs = trimmed.slice(command?.length ?? 0).trim();
     const outgoing =
-      extensionHit?.command.kind === "prompt" && extensionHit.command.template
-        ? expandPromptCommand(
-            extensionHit.command.template,
-            trimmed.slice(command?.length ?? 0).trim(),
-          )
-        : trimmed;
+      command === CREATE_EXTENSION_COMMAND
+        ? createExtensionPrompt(commandArgs)
+        : extensionHit?.command.kind === "prompt" && extensionHit.command.template
+          ? expandPromptCommand(extensionHit.command.template, commandArgs)
+          : trimmed;
 
     const message = userMessage(trimmed, attachments, {
       sentAt,

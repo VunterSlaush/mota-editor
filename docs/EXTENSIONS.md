@@ -10,11 +10,15 @@ model is informed consent, not a sandbox (ADR-0012).
 
 A complete working example lives in [`examples/standup/`](../examples/standup/).
 
-Don't want to write it by hand? The repo ships an agent skill —
-[`.claude/skills/create-mota-extension/`](../.claude/skills/create-mota-extension/SKILL.md)
-— that scaffolds a working extension from a plain-language prompt. Use it
-as `/create-mota-extension` with this repo open, or copy the folder into
-`~/.claude/skills/` to have it in every project.
+Don't want to write it by hand? Two prompt-driven routes:
+
+- **In Mota itself** (any install): type `/create-extension` in any chat
+  and describe what you want — the command is built into the app and
+  expands into a full scaffolding brief for whichever agent the tab runs.
+- **In plain Claude Code**: the repo ships the same brief as an agent
+  skill, [`.claude/skills/create-mota-extension/`](../.claude/skills/create-mota-extension/SKILL.md);
+  copy the folder into `~/.claude/skills/` to have `/create-mota-extension`
+  in every project.
 
 ## The manifest
 

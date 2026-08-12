@@ -46,17 +46,18 @@ optionally, a script in any language — dropped into
 your agents, and (soon) automate the workbench on events. Enabling one
 shows a native dialog listing exactly what it may do.
 
-- **Write one:** the guide is [docs/EXTENSIONS.md](docs/EXTENSIONS.md);
-  a complete working example lives in
-  [examples/standup/](examples/standup/) (~45 lines of plain Node, no SDK).
-- **Or let your agent write it:** this repo ships an agent skill,
-  [`create-mota-extension`](.claude/skills/create-mota-extension/SKILL.md),
-  that scaffolds a working extension from a plain-language prompt. With
-  this repo open (in Mota or Claude Code) it's available as
-  `/create-mota-extension`; to have it everywhere, copy the folder
-  `.claude/skills/create-mota-extension/` into `~/.claude/skills/` and
-  tell your agent e.g. */create-mota-extension a command that drafts a
-  release-notes prompt from recent commits*.
+- **Create one from a prompt — built into every install:** type
+  `/create-extension` in any chat and describe what you want (e.g.
+  */create-extension a command that drafts release notes from recent
+  commits*). The agent scaffolds the folder, explains the permissions it
+  requested, and tells you how to approve it. No repo checkout needed.
+- **Write one by hand:** the guide is
+  [docs/EXTENSIONS.md](docs/EXTENSIONS.md); a complete working example
+  lives in [examples/standup/](examples/standup/) (~45 lines of plain
+  Node, no SDK).
+- **Outside Mota** (plain Claude Code): copy the agent skill
+  [`.claude/skills/create-mota-extension/`](.claude/skills/create-mota-extension/SKILL.md)
+  into `~/.claude/skills/` and use `/create-mota-extension` anywhere.
 - **Design:** [ADR-0012](docs/adr/0012-extensions-over-stdio.md) —
   out-of-process, JSON-RPC over stdio (the same wire family as ACP/MCP),
   declared permissions, native consent, lazy processes.
