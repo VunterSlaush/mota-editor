@@ -422,7 +422,11 @@ export function ChatPanel({
           </button>
         )}
         <div className="chat-panel__controls">
-          {currentBranch && (
+          {/* Only where the sidebar has no worktrees section to hold it.
+              A folder tab reaches them from there instead, which keeps a
+              header that shows nothing out of a crowded row — unlike the
+              branch chip beside it, this button names no state. */}
+          {currentBranch && isWorktreeTab && (
             <button
               type="button"
               className="branch-chip"
@@ -522,6 +526,7 @@ export function ChatPanel({
                   tabs={tabs}
                   currentPath={tab.project.path}
                   onOpen={onOpenWorktree}
+                  onNewWorktree={() => setWorktreePickerOpen(true)}
                 />
               )}
               {shownSidebarView === "history" && (

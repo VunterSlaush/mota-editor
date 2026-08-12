@@ -3356,16 +3356,6 @@ body {
   padding: 12px;
 }
 
-.worktrees__heading {
-  flex: 1;
-  min-width: 0;
-  align-self: center;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-dim);
-}
-
 .worktrees__icon {
   flex: none;
   display: inline-flex;

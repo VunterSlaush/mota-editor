@@ -1,4 +1,4 @@
-import { ArrowClockwise, FolderSimple, GitFork } from "@phosphor-icons/react";
+import { ArrowClockwise, FolderSimple, GitFork, Plus } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { TAB_STATUS_LABELS } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
@@ -14,6 +14,8 @@ interface Props {
   /** The checkout the panel is shown from; its row reads "current". */
   currentPath: string;
   onOpen: (path: string, mainPath: string) => void;
+  /** Opens the picker, which owns creating and removing a worktree. */
+  onNewWorktree: () => void;
 }
 
 /**
@@ -25,8 +27,18 @@ interface Props {
  * Clicking a row goes to its tab, or opens one when the worktree was
  * closed — which is the whole point, since closing a worktree tab leaves
  * the worktree itself on disk (ADR-0007).
+ *
+ * Making and deleting one stays in the picker this panel's button opens:
+ * that needs a bounded branch search and a two-step confirm, neither of
+ * which survives being rebuilt in a column that drags down to 180px.
  */
-export function WorktreesPanel({ loadWorktrees, tabs, currentPath, onOpen }: Props) {
+export function WorktreesPanel({
+  loadWorktrees,
+  tabs,
+  currentPath,
+  onOpen,
+  onNewWorktree,
+}: Props) {
   const [worktrees, setWorktrees] = useState<readonly WorktreeItem[] | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -56,7 +68,16 @@ export function WorktreesPanel({ loadWorktrees, tabs, currentPath, onOpen }: Pro
   return (
     <aside className="worktrees">
       <div className="changes__actions">
-        <span className="worktrees__heading">Worktrees</span>
+        {rows.length > 0 && (
+          <button
+            type="button"
+            className="changes__action"
+            title="Open or create a worktree"
+            onClick={onNewWorktree}
+          >
+            <Plus /> New worktree
+          </button>
+        )}
         <button
           type="button"
           className="changes__action changes__action--icon"
@@ -85,7 +106,7 @@ export function WorktreesPanel({ loadWorktrees, tabs, currentPath, onOpen }: Pro
       )}
       {worktrees !== null && rows.length > 0 && linked.length === 0 && (
         <p className="changes__empty">
-          No worktrees yet — the Worktrees button in the header makes one.
+          No worktrees yet — New worktree makes one and opens it in its own tab.
         </p>
       )}
     </aside>
