@@ -2494,6 +2494,16 @@ body {
   font-size: 13px;
 }
 
+/* What the list is not showing: the rows past the cap, and the remote
+   branches that only a search reaches. */
+.branch-picker__hint {
+  margin: 0;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 /* The worktree picker borrows the branch picker's frame and rows. */
 .worktree-picker__section {
   padding: 6px 14px 2px;

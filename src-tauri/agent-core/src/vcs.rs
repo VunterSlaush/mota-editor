@@ -1,6 +1,8 @@
 //! Version-control status — pure parsing of `git status --porcelain`
 //! output. The shell runs git; this module only interprets the text.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 /// One changed file, as git reports it.
@@ -113,13 +115,22 @@ pub struct Branch {
 /// output: `*<TAB>short<TAB>refs/...` for the current branch, a space
 /// instead of `*` otherwise.
 ///
-/// Locals sort before remotes (refs/heads < refs/remotes), so a remote
-/// branch already checked out locally dedupes against the local entry.
-/// Remote entries keep the branch's own name — `origin/fix-login` shows
-/// (and checks out) as `fix-login`, which git resolves to a new tracking
+/// Locals come out first and remotes dedupe against them by name,
+/// whatever order the refs arrived in — the caller sorts by commit date,
+/// which interleaves `refs/heads` and `refs/remotes` freely. Remote
+/// entries keep the branch's own name — `origin/fix-login` shows (and
+/// checks out) as `fix-login`, which git resolves to a new tracking
 /// branch. `origin/HEAD` is a pointer, not a branch, and is skipped.
+///
+/// A well-fetched repository has thousands of remote refs, so the
+/// name-against-name comparison is a set: a scan per ref made opening
+/// the branch picker quadratic in the size of the remote.
 pub fn parse_branches(output: &str) -> Vec<Branch> {
-    let mut branches: Vec<Branch> = Vec::new();
+    let mut locals: Vec<Branch> = Vec::new();
+    let mut remotes: Vec<Branch> = Vec::new();
+    let mut local_names: HashSet<String> = HashSet::new();
+    let mut remote_names: HashSet<String> = HashSet::new();
+
     for line in output.lines() {
         let mut parts = line.splitn(3, '\t');
         let head = parts.next().unwrap_or_default().trim();
@@ -130,22 +141,24 @@ pub fn parse_branches(output: &str) -> Vec<Branch> {
         }
         if let Some(rest) = full.strip_prefix("refs/remotes/") {
             let Some((_, name)) = rest.split_once('/') else { continue };
-            if name == "HEAD" || name.is_empty() {
+            // The same branch on two remotes is one row; first one wins.
+            if name == "HEAD" || name.is_empty() || !remote_names.insert(name.to_owned()) {
                 continue;
             }
-            if branches.iter().any(|b| b.name == name) {
-                continue;
-            }
-            branches.push(Branch { name: name.to_owned(), current: false, remote: true });
+            remotes.push(Branch { name: name.to_owned(), current: false, remote: true });
         } else {
-            branches.push(Branch {
+            local_names.insert(short.to_owned());
+            locals.push(Branch {
                 name: short.to_owned(),
                 current: head == "*",
                 remote: false,
             });
         }
     }
-    branches
+
+    remotes.retain(|remote| !local_names.contains(&remote.name));
+    locals.extend(remotes);
+    locals
 }
 
 /// One checkout of the repository, from `git worktree list --porcelain`.
@@ -536,6 +549,31 @@ mod tests {
         assert_eq!(branches[1].name, "fix-login");
         assert!(branches[1].remote);
         assert!(!branches[1].current);
+    }
+
+    /// Sorting by commit date interleaves refs/heads and refs/remotes,
+    /// so a remote may be read before the local branch tracking it.
+    #[test]
+    fn a_remote_listed_before_its_local_branch_still_dedupes() {
+        let out = " \torigin/main\trefs/remotes/origin/main\n \
+                    \torigin/fix-login\trefs/remotes/origin/fix-login\n \
+                   *\tmain\trefs/heads/main\n";
+        let branches = parse_branches(out);
+        assert_eq!(branches.len(), 2);
+        // Locals first, whatever order the refs arrived in.
+        assert_eq!(branches[0].name, "main");
+        assert!(branches[0].current);
+        assert_eq!(branches[1].name, "fix-login");
+        assert!(branches[1].remote);
+    }
+
+    #[test]
+    fn the_same_branch_on_two_remotes_is_one_row() {
+        let out = " \torigin/fix-login\trefs/remotes/origin/fix-login\n \
+                    \tupstream/fix-login\trefs/remotes/upstream/fix-login\n";
+        let branches = parse_branches(out);
+        assert_eq!(branches.len(), 1);
+        assert_eq!(branches[0].name, "fix-login");
     }
 
     #[test]

@@ -188,9 +188,20 @@ pub async fn git_commit(project_path: String, message: String) -> Result<String,
 pub async fn git_branches(project_path: String) -> Result<Vec<Branch>, String> {
     // --all includes remote-tracking refs, so branches that only exist
     // on the remote (fetched, never checked out) are offered too.
+    //
+    // Newest commit first, because the picker shows a bounded number of
+    // rows: on a repository with thousands of refs, alphabetical order
+    // means the top of the list is whatever happens to start with "a",
+    // while the branch someone wants is nearly always one they touched
+    // recently.
     let out = run_git(
         &project_path,
-        &["branch", "--all", "--format=%(HEAD)%09%(refname:short)%09%(refname)"],
+        &[
+            "branch",
+            "--all",
+            "--sort=-committerdate",
+            "--format=%(HEAD)%09%(refname:short)%09%(refname)",
+        ],
     )
     .await?;
     Ok(vcs::parse_branches(&out))
