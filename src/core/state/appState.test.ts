@@ -413,6 +413,109 @@ describe("tab/planMarkdownUpdated", () => {
   });
 });
 
+describe("tab/usageUpdated provisional sizes", () => {
+  it("marks an agent-reported 200k on a 1M-window model as provisional", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "tab/usageUpdated",
+      tabId: "t1",
+      used: 90_000,
+      size: 200_000,
+    });
+    expect(state.tabs[0].usage).toEqual({
+      used: 90_000,
+      size: 200_000,
+      provisional: true,
+    });
+  });
+
+  it("leaves the corrected report unmarked", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "tab/usageUpdated",
+      tabId: "t1",
+      used: 90_000,
+      size: 1_000_000,
+    });
+    expect(state.tabs[0].usage).toEqual({ used: 90_000, size: 1_000_000 });
+  });
+
+  it("trusts 200k when the model's window really is 200k", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, { type: "tab/modelChanged", tabId: "t1", model: "haiku" });
+    state = reduce(state, {
+      type: "tab/usageUpdated",
+      tabId: "t1",
+      used: 90_000,
+      size: 200_000,
+    });
+    expect(state.tabs[0].usage).toEqual({ used: 90_000, size: 200_000 });
+  });
+
+  it("keeps client estimates as estimates, never provisional", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "tab/usageUpdated",
+      tabId: "t1",
+      used: 90_000,
+      size: 200_000,
+      estimated: true,
+    });
+    expect(state.tabs[0].usage).toEqual({
+      used: 90_000,
+      size: 200_000,
+      estimated: true,
+    });
+  });
+});
+
+describe("usage reseeding on model change", () => {
+  const withReportedUsage = (state: AppState) =>
+    reduce(state, {
+      type: "tab/usageUpdated",
+      tabId: "t1",
+      used: 150_000,
+      size: 200_000,
+    });
+
+  it("an applied deferred model change swaps the denominator for the new model's window", () => {
+    // An agent-reported size belongs to the OLD model; left in place it
+    // would keep driving the gauge and auto-compact after the switch.
+    let state = withReportedUsage(open(initialState, "t1", "/a"));
+    state = reduce(state, { type: "tab/specDeferred", tabId: "t1", model: "sonnet" });
+    state = reduce(state, { type: "tab/pendingSpecApplied", tabId: "t1" });
+    expect(state.tabs[0].usage).toEqual({
+      used: 150_000,
+      size: 1_000_000,
+      estimated: true,
+    });
+  });
+
+  it("an effort-only deferral leaves reported usage untouched", () => {
+    let state = withReportedUsage(open(initialState, "t1", "/a"));
+    const reported = state.tabs[0].usage;
+    state = reduce(state, { type: "tab/specDeferred", tabId: "t1", effort: "max" });
+    state = reduce(state, { type: "tab/pendingSpecApplied", tabId: "t1" });
+    expect(state.tabs[0].usage).toBe(reported);
+  });
+
+  it("an immediate model change reseeds against the new model's window", () => {
+    let state = withReportedUsage(open(initialState, "t1", "/a"));
+    state = reduce(state, { type: "tab/modelChanged", tabId: "t1", model: "haiku" });
+    expect(state.tabs[0].usage).toEqual({
+      used: 150_000,
+      size: 200_000,
+      estimated: true,
+    });
+  });
+
+  it("a model change with no usage yet invents none", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, { type: "tab/modelChanged", tabId: "t1", model: "haiku" });
+    expect(state.tabs[0].usage).toBeUndefined();
+  });
+});
+
 describe("tab/provisioningChanged", () => {
   const change = (
     state: AppState,

@@ -12,8 +12,12 @@ const CHARS_PER_TOKEN = 4;
 /** Fixed cost per message for role/framing overhead. */
 const PER_MESSAGE_OVERHEAD = 4;
 
-/** Token counts for display: "742", "12k". */
+/** Token counts for display: "742", "12k", "1M", "1.5M". */
 export function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    return `${millions % 1 === 0 ? millions : millions.toFixed(1)}M`;
+  }
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
 }
 

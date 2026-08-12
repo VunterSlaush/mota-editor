@@ -1010,7 +1010,13 @@ describe("SendPrompt", () => {
 
     await useCase.execute("t1", "big refactor");
 
-    expect(store.getState().tabs[0].usage).toEqual({ used: 180_000, size: 200_000 });
+    // The placeholder-size mark does not soften auto-compact: the agent's
+    // numbers are still the best signal there is, and they crossed 90%.
+    expect(store.getState().tabs[0].usage).toEqual({
+      used: 180_000,
+      size: 200_000,
+      provisional: true,
+    });
     // The follow-up compact turn was sent automatically...
     expect(gateway.requests.map((r) => r.prompt)).toEqual(["big refactor", "/compact"]);
     // ...with an explanatory info row, and did NOT re-trigger itself.
@@ -1027,6 +1033,63 @@ describe("SendPrompt", () => {
     await useCase.execute("t1", "small task");
 
     expect(gateway.requests).toHaveLength(1);
+  });
+
+  it("estimates against the selected model's window when the agent reports none", async () => {
+    // The denominator decides when auto-compact fires — a 200k guess for
+    // a 1M-window model would compact at 18% of the real ceiling.
+    const silent = setup([{ kind: "completed", isError: false }]);
+    await silent.useCase.execute("t1", "no usage reported");
+    expect(tabOf(silent.store).usage).toMatchObject({
+      size: 1_000_000,
+      estimated: true,
+    });
+
+    const haiku = setup([{ kind: "completed", isError: false }]);
+    haiku.store.dispatch({ type: "tab/modelChanged", tabId: "t1", model: "haiku" });
+    await haiku.useCase.execute("t1", "no usage reported");
+    expect(tabOf(haiku.store).usage).toMatchObject({
+      size: 200_000,
+      estimated: true,
+    });
+  });
+
+  it("keeps a provisional agent report through completion — no client estimate over it", async () => {
+    // The agent's `used` is real accounting even while its `size` is the
+    // adapter's placeholder; the char-count fallback must not replace it.
+    const { store, useCase } = setup([
+      { kind: "usage", used: 90_000, size: 200_000 },
+      { kind: "completed", isError: false },
+    ]);
+    await useCase.execute("t1", "first turn on a fresh session");
+    expect(tabOf(store).usage).toEqual({
+      used: 90_000,
+      size: 200_000,
+      provisional: true,
+    });
+  });
+
+  it("drops the provisional mark once the corrected window arrives", async () => {
+    const { store, useCase } = setup([
+      { kind: "usage", used: 90_000, size: 200_000 }, // adapter seed
+      { kind: "usage", used: 92_000, size: 1_000_000 }, // authoritative
+      { kind: "completed", isError: false },
+    ]);
+    await useCase.execute("t1", "first turn completes");
+    expect(tabOf(store).usage).toEqual({ used: 92_000, size: 1_000_000 });
+  });
+
+  it("a real usage report always beats a prior estimate", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    await useCase.execute("t1", "first turn, agent silent");
+    expect(tabOf(store).usage?.estimated).toBe(true);
+
+    gateway.script = [
+      { kind: "usage", used: 42_000, size: 500_000 },
+      { kind: "completed", isError: false },
+    ];
+    await useCase.execute("t1", "second turn, agent reports");
+    expect(tabOf(store).usage).toEqual({ used: 42_000, size: 500_000 });
   });
 
   it("saves the transcript to session history after a completed turn", async () => {

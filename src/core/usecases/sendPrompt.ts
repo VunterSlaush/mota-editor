@@ -15,7 +15,7 @@ import {
   toolMessage,
   userMessage,
 } from "../entities/message";
-import { COMPACT_COMMAND, providerById } from "../entities/provider";
+import { COMPACT_COMMAND, contextWindowFor, providerById } from "../entities/provider";
 import { estimateTokens } from "../entities/tokens";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
@@ -612,7 +612,7 @@ export class SendPrompt {
       type: "tab/usageUpdated",
       tabId,
       used: estimateTokens(tab.messages),
-      size: providerById(tab.project.provider).contextWindow,
+      size: contextWindowFor(tab.project.provider, tab.project.model),
       estimated: true,
     });
   }

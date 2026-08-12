@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { AUTO_COMPACT_POLICIES } from "../../core/entities/agentSettings";
+import {
+  AUTO_COMPACT_POLICIES,
+  MAX_AUTO_COMPACT_THRESHOLD,
+  MIN_AUTO_COMPACT_THRESHOLD,
+} from "../../core/entities/agentSettings";
 import { totalBilledTokens } from "../../core/entities/billing";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import { formatUsd } from "../../core/entities/modelPricing";
@@ -19,10 +23,10 @@ interface Props {
   loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
 }
 
-/** The auto-compact ceiling is picked from sane bounds, not free text:
- *  below 50% compaction would thrash, above 95% it fires too late. */
-const THRESHOLD_MIN = 50;
-const THRESHOLD_MAX = 95;
+/** The auto-compact ceiling is picked from sane bounds, not free text —
+ *  the same bounds the restore clamp enforces, so they cannot drift. */
+const THRESHOLD_MIN = MIN_AUTO_COMPACT_THRESHOLD * 100;
+const THRESHOLD_MAX = MAX_AUTO_COMPACT_THRESHOLD * 100;
 
 /**
  * UI — everything the agents have consumed on this machine, per vendor.
@@ -243,7 +247,7 @@ export function SettingsUsage({ settings, onChange, tabs, loadInsights }: Props)
                   />
                 </div>
                 <span className="usage-row__numbers">
-                  {usage.estimated ? "≈ " : ""}
+                  {usage.estimated || usage.provisional ? "≈ " : ""}
                   {formatTokens(usage.used)} / {formatTokens(usage.size)} (
                   {Math.round(fraction * 100)}%)
                 </span>

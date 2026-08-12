@@ -212,17 +212,39 @@ describe("buildInsights", () => {
   });
 
   it("counts a session once when its cumulative delta crosses the auto-compact ceiling", () => {
-    // claude window 200k × 0.85 = 170k ceiling
+    // haiku window 200k × 0.85 = 170k ceiling
     const crossing = session({
       turns: [
-        turn({ sentAt: NOW - 2 * DAY, tokens: 100_000 }),
-        turn({ sentAt: NOW - DAY, tokens: 80_000 }),
-        turn({ sentAt: NOW - DAY + 1, tokens: 10_000 }),
+        turn({ sentAt: NOW - 2 * DAY, tokens: 100_000, model: "haiku" }),
+        turn({ sentAt: NOW - DAY, tokens: 80_000, model: "haiku" }),
+        turn({ sentAt: NOW - DAY + 1, tokens: 10_000, model: "haiku" }),
       ],
     });
-    const below = session({ sessionId: "b", turns: [turn({ tokens: 50_000 })] });
+    const below = session({
+      sessionId: "b",
+      turns: [turn({ tokens: 50_000, model: "haiku" })],
+    });
     const report = build([crossing, below]);
     expect(report.tokens.sessionsNearThreshold).toBe(1);
+  });
+
+  it("judges session fill against the window of the model it ended under", () => {
+    // 190k would cross a 200k window's ceiling but is 19% of the default
+    // claude model's 1M window — near-threshold must not count it.
+    const defaultModel = session({
+      turns: [turn({ sentAt: NOW - DAY, tokens: 190_000 })],
+    });
+    expect(build([defaultModel]).tokens.sessionsNearThreshold).toBe(0);
+
+    // The same fill under haiku, switched to mid-session: the LAST model
+    // decides, because that is the window the session actually ended in.
+    const endedOnHaiku = session({
+      turns: [
+        turn({ sentAt: NOW - 2 * DAY, tokens: 190_000, model: "sonnet" }),
+        turn({ sentAt: NOW - DAY, tokens: 1_000, model: "haiku" }),
+      ],
+    });
+    expect(build([endedOnHaiku]).tokens.sessionsNearThreshold).toBe(1);
   });
 
   it("splits habits by mode, permission, and effort with a 'default' effort bucket", () => {

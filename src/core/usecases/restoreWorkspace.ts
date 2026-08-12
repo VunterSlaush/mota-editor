@@ -1,4 +1,8 @@
-import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
+import {
+  clampAutoCompactThreshold,
+  DEFAULT_MODE,
+  DEFAULT_PERMISSION,
+} from "../entities/agentSettings";
 import { projectNameFromPath } from "../entities/project";
 import type { WorktreeSettings } from "../entities/worktree";
 import { clampZoomLevel } from "../entities/zoom";
@@ -77,8 +81,9 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     defaultEffort: persisted?.defaultEffort ?? defaultSettings.defaultEffort,
     commandConfigs: persisted?.commandConfigs ?? defaultSettings.commandConfigs,
     mcpServers: persisted?.mcpServers ?? defaultSettings.mcpServers,
-    autoCompactThreshold:
+    autoCompactThreshold: clampAutoCompactThreshold(
       persisted?.autoCompactThreshold ?? defaultSettings.autoCompactThreshold,
+    ),
     autoCompact: persisted?.autoCompact ?? defaultSettings.autoCompact,
     theme: persisted?.theme ?? defaultSettings.theme,
     zoomLevel: clampZoomLevel(persisted?.zoomLevel ?? defaultSettings.zoomLevel),

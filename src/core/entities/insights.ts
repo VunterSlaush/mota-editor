@@ -8,7 +8,7 @@ import {
   totalBilledTokens,
 } from "./billing";
 import { billedCostUsd, estimateCostUsd } from "./modelPricing";
-import { COMPACT_COMMAND, PROVIDERS } from "./provider";
+import { COMPACT_COMMAND, contextWindowFor, PROVIDERS } from "./provider";
 
 /**
  * Entities layer — historical usage statistics ("Insights") built from
@@ -329,8 +329,12 @@ function basename(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-function contextWindowOf(provider: string): number | undefined {
-  return PROVIDERS.find((p) => p.id === provider)?.contextWindow;
+function contextWindowOf(
+  provider: string,
+  model: string | undefined,
+): number | undefined {
+  const known = PROVIDERS.find((p) => p.id === provider)?.id;
+  return known === undefined ? undefined : contextWindowFor(known, model);
 }
 
 /** How a session's project is keyed and named in every ranking. */
@@ -758,7 +762,12 @@ export function buildInsights(
 
   let sessionsNearThreshold = 0;
   for (const { session } of included) {
-    const window = contextWindowOf(session.provider);
+    // Judged against the window of the model the session ENDED under —
+    // the ceiling that applied when the fill actually accumulated.
+    const lastModel = [...session.turns]
+      .sort((a, b) => b.sentAt - a.sentAt)
+      .find((t) => t.model !== undefined)?.model;
+    const window = contextWindowOf(session.provider, lastModel);
     if (window === undefined) continue;
     const ceiling = options.autoCompactThreshold * window;
     let cumulative = 0;

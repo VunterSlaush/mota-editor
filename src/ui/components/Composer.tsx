@@ -28,6 +28,7 @@ import {
 } from "../../core/entities/fileMention";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
+import type { TabState } from "../../core/state/appState";
 import { fileName } from "../fileName";
 import { CommandPalette } from "./CommandPalette";
 import { CommandText } from "./CommandText";
@@ -97,7 +98,7 @@ interface Props {
    *  Defaults), so the pickers can say it. Empty = the provider's own. */
   defaultModel: string;
   defaultEffort: string;
-  usage: { readonly used: number; readonly size: number } | undefined;
+  usage: TabState["usage"];
   /** Fraction of the context window at which auto-compact kicks in. */
   autoCompactThreshold: number;
   onSend: (prompt: string, attachments: readonly string[]) => void;

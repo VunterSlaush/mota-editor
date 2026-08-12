@@ -3,7 +3,11 @@ import type {
   AutoCompactPolicy,
   PermissionPolicy,
 } from "../entities/agentSettings";
-import { DEFAULT_MODE, DEFAULT_PERMISSION } from "../entities/agentSettings";
+import {
+  DEFAULT_AUTO_COMPACT_THRESHOLD,
+  DEFAULT_MODE,
+  DEFAULT_PERMISSION,
+} from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { McpServerConfig } from "../entities/mcpServer";
@@ -17,7 +21,11 @@ import { mergeToolCall } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
 import type { ProviderId } from "../entities/provider";
-import { DEFAULT_PROVIDER } from "../entities/provider";
+import {
+  contextWindowFor,
+  DEFAULT_PROVIDER,
+  isProvisionalContextSize,
+} from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
@@ -75,11 +83,15 @@ export interface TabState {
   /** What went wrong preparing them, once, until dismissed. */
   readonly preparingProblem?: string;
   /** Context-window usage of the tab's agent session. `estimated` marks
-   *  a client-side approximation (no `usage_update` from the agent). */
+   *  a client-side approximation (no `usage_update` from the agent);
+   *  `provisional` marks an agent report whose `size` is the adapter's
+   *  known placeholder, corrected when the first turn completes — the
+   *  `used` figure is real either way. */
   readonly usage?: {
     readonly used: number;
     readonly size: number;
     readonly estimated?: boolean;
+    readonly provisional?: boolean;
   };
   /**
    * A model/effort change the user made mid-conversation, held back
@@ -182,10 +194,7 @@ export const defaultSettings: AppSettings = {
   defaultEffort: {},
   commandConfigs: {},
   mcpServers: [],
-  // 0.90, not 0.85: compacting costs a full pass over the context and a
-  // cache re-write on the turn after, so firing early spends money to
-  // save money. Matches the default Zed ships.
-  autoCompactThreshold: 0.9,
+  autoCompactThreshold: DEFAULT_AUTO_COMPACT_THRESHOLD,
   autoCompact: "compact",
   theme: "mota-dark",
   zoomLevel: DEFAULT_ZOOM_LEVEL,
@@ -433,10 +442,12 @@ export function reduce(state: AppState, action: Action): AppState {
       }));
 
     case "tab/modelChanged":
-      return mapTab(state, action.tabId, (tab) => ({
-        ...tab,
-        project: { ...tab.project, model: action.model.trim() || undefined },
-      }));
+      return mapTab(state, action.tabId, (tab) =>
+        usageReseededForModel({
+          ...tab,
+          project: { ...tab.project, model: action.model.trim() || undefined },
+        }),
+      );
 
     case "tab/effortChanged":
       return mapTab(state, action.tabId, (tab) => ({
@@ -451,7 +462,13 @@ export function reduce(state: AppState, action: Action): AppState {
       }));
 
     case "tab/pendingSpecApplied":
-      return mapTab(state, action.tabId, applyPendingSpec);
+      return mapTab(state, action.tabId, (tab) => {
+        // An effort-only deferral stays on the same model, so its
+        // context window — and any reported usage — is still valid.
+        const modelChanged = tab.pendingSpec?.model !== undefined;
+        const applied = applyPendingSpec(tab);
+        return modelChanged ? usageReseededForModel(applied) : applied;
+      });
 
     case "tab/pendingSpecDiscarded":
       return mapTab(state, action.tabId, ({ pendingSpec: _, ...tab }) => tab);
@@ -515,12 +532,19 @@ export function reduce(state: AppState, action: Action): AppState {
       }));
 
     case "tab/usageUpdated":
+      // `provisional` is derived here, not carried on the action: every
+      // path that reports usage (live turn, history replay) gets the
+      // same verdict on whether the size is the adapter's placeholder.
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         usage: {
           used: action.used,
           size: action.size,
           ...(action.estimated ? { estimated: true } : {}),
+          ...(!action.estimated &&
+          isProvisionalContextSize(tab.project.provider, tab.project.model, action.size)
+            ? { provisional: true }
+            : {}),
         },
       }));
 
@@ -825,6 +849,25 @@ function deferredSpec(
     ...(differs(merged.effort, tab.project.effort) ? { effort: merged.effort } : {}),
   };
   return "model" in pending || "effort" in pending ? pending : undefined;
+}
+
+/**
+ * A model change moves the tab to a different context window, so an
+ * agent-reported size from the OLD model must not linger as the gauge's
+ * — and auto-compact's — denominator. Downgraded to an estimate rather
+ * than cleared: `used` is still the best signal available, and the
+ * respawned agent's first real `usage_update` replaces it wholesale.
+ */
+function usageReseededForModel(tab: TabState): TabState {
+  if (!tab.usage) return tab;
+  return {
+    ...tab,
+    usage: {
+      used: tab.usage.used,
+      size: contextWindowFor(tab.project.provider, tab.project.model),
+      estimated: true,
+    },
+  };
 }
 
 /** Fold a pending model/effort into the project and clear it. */

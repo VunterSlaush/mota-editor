@@ -129,6 +129,22 @@ describe("RestoreWorkspace settings", () => {
     expect(state.settings.worktrees.provisioning).toEqual(provisioning);
   });
 
+  it("clamps a corrupt auto-compact threshold into the usable range", async () => {
+    // 0 would compact on every turn, 1.5 would never compact at all — a
+    // hand-edited or corrupt file must not install either behavior.
+    const floored = await restore({
+      ...EMPTY,
+      settings: { autoCompactThreshold: 0 },
+    });
+    expect(floored.settings.autoCompactThreshold).toBe(0.5);
+
+    const ceilinged = await restore({
+      ...EMPTY,
+      settings: { autoCompactThreshold: 1.5 },
+    });
+    expect(ceilinged.settings.autoCompactThreshold).toBe(0.95);
+  });
+
   it("leaves the state alone when there is no workspace file at all", async () => {
     const state = await restore(null);
     expect(state.settings).toEqual(defaultSettings);

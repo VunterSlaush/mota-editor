@@ -1,10 +1,11 @@
+import { formatTokens } from "../../core/entities/tokens";
+import type { TabState } from "../../core/state/appState";
+
 const RADIUS = 7;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 interface Props {
-  usage:
-    | { readonly used: number; readonly size: number; readonly estimated?: boolean }
-    | undefined;
+  usage: TabState["usage"];
   /** Fraction at which the app auto-compacts (colors the ring). */
   threshold: number;
 }
@@ -29,7 +30,7 @@ export function ContextGauge({ usage, threshold }: Props) {
     <span
       className="context-gauge"
       role="img"
-      title={`${usage.estimated ? "≈ estimated — " : ""}Context: ${percent}% used (${format(usage.used)} of ${format(usage.size)} tokens). Auto-compacts at ${Math.round(threshold * 100)}%.`}
+      title={`${qualifier(usage)}Context: ${percent}% used (${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens). Auto-compacts at ${Math.round(threshold * 100)}%.`}
       aria-label={`Context ${percent} percent used`}
     >
       {/* Decorative: the accessible name lives on the wrapper above. */}
@@ -59,6 +60,9 @@ export function ContextGauge({ usage, threshold }: Props) {
   );
 }
 
-function format(tokens: number): string {
-  return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
+/** How much the max can be trusted, spelled out where the number is. */
+function qualifier(usage: NonNullable<TabState["usage"]>): string {
+  if (usage.estimated) return "≈ estimated — ";
+  if (usage.provisional) return "≈ provisional window, confirmed after the first turn — ";
+  return "";
 }

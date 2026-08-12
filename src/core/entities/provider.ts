@@ -10,9 +10,9 @@ export interface ProviderDescriptor {
   readonly vendor: string;
   /** Whether the provider can continue a previous conversation turn. */
   readonly supportsResume: boolean;
-  /** Typical context window (tokens) of the provider's default model —
-   *  the denominator for ESTIMATED usage when the agent reports none.
-   *  Deliberately conservative; real `usage_update`s always win. */
+  /** Context window (tokens) of the provider's DEFAULT model — the
+   *  fallback when `contextWindowFor` has no per-model entry (verified
+   *  against vendor docs 2026-08). Real `usage_update`s always win. */
   readonly contextWindow: number;
 }
 
@@ -22,14 +22,14 @@ export const PROVIDERS: readonly ProviderDescriptor[] = [
     displayName: "Claude",
     vendor: "Anthropic",
     supportsResume: true,
-    contextWindow: 200_000,
+    contextWindow: 1_000_000,
   },
   {
     id: "codex",
     displayName: "ChatGPT (Codex)",
     vendor: "OpenAI",
     supportsResume: true,
-    contextWindow: 200_000,
+    contextWindow: 400_000,
   },
   {
     id: "gemini",
@@ -69,6 +69,73 @@ export const MODEL_SUGGESTIONS: Readonly<Record<ProviderId, readonly string[]>> 
     "gemini-2.5-flash",
   ],
 };
+
+interface ContextWindowEntry {
+  readonly provider: ProviderId;
+  /** Substring matched against the lowercased model id; first match
+   *  wins, so more specific entries must precede their prefixes. */
+  readonly match: string;
+  readonly tokens: number;
+}
+
+/**
+ * Models whose window differs from their provider's default (verified
+ * against vendor docs 2026-08): every current Claude line is 1M except
+ * Haiku; GPT-5.x is 400K across the family; every current Gemini is 1M,
+ * so it needs no rows.
+ */
+const MODEL_CONTEXT_WINDOWS: readonly ContextWindowEntry[] = [
+  { provider: "claude", match: "haiku", tokens: 200_000 },
+  { provider: "codex", match: "gpt-5", tokens: 400_000 },
+];
+
+/**
+ * The context window (tokens) for a model on a provider — the
+ * denominator for ESTIMATED usage when the agent reports none.
+ * `undefined` or empty model means the provider default. Real
+ * `usage_update`s always win; this only feeds the estimate path.
+ */
+export function contextWindowFor(
+  provider: ProviderId,
+  model: string | undefined,
+): number {
+  const target = model?.trim().toLowerCase();
+  if (target) {
+    const entry = MODEL_CONTEXT_WINDOWS.find(
+      (e) => e.provider === provider && target.includes(e.match),
+    );
+    if (entry) return entry.tokens;
+  }
+  return providerById(provider).contextWindow;
+}
+
+/** What the Claude ACP adapter reports as `usage_update.size` for a
+ *  fresh session before any turn has run (`DEFAULT_CONTEXT_WINDOW` in
+ *  @agentclientprotocol/claude-agent-acp). */
+const CLAUDE_ADAPTER_SEED_WINDOW = 200_000;
+
+/**
+ * Whether an agent-reported context size is a PLACEHOLDER rather than
+ * the session's confirmed window.
+ *
+ * The Claude adapter seeds a fresh session's `size` with 200k and only
+ * learns the authoritative window when the first turn completes. A
+ * report matching that signature — exactly the seed, on a model whose
+ * window is known to be larger — is trustworthy in `used` but not in
+ * `size`, and displays should say so instead of announcing a full-looking
+ * gauge that quintuples moments later.
+ */
+export function isProvisionalContextSize(
+  provider: ProviderId,
+  model: string | undefined,
+  size: number,
+): boolean {
+  return (
+    provider === "claude" &&
+    size === CLAUDE_ADAPTER_SEED_WINDOW &&
+    contextWindowFor(provider, model) > size
+  );
+}
 
 /**
  * Reasoning-effort levels per provider, in each vendor's own vocabulary

@@ -1,6 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { COST_PRESETS, matchingCostPreset } from "./agentSettings";
+import {
+  COST_PRESETS,
+  clampAutoCompactThreshold,
+  DEFAULT_AUTO_COMPACT_THRESHOLD,
+  MAX_AUTO_COMPACT_THRESHOLD,
+  MIN_AUTO_COMPACT_THRESHOLD,
+  matchingCostPreset,
+} from "./agentSettings";
 import { EFFORT_OPTIONS, MODEL_SUGGESTIONS, PROVIDERS } from "./provider";
+
+describe("clampAutoCompactThreshold", () => {
+  it("passes a value inside the usable range through untouched", () => {
+    expect(clampAutoCompactThreshold(0.6)).toBe(0.6);
+    expect(clampAutoCompactThreshold(DEFAULT_AUTO_COMPACT_THRESHOLD)).toBe(
+      DEFAULT_AUTO_COMPACT_THRESHOLD,
+    );
+  });
+
+  it("pulls a corrupt zero up to the floor instead of compacting every turn", () => {
+    expect(clampAutoCompactThreshold(0)).toBe(MIN_AUTO_COMPACT_THRESHOLD);
+  });
+
+  it("pulls a value above one down to the ceiling instead of never compacting", () => {
+    expect(clampAutoCompactThreshold(1.5)).toBe(MAX_AUTO_COMPACT_THRESHOLD);
+  });
+
+  it("falls back to the default when the value is not a number at all", () => {
+    expect(clampAutoCompactThreshold(Number.NaN)).toBe(DEFAULT_AUTO_COMPACT_THRESHOLD);
+  });
+});
 
 describe("COST_PRESETS", () => {
   it("names a model and effort for every provider", () => {

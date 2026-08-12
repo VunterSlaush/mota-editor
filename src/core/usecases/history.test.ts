@@ -327,7 +327,9 @@ describe("SessionHistory", () => {
     expect(tool.toolCall?.status).toBe("completed");
     expect(tool.toolCall?.content).toEqual([{ type: "text", text: "42 passed" }]);
     expect(tab.messages[3].error?.context).toBe("agent-exited");
-    expect(tab.usage).toEqual({ used: 1200, size: 200000 });
+    // 200k on a 1M-window model is the adapter's placeholder size, so
+    // the replayed usage carries the provisional mark too.
+    expect(tab.usage).toEqual({ used: 1200, size: 200000, provisional: true });
   });
 
   it("startNew ends the backend session, resets state, and re-warms", async () => {

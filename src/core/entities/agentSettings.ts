@@ -91,6 +91,28 @@ export const AUTO_COMPACT_POLICIES: readonly OptionDescriptor<AutoCompactPolicy>
   },
 ];
 
+/** Below this compaction would thrash. */
+export const MIN_AUTO_COMPACT_THRESHOLD = 0.5;
+/** Above this it fires too late to leave room for the compact turn. */
+export const MAX_AUTO_COMPACT_THRESHOLD = 0.95;
+/** 0.90, not 0.85: compacting costs a full pass over the context and a
+ *  cache re-write on the turn after, so firing early spends money to
+ *  save money. Matches the default Zed ships. */
+export const DEFAULT_AUTO_COMPACT_THRESHOLD = 0.9;
+
+/**
+ * A threshold inside the usable range. A corrupt persisted value would
+ * otherwise be catastrophic in both directions: 0 compacts on every
+ * turn, anything above 1 never compacts at all.
+ */
+export function clampAutoCompactThreshold(fraction: number): number {
+  if (!Number.isFinite(fraction)) return DEFAULT_AUTO_COMPACT_THRESHOLD;
+  return Math.min(
+    MAX_AUTO_COMPACT_THRESHOLD,
+    Math.max(MIN_AUTO_COMPACT_THRESHOLD, fraction),
+  );
+}
+
 export type CostPresetId = "economy" | "balanced" | "max";
 
 /** The model and effort a preset sets, per provider. */
