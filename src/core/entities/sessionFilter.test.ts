@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import { filterSessions, matchedKeyword, scopeCounts } from "./sessionFilter";
 
 const OWN = { title: "Fix the parser" };
-const POLISH = { title: "Tidy the sidebar", from: { label: "feature/polish" } };
-const DOCS = { title: "Write the ADR", from: { label: "docs" } };
+const POLISH = {
+  title: "Tidy the sidebar",
+  from: { label: "feature/polish", elsewhere: true },
+};
+const DOCS = { title: "Write the ADR", from: { label: "docs", elsewhere: true } };
 const ALL = [OWN, POLISH, DOCS];
+/** A worktree's own session, seen from that worktree's tab: it names its
+ *  checkout (the badge does) but it is still "this folder". */
+const HERE = { title: "Tidy the sidebar", from: { label: "feature/polish" } };
 
 describe("filterSessions", () => {
   it("keeps everything when nothing is typed or toggled", () => {
@@ -25,6 +31,11 @@ describe("filterSessions", () => {
 
   it("narrows to the worktrees' sessions", () => {
     expect(filterSessions(ALL, "", "worktrees")).toEqual([POLISH, DOCS]);
+  });
+
+  it("counts a worktree's own sessions as this folder's, not elsewhere's", () => {
+    expect(filterSessions([OWN, HERE], "", "own")).toEqual([OWN, HERE]);
+    expect(filterSessions([OWN, HERE], "", "worktrees")).toEqual([]);
   });
 
   it("applies the scope and the text together", () => {
@@ -84,6 +95,10 @@ describe("matchedKeyword", () => {
 describe("scopeCounts", () => {
   it("counts each side, so the toggles can say how much they hide", () => {
     expect(scopeCounts(ALL)).toEqual({ all: 3, own: 1, worktrees: 2 });
+  });
+
+  it("leaves the toggles nothing to offer on a worktree's own tab", () => {
+    expect(scopeCounts([HERE, HERE])).toEqual({ all: 2, own: 2, worktrees: 0 });
   });
 
   it("counts an empty list without inventing anything", () => {

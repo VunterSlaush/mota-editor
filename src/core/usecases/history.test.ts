@@ -701,6 +701,8 @@ describe("SessionHistory", () => {
       expect(listing.sessions[0].from).toEqual({
         path: "/repo-worktrees/polish",
         label: "feature/polish",
+        worktree: true,
+        elsewhere: true,
       });
       expect(listing.sessions[1].from).toBeUndefined();
     });
@@ -734,10 +736,60 @@ describe("SessionHistory", () => {
 
       const listing = await history.list("t2");
 
-      // Its own folder's transcript, untagged — and never the main
-      // checkout's, which is the tab the whole-repository view lives on.
+      // Its own folder's transcript, and never the main checkout's —
+      // the whole-repository view is what the main tab is for.
       expect(listing.sessions.map((s) => s.id)).toEqual(["w1"]);
-      expect(listing.sessions[0].from).toBeUndefined();
+      // Badged all the same: it WAS had in a worktree, which is true
+      // wherever the row is listed. But it is not elsewhere, so it opens
+      // right here and the scope toggles count it as this folder's.
+      expect(listing.sessions[0].from).toEqual({
+        path: "/repo-worktrees/polish",
+        label: "polish",
+        worktree: true,
+        elsewhere: false,
+      });
+    });
+
+    it("names a worktree tab's own sessions by its branch once git has said", async () => {
+      const { store, transcripts, history } = withWorktree();
+      store.dispatch({
+        type: "tab/opened",
+        project: newProject("t2", "/repo-worktrees/polish", DEFAULTS, "/repo"),
+      });
+      store.dispatch({
+        type: "tab/branchUpdated",
+        tabId: "t2",
+        branch: "feature/polish",
+      });
+      transcripts.elsewhere.set("/repo-worktrees/polish", [
+        { id: "w1", title: "in the worktree", savedAt: 500, provider: "claude" },
+      ]);
+
+      const listing = await history.list("t2");
+
+      expect(listing.sessions[0].from?.label).toBe("feature/polish");
+    });
+
+    it("opens a worktree tab's own session in place, not in a new tab", async () => {
+      const { store, worktrees, transcripts, history } = withWorktree();
+      store.dispatch({
+        type: "tab/opened",
+        project: newProject("t2", "/repo-worktrees/polish", DEFAULTS, "/repo"),
+      });
+      transcripts.transcripts.set("w1", {
+        id: "w1",
+        title: "in the worktree",
+        savedAt: 500,
+        provider: "claude",
+        messages: [{ id: "m1", role: "user", text: "hello from the worktree" }],
+      });
+      const own = (await history.list("t2")).sessions[0];
+
+      await history.open("t2", own);
+
+      expect(worktrees.opened).toEqual([]);
+      expect(store.getState().tabs).toHaveLength(2);
+      expect(store.getState().tabs[1].historySessionId).toBe("w1");
     });
 
     it("keeps the worktrees' rows when the agent's listing lands", async () => {

@@ -8,9 +8,11 @@ import {
   toolMessage,
 } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
+import { projectNameFromPath } from "../entities/project";
 import { samePath } from "../entities/worktree";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
+import type { TabState } from "../state/appState";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import { startNewChat } from "./startNewChat";
@@ -27,8 +29,10 @@ export interface HistoryItem extends TranscriptMeta {
    */
   readonly local: boolean;
   /**
-   * The repository's OTHER checkout this session was had in. Absent for
-   * the tab's own folder, which is every row on a worktree's own tab.
+   * The checkout this session was had in, whenever there is something
+   * worth saying about it — it is a worktree, or it is not this tab's,
+   * or both. Absent only for a main checkout's own sessions, which are
+   * the unremarkable case.
    *
    * A conversation belongs to the repository, not to the folder git
    * happened to lay it out in: work started in a worktree is the same
@@ -38,11 +42,26 @@ export interface HistoryItem extends TranscriptMeta {
   readonly from?: SessionOrigin;
 }
 
-/** Where a session that is not this tab's own was had. */
+/** The checkout a session was had in. */
 export interface SessionOrigin {
+  /** Its folder — where the transcript lives, and what deletes it. */
   readonly path: string;
-  /** The worktree's branch, or its folder when the HEAD is detached. */
+  /** Its branch, or its folder when the HEAD is detached. */
   readonly label: string;
+  /**
+   * A linked worktree rather than the repository's main checkout. This
+   * is what the badge says, and it is a fact about the session — true
+   * on a worktree's own tab as much as on the main checkout that
+   * borrowed the row, because it was a worktree either way.
+   */
+  readonly worktree: boolean;
+  /**
+   * Not the tab the panel is being shown from: opening this row has to
+   * open or activate another tab first, and deleting it reaches into
+   * another folder. Relative, unlike `worktree` — which is why the two
+   * are separate answers rather than one flag doing both jobs badly.
+   */
+  readonly elsewhere: boolean;
 }
 
 /**
@@ -188,13 +207,35 @@ export class SessionHistory {
       this.transcriptStore.list(tab.project.path).catch(() => []),
       this.listWorktreeSessions(tabId),
     ]);
+    const own = this.ownOrigin(tab);
     if (onRefresh) void this.refreshFromAgent(tabId, local, elsewhere, onRefresh);
     return {
       native: false,
       sessions: byNewest([
-        ...local.map((m) => ({ ...m, native: false, local: true })),
+        ...local.map((m) => ({ ...m, native: false, local: true, ...own })),
         ...elsewhere,
       ]),
+    };
+  }
+
+  /**
+   * What this tab's OWN sessions say about where they happened: nothing
+   * on a main checkout, and "this worktree" on a worktree's tab.
+   *
+   * A session had in a worktree was had in a worktree wherever it is
+   * being listed. Saying so only on the tab that borrowed the row would
+   * make the badge mean "somewhere else" rather than "in a worktree",
+   * and leave a worktree's own history unable to say what it is.
+   */
+  private ownOrigin(tab: TabState): { from?: SessionOrigin } {
+    if (!tab.project.worktreeOf) return {};
+    return {
+      from: {
+        path: tab.project.path,
+        label: tab.branch || projectNameFromPath(tab.project.path),
+        worktree: true,
+        elsewhere: false,
+      },
     };
   }
 
@@ -218,7 +259,12 @@ export class SessionHistory {
     const lists = await Promise.all(
       others.map(async (worktree) => {
         const metas = await this.transcriptStore.list(worktree.path).catch(() => []);
-        const from = { path: worktree.path, label: originLabel(worktree) };
+        const from: SessionOrigin = {
+          path: worktree.path,
+          label: originLabel(worktree),
+          worktree: !worktree.main,
+          elsewhere: true,
+        };
         return metas.map((m) => ({ ...m, native: false, local: true, from }));
       }),
     );
@@ -381,7 +427,9 @@ export class SessionHistory {
   async open(tabId: string, item: HistoryItem): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab || tab.busy) return;
-    if (item.from) {
+    // Only a row from ANOTHER checkout travels. This tab's own sessions
+    // open here, badge or no badge — on a worktree's tab they carry one.
+    if (item.from?.elsewhere) {
       await this.openInWorktree(tabId, item, item.from);
       return;
     }

@@ -240,11 +240,11 @@ function SessionRow({
             {theme}
           </span>
         )}
-        {/* Which checkout this conversation was had in. Only ever on the
-            main checkout's tab: a worktree lists its own and needs no
-            badge to say whose they are. */}
-        {session.from && (
-          <span className="history__worktree">
+        {/* That this conversation happened in a worktree is true wherever
+            the row is listed — on the worktree's own tab as much as on
+            the main checkout that borrowed it. */}
+        {session.from?.worktree && (
+          <span className="history__worktree" title={session.from.path}>
             <GitFork size={10} aria-hidden="true" />
             {session.from.label}
           </span>
@@ -276,9 +276,8 @@ function sessionTitle(session: HistoryItem): string {
     session.messageCount !== undefined
       ? `${session.messageCount} messages · ${session.provider}`
       : session.provider;
-  return session.from
-    ? `${counted}\nIn the worktree ${session.from.path}\nOpens that worktree's tab`
-    : counted;
+  if (!session.from?.elsewhere) return counted;
+  return `${counted}\nIn the worktree ${session.from.path}\nOpens that worktree's tab`;
 }
 
 function formatWhen(savedAt: number): string {

@@ -15,10 +15,12 @@ export type SessionScope = "all" | "own" | "worktrees";
 export interface FilterableSession {
   readonly title: string;
   /**
-   * The other checkout this session belongs to. Absent means the tab's
-   * own folder — the distinction the scope toggles are made of.
+   * The checkout this session was had in, when there is something to say
+   * about it. `elsewhere` — not its mere presence — is what the scope
+   * toggles split on: a worktree's own sessions name their checkout too,
+   * and they are still "this folder" while you are standing in it.
    */
-  readonly from?: { readonly label: string };
+  readonly from?: { readonly label: string; readonly elsewhere?: boolean };
   /**
    * What the conversation was about, most frequent term first. Absent
    * until the index has been built, which is why every match here is an
@@ -66,13 +68,13 @@ export function matchedKeyword(
 }
 
 export function scopeCounts(sessions: readonly FilterableSession[]): ScopeCounts {
-  const worktrees = sessions.filter((session) => session.from !== undefined).length;
-  return { all: sessions.length, own: sessions.length - worktrees, worktrees };
+  const elsewhere = sessions.filter((session) => session.from?.elsewhere).length;
+  return { all: sessions.length, own: sessions.length - elsewhere, worktrees: elsewhere };
 }
 
 function inScope(session: FilterableSession, scope: SessionScope): boolean {
-  if (scope === "own") return session.from === undefined;
-  if (scope === "worktrees") return session.from !== undefined;
+  if (scope === "own") return !session.from?.elsewhere;
+  if (scope === "worktrees") return session.from?.elsewhere === true;
   return true;
 }
 
