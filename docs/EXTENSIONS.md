@@ -139,6 +139,7 @@ themed like everything else:
 ```json
 { "view": {
   "emptyText": "Shown when there are no groups — say what to do about it.",
+  "buttons": [ { "id": "login", "label": "Log in" } ],
   "groups": [
     { "title": "In Progress", "items": [
       { "id": "iss-1", "title": "Fix login", "subtitle": "ENG-123",
@@ -151,9 +152,12 @@ themed like everything else:
 ```
 
 Interactions come back as `panel/action` with a host-owned vocabulary of
-two: `"open"` (the item was clicked — answer `{detail}` and the host
-shows a modal) and `"select"` (the item's dropdown changed to `value` —
-answer `{view}` with the updated model). A detail is
+three: `"open"` (the item was clicked — answer `{detail}` and the host
+shows a modal), `"select"` (the item's dropdown changed to `value` —
+answer `{view}` with the updated model), and `"button"` (a panel-level
+button was pressed; `itemId` is the button id — for anything slow, like
+a browser sign-in, answer immediately with an interim `{view}` and send
+`panels/refresh` when you are done). A detail is
 `{title, subtitle?, fields: [{label, value}], body?, url?}`; `body` is
 markdown, `url` gets an open-in-browser button (http/https only).
 

@@ -70,6 +70,20 @@ describe("parsePanelView", () => {
     expect(view.groups[0]?.items[0]?.title).toHaveLength(200);
   });
 
+  it("parses panel-level buttons, dropping malformed ones", () => {
+    const view = parsePanelView({
+      buttons: [{ id: "login", label: "Log in with Linear" }, { id: "" }, "junk"],
+    });
+    expect(view.buttons).toEqual([{ id: "login", label: "Log in with Linear" }]);
+  });
+
+  it("caps buttons at five", () => {
+    const view = parsePanelView({
+      buttons: Array.from({ length: 10 }, (_, i) => ({ id: `b${i}`, label: `B${i}` })),
+    });
+    expect(view.buttons).toHaveLength(5);
+  });
+
   it("drops a select without usable options", () => {
     const view = parsePanelView({
       groups: [

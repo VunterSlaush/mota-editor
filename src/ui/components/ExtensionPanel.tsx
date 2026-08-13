@@ -95,6 +95,12 @@ export function ExtensionPanel({ panel, panels }: Props) {
       if (result.view) setView(result.view);
     });
 
+  const pressButton = (buttonId: string) =>
+    run({ action: "button", itemId: buttonId }, (result) => {
+      if (result.view) setView(result.view);
+      if (result.detail) setDetail(result.detail);
+    });
+
   return (
     <aside className="ext-panel">
       <div className="ext-panel__toolbar">
@@ -114,6 +120,21 @@ export function ExtensionPanel({ panel, panels }: Props) {
       {loading && !view && <p className="changes__empty">Loading…</p>}
       {!loading && view && view.groups.length === 0 && (
         <p className="changes__empty">{view.emptyText ?? "Nothing to show."}</p>
+      )}
+      {!loading && view && view.buttons.length > 0 && (
+        <div className="ext-panel__buttons">
+          {view.buttons.map((button) => (
+            <button
+              type="button"
+              key={button.id}
+              className="changes__action"
+              disabled={pendingItemId === button.id}
+              onClick={() => pressButton(button.id)}
+            >
+              {button.label}
+            </button>
+          ))}
+        </div>
       )}
       {view?.groups.map((group) => (
         <section key={group.title} className="ext-panel__group">

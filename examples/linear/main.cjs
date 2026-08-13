@@ -2,15 +2,27 @@
 // Plain Node (18+, for fetch), no dependencies: one JSON object per
 // stdin line in, one per stdout line out (MXP, see docs/EXTENSIONS.md).
 //
-// Setup: put your Linear personal API key (Linear → Settings → API) in
-// <dataDir>/config.json as {"apiKey": "lin_api_…"} — the panel tells
-// you the exact path until you do. LINEAR_API_KEY in the environment
-// works too.
+// Signing in — the "Log in with Linear" button, two flavors:
+// - Default: a browser-assisted key setup. The extension serves a tiny
+//   localhost page with a link to Linear's API-key screen and a paste
+//   box; submitting validates the key and stores it in <dataDir>/config.json.
+// - Full OAuth, when <dataDir>/config.json carries
+//   {"oauth": {"clientId": "…", "clientSecret": "…"}} from a Linear
+//   OAuth application you registered (redirect URL: http://localhost).
+// Either way the panel refreshes itself when the browser round-trip
+// lands (`panels/refresh`). LINEAR_API_KEY in the environment also works.
+const crypto = require("node:crypto");
 const fs = require("node:fs");
+const http = require("node:http");
 const path = require("node:path");
 const readline = require("node:readline");
+const { spawn } = require("node:child_process");
 
 const LINEAR_GRAPHQL = "https://api.linear.app/graphql";
+const LINEAR_OAUTH_AUTHORIZE = "https://linear.app/oauth/authorize";
+const LINEAR_OAUTH_TOKEN = "https://api.linear.app/oauth/token";
+const LINEAR_KEYS_PAGE = "https://linear.app/settings/api";
+const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 /** Linear's state.type values, in board order — our group order. */
 const STATE_TYPE_ORDER = ["triage", "started", "unstarted", "backlog"];
 
@@ -23,6 +35,9 @@ const log = (message) => send({ jsonrpc: "2.0", method: "host/log", params: { me
 let dataDir = "";
 /** issueId → its team's workflow states, cached per process lifetime. */
 let statesByTeam = null;
+/** The one login attempt in flight, or null. */
+let login = null;
+let outgoingId = 1;
 
 // Exiting the moment `shutdown` arrives would drop replies still being
 // built (the host batches stdin) — drain in-flight requests first, with
@@ -63,6 +78,7 @@ async function handle(msg) {
   } else if (msg.method === "ping") {
     reply(msg.id, {});
   } else if (msg.method === "shutdown") {
+    endLogin("shutdown");
     shuttingDown = true;
     setTimeout(() => process.exit(0), 2000).unref();
   } else if (msg.id !== undefined) {
@@ -77,62 +93,316 @@ async function handle(msg) {
 // ---- The panel ----
 
 async function buildView() {
-  const key = apiKey();
-  if (!key) return needsKeyView();
-  const [issues, states] = await Promise.all([fetchAssignedIssues(key), teamStates(key)]);
-  return {
-    groups: groupByState(issues, states),
-    emptyText: "No open issues assigned to you. Enjoy it while it lasts.",
-  };
+  const auth = authHeader();
+  if (!auth) return signInView();
+  try {
+    const [issues, states] = await Promise.all([
+      fetchAssignedIssues(auth),
+      teamStates(auth),
+    ]);
+    return {
+      groups: groupByState(issues, states),
+      emptyText: "No open issues assigned to you. Enjoy it while it lasts.",
+    };
+  } catch (e) {
+    if (e && e.unauthorized) {
+      return signInView("Linear rejected the stored sign-in — log in again.");
+    }
+    throw e;
+  }
 }
 
 async function handleAction(params) {
-  const key = apiKey();
-  if (!key) return { view: needsKeyView() };
   const { action, itemId, value } = params || {};
+  if (action === "button" && itemId === "login") return startLogin();
+  const auth = authHeader();
+  if (!auth) return { view: signInView() };
   if (action === "select" && itemId && value) {
-    await updateIssueState(key, itemId, value);
+    await updateIssueState(auth, itemId, value);
     return { view: await buildView() };
   }
   if (action === "open" && itemId) {
-    return { detail: await issueDetail(key, itemId) };
+    return { detail: await issueDetail(auth, itemId) };
   }
   return {};
 }
 
-function needsKeyView() {
-  const configPath = path.join(dataDir || "<dataDir>", "config.json");
+function signInView(reason) {
   return {
     groups: [],
+    buttons: [{ id: "login", label: "Log in with Linear" }],
     emptyText:
-      `Add your Linear API key to use this panel: create ${configPath} ` +
-      'containing {"apiKey": "lin_api_…"} (key from Linear → Settings → API → ' +
-      "Personal API keys), then hit refresh.",
+      (reason ? `${reason} ` : "") +
+      "Sign in to see your issues — the button opens your browser. " +
+      `(Manual alternative: put {"apiKey": "lin_api_…"} in ${configPath()}.)`,
   };
 }
 
-function apiKey() {
-  if (process.env.LINEAR_API_KEY) return process.env.LINEAR_API_KEY;
+function waitingView() {
+  return {
+    groups: [],
+    buttons: [{ id: "login", label: "Restart browser login" }],
+    emptyText:
+      "Finish signing in inside your browser — this panel refreshes by itself when you are done.",
+  };
+}
+
+// ---- Auth ----
+
+function configPath() {
+  return path.join(dataDir || "<dataDir>", "config.json");
+}
+
+function readConfig() {
   try {
-    const config = JSON.parse(fs.readFileSync(path.join(dataDir, "config.json"), "utf8"));
-    return typeof config.apiKey === "string" && config.apiKey.trim()
-      ? config.apiKey.trim()
-      : null;
+    return JSON.parse(fs.readFileSync(configPath(), "utf8"));
   } catch {
-    return null;
+    return {};
   }
+}
+
+function saveConfig(patch) {
+  const next = { ...readConfig(), ...patch };
+  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+  fs.writeFileSync(configPath(), `${JSON.stringify(next, null, 2)}\n`);
+}
+
+/** The Authorization header value, or null when signed out. Personal
+ *  API keys go raw; OAuth access tokens go as Bearer. */
+function authHeader() {
+  if (process.env.LINEAR_API_KEY) return process.env.LINEAR_API_KEY;
+  const config = readConfig();
+  if (typeof config.accessToken === "string" && config.accessToken.trim()) {
+    return `Bearer ${config.accessToken.trim()}`;
+  }
+  if (typeof config.apiKey === "string" && config.apiKey.trim()) {
+    return config.apiKey.trim();
+  }
+  return null;
+}
+
+function oauthApp() {
+  const oauth = readConfig().oauth;
+  return oauth && typeof oauth.clientId === "string" && typeof oauth.clientSecret === "string"
+    ? oauth
+    : null;
+}
+
+// ---- Browser login ----
+
+function startLogin() {
+  endLogin("restarted");
+  void runLoginFlow().catch((e) => {
+    log(`login failed: ${e && e.stack ? e.stack : e}`);
+    endLogin("failed");
+  });
+  // Reply inside the 30 s action budget; the browser round-trip finishes
+  // on its own time and announces itself with panels/refresh.
+  return { view: waitingView() };
+}
+
+async function runLoginFlow() {
+  const state = crypto.randomBytes(16).toString("hex");
+  const server = http.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = server.address().port;
+  const timer = setTimeout(() => endLogin("timed out"), LOGIN_WINDOW_MS);
+  timer.unref();
+  login = { server, state, timer };
+
+  const app = oauthApp();
+  server.on("request", (request, response) => {
+    void routeLoginRequest(request, response, { state, port, app }).catch((e) => {
+      log(`login request failed: ${e}`);
+      respondHtml(response, 500, page("Something went wrong", String(e)));
+    });
+  });
+
+  if (app) {
+    const redirect = `http://localhost:${port}/callback`;
+    const url =
+      `${LINEAR_OAUTH_AUTHORIZE}?client_id=${encodeURIComponent(app.clientId)}` +
+      `&redirect_uri=${encodeURIComponent(redirect)}` +
+      `&response_type=code&scope=read,write&state=${state}&prompt=consent`;
+    openBrowser(url);
+    log(`OAuth login started on port ${port}`);
+  } else {
+    openBrowser(`http://127.0.0.1:${port}/setup?s=${state}`);
+    log(`browser key setup started on port ${port}`);
+  }
+}
+
+async function routeLoginRequest(request, response, { state, port, app }) {
+  const url = new URL(request.url, `http://127.0.0.1:${port}`);
+
+  if (app && url.pathname === "/callback" && request.method === "GET") {
+    if (url.searchParams.get("state") !== state) {
+      return respondHtml(response, 403, page("Rejected", "State mismatch — try again."));
+    }
+    const code = url.searchParams.get("code");
+    if (!code) {
+      return respondHtml(response, 400, page("Cancelled", "Linear sent no code."));
+    }
+    const token = await exchangeCode(app, code, `http://localhost:${port}/callback`);
+    saveConfig({ accessToken: token });
+    finishLogin(response);
+    return;
+  }
+
+  if (!app && url.pathname === "/setup" && request.method === "GET") {
+    if (url.searchParams.get("s") !== state) {
+      return respondHtml(response, 403, page("Rejected", "Stale link — press the login button again."));
+    }
+    return respondHtml(response, 200, setupForm(state));
+  }
+
+  if (!app && url.pathname === "/save" && request.method === "POST") {
+    const body = await readBody(request);
+    const form = new URLSearchParams(body);
+    if (form.get("s") !== state) {
+      return respondHtml(response, 403, page("Rejected", "Stale form — press the login button again."));
+    }
+    const key = (form.get("key") || "").trim();
+    if (!key) {
+      return respondHtml(response, 200, setupForm(state, "Paste a key first."));
+    }
+    try {
+      await linear(key, "query { viewer { id } }");
+    } catch (e) {
+      return respondHtml(response, 200, setupForm(state, `Linear rejected that key: ${e.message}`));
+    }
+    saveConfig({ apiKey: key });
+    finishLogin(response);
+    return;
+  }
+
+  respondHtml(response, 404, page("Not found", "This little server only does sign-in."));
+}
+
+function finishLogin(response) {
+  respondHtml(
+    response,
+    200,
+    page("Signed in ✓", "You can close this tab — Mota's Linear panel is refreshing itself."),
+  );
+  statesByTeam = null;
+  endLogin("completed");
+  sendPanelsRefresh();
+}
+
+function endLogin(why) {
+  if (!login) return;
+  clearTimeout(login.timer);
+  login.server.close();
+  login = null;
+  log(`login window closed (${why})`);
+}
+
+function sendPanelsRefresh() {
+  outgoingId += 1;
+  send({
+    jsonrpc: "2.0",
+    id: outgoingId,
+    method: "panels/refresh",
+    params: { panelId: "tasks" },
+  });
+}
+
+async function exchangeCode(app, code, redirectUri) {
+  const response = await fetch(LINEAR_OAUTH_TOKEN, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: app.clientId,
+      client_secret: app.clientSecret,
+    }).toString(),
+  });
+  if (!response.ok) {
+    throw new Error(`Token exchange failed (HTTP ${response.status}).`);
+  }
+  const payload = await response.json();
+  if (!payload.access_token) throw new Error("Linear sent no access token.");
+  return payload.access_token;
+}
+
+function openBrowser(url) {
+  if (process.env.MOTA_LINEAR_NO_BROWSER) {
+    log(`would open browser: ${url}`);
+    return;
+  }
+  // rundll32 handles URLs with & reliably; cmd's `start` would need
+  // shell quoting that spawn argv does not provide.
+  const [command, args] =
+    process.platform === "win32"
+      ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
+      : process.platform === "darwin"
+        ? ["open", [url]]
+        : ["xdg-open", [url]];
+  spawn(command, args, { detached: true, stdio: "ignore" }).unref();
+}
+
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 64 * 1024) {
+        reject(new Error("Body too large"));
+        request.destroy();
+      }
+    });
+    request.on("end", () => resolve(body));
+    request.on("error", reject);
+  });
+}
+
+function respondHtml(response, status, html) {
+  response.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+  response.end(html);
+}
+
+function page(title, message) {
+  return `<!doctype html><meta charset="utf-8"><title>${title} · Mota Linear</title>
+<body style="font-family:system-ui;max-width:26rem;margin:14vh auto;line-height:1.5">
+<h2>${title}</h2><p>${message}</p></body>`;
+}
+
+function setupForm(state, notice) {
+  return `<!doctype html><meta charset="utf-8"><title>Connect Linear · Mota</title>
+<body style="font-family:system-ui;max-width:26rem;margin:14vh auto;line-height:1.5">
+<h2>Connect Linear to Mota</h2>
+<ol>
+<li><a href="${LINEAR_KEYS_PAGE}" target="_blank" rel="noreferrer">Open Linear's API settings</a>
+ and create a <b>personal API key</b>.</li>
+<li>Paste it here — it stays on this machine.</li>
+</ol>
+${notice ? `<p style="color:#b00">${notice}</p>` : ""}
+<form method="post" action="/save">
+<input type="hidden" name="s" value="${state}">
+<input type="password" name="key" placeholder="lin_api_…" autofocus
+ style="width:100%;padding:.5rem;font-size:1rem;box-sizing:border-box">
+<button type="submit" style="margin-top:.75rem;padding:.5rem 1.25rem;font-size:1rem">Save</button>
+</form></body>`;
 }
 
 // ---- Linear GraphQL ----
 
-async function linear(key, query, variables) {
+async function linear(auth, query, variables) {
   const response = await fetch(LINEAR_GRAPHQL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: key },
+    headers: { "Content-Type": "application/json", Authorization: auth },
     body: JSON.stringify({ query, variables }),
   });
   if (response.status === 401) {
-    throw new Error("Linear rejected the API key — check config.json.");
+    const unauthorized = new Error("Linear rejected the sign-in.");
+    unauthorized.unauthorized = true;
+    throw unauthorized;
   }
   if (!response.ok) {
     throw new Error(`Linear answered HTTP ${response.status}.`);
@@ -144,9 +414,9 @@ async function linear(key, query, variables) {
   return payload.data;
 }
 
-async function fetchAssignedIssues(key) {
+async function fetchAssignedIssues(auth) {
   const data = await linear(
-    key,
+    auth,
     `query {
       viewer {
         assignedIssues(
@@ -166,10 +436,10 @@ async function fetchAssignedIssues(key) {
   return data.viewer.assignedIssues.nodes;
 }
 
-async function teamStates(key) {
+async function teamStates(auth) {
   if (statesByTeam) return statesByTeam;
   const data = await linear(
-    key,
+    auth,
     `query {
       teams(first: 50) {
         nodes { id states { nodes { id name type position } } }
@@ -187,9 +457,9 @@ async function teamStates(key) {
   return statesByTeam;
 }
 
-async function updateIssueState(key, issueId, stateId) {
+async function updateIssueState(auth, issueId, stateId) {
   const data = await linear(
-    key,
+    auth,
     `mutation($id: String!, $stateId: String!) {
       issueUpdate(id: $id, input: { stateId: $stateId }) { success }
     }`,
@@ -198,9 +468,9 @@ async function updateIssueState(key, issueId, stateId) {
   if (!data.issueUpdate.success) throw new Error("Linear refused the status change.");
 }
 
-async function issueDetail(key, issueId) {
+async function issueDetail(auth, issueId) {
   const data = await linear(
-    key,
+    auth,
     `query($id: String!) {
       issue(id: $id) {
         identifier title description url priorityLabel updatedAt

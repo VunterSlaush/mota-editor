@@ -32,8 +32,16 @@ export interface PanelGroup {
   readonly items: readonly PanelItem[];
 }
 
+/** A panel-level button ("Log in", "New issue") — clicking it comes back
+ *  as a `button` action carrying the id. */
+export interface PanelButton {
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface PanelView {
   readonly groups: readonly PanelGroup[];
+  readonly buttons: readonly PanelButton[];
   /** Shown instead of the list when there are no groups — the
    *  extension's own words ("Add your API key to …"). */
   readonly emptyText?: string;
@@ -64,6 +72,7 @@ const MAX_GROUPS = 20;
 const MAX_ITEMS = 100;
 const MAX_OPTIONS = 50;
 const MAX_FIELDS = 20;
+const MAX_BUTTONS = 5;
 const MAX_TEXT = 200;
 const MAX_SUBTITLE = 400;
 const MAX_BODY = 20_000;
@@ -73,8 +82,17 @@ export function parsePanelView(payload: unknown): PanelView {
   const groups = asArray(view.groups)
     .slice(0, MAX_GROUPS)
     .flatMap((group) => parseGroup(group) ?? []);
+  const buttons = asArray(view.buttons)
+    .slice(0, MAX_BUTTONS)
+    .flatMap((button) => {
+      const entry = asObject(button);
+      const id = optionalText(entry?.id, MAX_TEXT);
+      const label = optionalText(entry?.label, MAX_TEXT);
+      return id && label ? [{ id, label }] : [];
+    });
   return {
     groups,
+    buttons,
     emptyText: optionalText(view.emptyText, MAX_SUBTITLE),
   };
 }

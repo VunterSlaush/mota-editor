@@ -28,9 +28,10 @@ export type ExtensionHostEvent =
     };
 
 /** One user interaction inside a panel (ADR-0013's tiny vocabulary):
- *  `open` — an item was clicked; `select` — its dropdown changed. */
+ *  `open` — an item was clicked; `select` — its dropdown changed;
+ *  `button` — a panel-level button (itemId is the button id). */
 export interface PanelActionRequest {
-  readonly action: "open" | "select";
+  readonly action: "open" | "select" | "button";
   readonly itemId: string;
   readonly value?: string;
 }
