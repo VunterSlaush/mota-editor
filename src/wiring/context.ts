@@ -76,6 +76,7 @@ import {
   SwitchTab,
   UpdateSettings,
 } from "../core/usecases/switchTab";
+import { RecolorTab, RenameTab } from "../core/usecases/tabIdentity";
 import { RemoveWorktree, Worktrees } from "../core/usecases/worktrees";
 
 /**
@@ -90,6 +91,8 @@ export interface AppContext {
   readonly closeProject: CloseProject;
   readonly switchTab: SwitchTab;
   readonly reorderTabs: ReorderTabs;
+  readonly renameTab: RenameTab;
+  readonly recolorTab: RecolorTab;
   readonly selectProvider: SelectProvider;
   readonly selectMode: SelectMode;
   readonly selectPermission: SelectPermission;
@@ -210,6 +213,8 @@ export function createAppContext(): AppContext {
     discardPendingSpec: new DiscardPendingSpec(store),
     selectEffort,
     selectVerbose: new SelectVerbose(store, workspaceStore),
+    renameTab: new RenameTab(store, workspaceStore),
+    recolorTab: new RecolorTab(store, workspaceStore),
     scopeMcpServer: new ScopeMcpServer(store, workspaceStore, agentGateway),
     scopeWorktreeProvisioning: new ScopeWorktreeProvisioning(store, workspaceStore),
     loadGitChanges: new LoadGitChanges(store, gitPort),
