@@ -15,6 +15,7 @@ import {
   toolMessage,
   userMessage,
 } from "../entities/message";
+import { tabLabel } from "../entities/project";
 import { COMPACT_COMMAND, contextWindowFor, providerById } from "../entities/provider";
 import { estimateTokens } from "../entities/tokens";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
@@ -593,7 +594,9 @@ export class SendPrompt {
     }
     void this.notifications
       .turnCompleted(
-        tab.project.name,
+        // What the user calls the tab, which is the whole point of a
+        // notification: which of my tasks just finished?
+        tabLabel(tab.project),
         providerById(tab.project.provider).displayName,
         tabActive,
       )
