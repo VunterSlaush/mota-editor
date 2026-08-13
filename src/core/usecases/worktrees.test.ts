@@ -364,6 +364,47 @@ describe("Worktrees.create", () => {
     expect(store.getState().tabs[1].project.mode).toBe(DEFAULTS.mode);
   });
 
+  it("carries the source tab's colour into the worktree's tab", async () => {
+    const { store, git, worktrees } = setup();
+    store.dispatch({ type: "tab/colorChanged", tabId: "t1", color: "violet" });
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "dev", "new");
+
+    expect(store.getState().tabs[1].project.color).toBe("violet");
+  });
+
+  it("carries the colour even when inheriting agent settings is turned off", async () => {
+    // The toggle governs provider/model/permission — what the AGENT runs.
+    // A grouping colour is not one of those, and a worktree forked from a
+    // task's tab is that task.
+    const { store, git, worktrees } = setup();
+    store.dispatch({ type: "tab/colorChanged", tabId: "t1", color: "violet" });
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        worktrees: { ...defaultSettings.worktrees, inheritFromSourceTab: false },
+      },
+    });
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "dev", "new");
+
+    expect(store.getState().tabs[1].project.color).toBe("violet");
+  });
+
+  it("never carries the source tab's name", async () => {
+    // Two tabs called the same thing is worse than one called nothing.
+    const { store, git, worktrees } = setup();
+    store.dispatch({
+      type: "tab/labelChanged",
+      tabId: "t1",
+      label: "auth rewrite",
+    });
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "dev", "new");
+
+    expect(store.getState().tabs[1].project.label).toBeUndefined();
+  });
+
   it("returns git's error as a message and opens nothing", async () => {
     const { store, git, worktrees } = setup();
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
