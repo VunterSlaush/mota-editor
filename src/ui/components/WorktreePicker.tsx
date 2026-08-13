@@ -1,5 +1,6 @@
 import { FolderSimple, GitFork, Trash } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { type BranchMatches, filterBranches } from "../../core/entities/branch";
 import type { RemovalCheck } from "../../core/entities/worktree";
 import { deriveBranchName } from "../../core/entities/worktree";
 import type {
@@ -9,6 +10,7 @@ import type {
 } from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
+import { branchListHint } from "./branchListHint";
 
 interface Props {
   /** The repo's checkouts, decorated with what's already open. */
@@ -40,10 +42,20 @@ type Row =
   | { readonly kind: "fromCurrent"; readonly base: string; readonly name: string }
   | { readonly kind: "newBranch"; readonly name: string };
 
+/** The rows to draw, plus what the branch section left out of them. */
+interface PickerRows {
+  readonly rows: Row[];
+  readonly branchMatches: BranchMatches<GitBranch>;
+}
+
 /**
  * UI — worktree picker, a sibling of BranchPicker: search on top, one
  * keyboard-navigable list below. Existing worktrees open as tabs; the
  * rows after them create a worktree first, then open it.
+ *
+ * It borrows the branch picker's bounded list as well as its frame: the
+ * branches without a worktree are the same thousands of refs, and
+ * rendering a row for each of them froze the app on open.
  */
 export function WorktreePicker({
   loadWorktrees,
@@ -62,6 +74,7 @@ export function WorktreePicker({
   const [error, setError] = useState<string | null>(null);
   const [armed, setArmed] = useState<Armed | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => inputRef.current?.focus(), []);
 
@@ -77,8 +90,20 @@ export function WorktreePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rows = buildRows(worktrees ?? [], branches, currentBranch, query);
+  const { rows, branchMatches } = useMemo(
+    () => buildRows(worktrees ?? [], branches, currentBranch, query),
+    [worktrees, branches, currentBranch, query],
+  );
+  const hint = branchListHint(branchMatches);
   const mainPath = worktrees?.find((w) => w.main)?.path ?? worktrees?.[0]?.path ?? "";
+
+  // Arrow keys walk past the bottom of the list; without this the
+  // selection ends up below the fold and Enter looks random.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector(".branch-picker__item--selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
   /** First click asks git what it would cost; the second click removes. */
   const arm = async (path: string) => {
@@ -156,7 +181,7 @@ export function WorktreePicker({
           }}
           onKeyDown={onKeyDown}
         />
-        <div className="branch-picker__list" role="listbox">
+        <div className="branch-picker__list" role="listbox" ref={listRef}>
           {worktrees === null && (
             <div className="branch-picker__empty">Loading worktrees…</div>
           )}
@@ -210,6 +235,7 @@ export function WorktreePicker({
           })}
           {error && <div className="worktree-picker__error">{error}</div>}
         </div>
+        {hint && <p className="branch-picker__hint">{hint}</p>}
       </div>
     </div>
   );
@@ -219,13 +245,16 @@ export function WorktreePicker({
  * The selectable rows for the current query: existing worktrees first,
  * then branches that don't have one yet, then — when the query names no
  * known branch — creating that branch fresh.
+ *
+ * Only the branch section is bounded, by `filterBranches`: worktrees are
+ * countable by hand, branches are not.
  */
 function buildRows(
   worktrees: readonly WorktreeItem[],
   branches: readonly GitBranch[],
   currentBranch: string,
   query: string,
-): Row[] {
+): PickerRows {
   const q = query.trim().toLowerCase();
   const matches = (text: string) => text.toLowerCase().includes(q);
 
@@ -246,14 +275,18 @@ function buildRows(
     });
   }
 
-  rows.push(
-    ...branches
-      .filter((b) => !withWorktree.has(b.name) && matches(b.name))
-      .map((branch) => ({ kind: "branch", branch }) as Row),
+  // A branch that already has a worktree is offered by that worktree's
+  // own row above, so it never reaches the branch section.
+  const branchMatches = filterBranches(
+    branches.filter((b) => !withWorktree.has(b.name)),
+    query,
   );
+  rows.push(...branchMatches.shown.map((branch) => ({ kind: "branch", branch }) as Row));
 
   const name = query.trim();
   const known = (text: string) => text.toLowerCase() === name.toLowerCase();
+  // Every branch is consulted here, shown or not: offering to create one
+  // that already exists is a promise git would refuse.
   if (
     validBranchName(name) &&
     !branches.some((b) => known(b.name)) &&
@@ -261,7 +294,7 @@ function buildRows(
   ) {
     rows.push({ kind: "newBranch", name });
   }
-  return rows;
+  return { rows, branchMatches };
 }
 
 /** Enough validation for a picker; git has the final word. */

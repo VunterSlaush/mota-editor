@@ -351,6 +351,9 @@ export class DemoGit implements GitPort {
   async remoteUrl(): Promise<string> {
     return "git@github.com:mota/mota-editor.git";
   }
+  async currentBranch(): Promise<string> {
+    return "main";
+  }
   async upstream(): Promise<GitDivergence> {
     return { behind: 1, ahead: 2 };
   }
@@ -553,6 +556,9 @@ export class DemoTranscriptStore implements TranscriptStore {
         messageCount: t.messages.length,
       }))
       .sort((a, b) => b.savedAt - a.savedAt);
+  }
+  async listExternal() {
+    return []; // no vendor store exists in a browser
   }
   async load(_p: string, id: string) {
     return this.transcripts.get(id) ?? null;

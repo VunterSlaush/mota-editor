@@ -1383,6 +1383,24 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 },
             );
         }
+        Some(acp::Incoming::UnanswerablePermission { id, title }) => {
+            // Nothing to offer the user, so nothing they could ever
+            // answer. Cancelling frees the agent — and the turn with it —
+            // where drawing an option-less card would have left both
+            // waiting on each other until the app restarted.
+            let _ = session
+                .write_message(&acp::permission_cancelled_response(id))
+                .await;
+            runner::emit(
+                app,
+                tab_id,
+                &AgentEvent::Notice {
+                    message: format!(
+                        "The agent asked for approval to {title}, but offered no options Mota could show, so the request was cancelled."
+                    ),
+                },
+            );
+        }
         Some(acp::Incoming::UnsupportedElicitation { id }) => {
             // Declining (not erroring) lets the agent carry on without the
             // answer instead of failing the whole turn.

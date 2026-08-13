@@ -1,7 +1,9 @@
 import { FolderSimple, GitFork } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
 import { useDragReorder } from "../useDragReorder";
+import { tabDensity } from "./tabDensity";
 
 interface Props {
   tabs: readonly TabState[];
@@ -22,10 +24,12 @@ export function TabBar({
   onOpenProject,
 }: Props) {
   const drag = useDragReorder(onReorder, ".tab");
+  const strip = useRef<HTMLElement>(null);
+  const density = tabDensity(useWidthOf(strip), tabs.length);
 
   return (
     // The header itself drags the window; the tabs on it drag each other.
-    <header className="tab-bar" data-tauri-drag-region>
+    <header className={`tab-bar tab-bar--${density}`} data-tauri-drag-region ref={strip}>
       {tabs.map((tab) => {
         const id = tab.project.id;
         const isActive = id === activeTabId;
@@ -65,6 +69,10 @@ export function TabBar({
               />
             )}
             <span className="tab__name">{tab.project.name}</span>
+            {/* Which checkout this is. With worktrees two tabs of one
+                repository differ by nothing else, so it earns its width
+                — and gives it back first when the strip runs short. */}
+            {tab.branch && <span className="tab__branch">{tab.branch}</span>}
             <button
               type="button"
               className="tab__close"
@@ -89,4 +97,24 @@ export function TabBar({
       </button>
     </header>
   );
+}
+
+/**
+ * The element's width, kept current as the window resizes. Zero until
+ * the first measurement, which `tabDensity` reads as "not known yet".
+ */
+function useWidthOf(element: React.RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const node = element.current;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setWidth(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [element]);
+
+  return width;
 }

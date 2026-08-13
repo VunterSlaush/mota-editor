@@ -1,6 +1,8 @@
 //! Version-control status — pure parsing of `git status --porcelain`
 //! output. The shell runs git; this module only interprets the text.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 /// One changed file, as git reports it.
@@ -113,13 +115,22 @@ pub struct Branch {
 /// output: `*<TAB>short<TAB>refs/...` for the current branch, a space
 /// instead of `*` otherwise.
 ///
-/// Locals sort before remotes (refs/heads < refs/remotes), so a remote
-/// branch already checked out locally dedupes against the local entry.
-/// Remote entries keep the branch's own name — `origin/fix-login` shows
-/// (and checks out) as `fix-login`, which git resolves to a new tracking
+/// Locals come out first and remotes dedupe against them by name,
+/// whatever order the refs arrived in — the caller sorts by commit date,
+/// which interleaves `refs/heads` and `refs/remotes` freely. Remote
+/// entries keep the branch's own name — `origin/fix-login` shows (and
+/// checks out) as `fix-login`, which git resolves to a new tracking
 /// branch. `origin/HEAD` is a pointer, not a branch, and is skipped.
+///
+/// A well-fetched repository has thousands of remote refs, so the
+/// name-against-name comparison is a set: a scan per ref made opening
+/// the branch picker quadratic in the size of the remote.
 pub fn parse_branches(output: &str) -> Vec<Branch> {
-    let mut branches: Vec<Branch> = Vec::new();
+    let mut locals: Vec<Branch> = Vec::new();
+    let mut remotes: Vec<Branch> = Vec::new();
+    let mut local_names: HashSet<String> = HashSet::new();
+    let mut remote_names: HashSet<String> = HashSet::new();
+
     for line in output.lines() {
         let mut parts = line.splitn(3, '\t');
         let head = parts.next().unwrap_or_default().trim();
@@ -130,22 +141,24 @@ pub fn parse_branches(output: &str) -> Vec<Branch> {
         }
         if let Some(rest) = full.strip_prefix("refs/remotes/") {
             let Some((_, name)) = rest.split_once('/') else { continue };
-            if name == "HEAD" || name.is_empty() {
+            // The same branch on two remotes is one row; first one wins.
+            if name == "HEAD" || name.is_empty() || !remote_names.insert(name.to_owned()) {
                 continue;
             }
-            if branches.iter().any(|b| b.name == name) {
-                continue;
-            }
-            branches.push(Branch { name: name.to_owned(), current: false, remote: true });
+            remotes.push(Branch { name: name.to_owned(), current: false, remote: true });
         } else {
-            branches.push(Branch {
+            local_names.insert(short.to_owned());
+            locals.push(Branch {
                 name: short.to_owned(),
                 current: head == "*",
                 remote: false,
             });
         }
     }
-    branches
+
+    remotes.retain(|remote| !local_names.contains(&remote.name));
+    locals.extend(remotes);
+    locals
 }
 
 /// One checkout of the repository, from `git worktree list --porcelain`.
@@ -243,9 +256,180 @@ pub fn parse_ls_files(output: &str) -> Vec<String> {
         .collect()
 }
 
+/// Why a git command failed, said first in words the user can act on,
+/// with git's own output kept underneath.
+///
+/// git explains itself to someone who already knows git: the sentence
+/// that names the fix is a `hint:` several lines below the failure, and
+/// a rejected push shows the mechanics of refs before it shows the
+/// problem. The panel has room for a few lines, so those lines have to
+/// be the ones that mean something — a lead sentence we recognise the
+/// case from, then what git said, minus the general-case advice.
+pub fn explain_failure(stderr: &str) -> String {
+    let detail = significant_lines(stderr, 4);
+    match (plain_cause(stderr), detail.is_empty()) {
+        (Some(cause), true) => cause.to_owned(),
+        (Some(cause), false) => format!("{cause}\n\n{detail}"),
+        (None, true) => "git failed without an error message.".to_owned(),
+        (None, false) => detail,
+    }
+}
+
+/// The failures worth naming — every one of them is a thing the user
+/// then has to do something about, and the doing is what the sentence
+/// says. Ordered by specificity: an authentication failure also mentions
+/// the URL it could not reach, and would otherwise read as a network
+/// problem.
+fn plain_cause(stderr: &str) -> Option<&'static str> {
+    let text = stderr.to_lowercase();
+    let says = |needle: &str| text.contains(needle);
+
+    if says("not a git repository") {
+        Some("This folder is not a git repository.")
+    } else if says("index.lock") || says("another git process") {
+        Some("Another git process is using this repository. Wait for it to finish, then try again.")
+    } else if says("could not read username")
+        || says("authentication failed")
+        || says("permission denied (publickey)")
+        || says("terminal prompts disabled")
+    {
+        Some(
+            "Git could not sign in to the remote. Mota never asks for credentials, so this has to be a credential helper or an SSH key on your machine.",
+        )
+    } else if says("could not resolve host")
+        || says("connection timed out")
+        || says("could not connect")
+    {
+        Some("The remote could not be reached. Check your network, then try again.")
+    } else if says("does not appear to be a git repository") {
+        Some("The address configured for this remote is not a repository git can read.")
+    } else if says("non-fast-forward") || says("fetch first") || says("[rejected]") {
+        Some("The remote has commits this branch does not. Pull first, then push again.")
+    } else if says("no upstream branch") || says("no upstream configured") {
+        Some(
+            "This branch tracks no remote branch, so git does not know where to send it. Push it once from a terminal with `git push -u origin <branch>`.",
+        )
+    } else if says("divergent branches") || says("need to specify how to reconcile") {
+        Some(
+            "This branch and its upstream have both moved on, and git has no rule here for which to keep. Set `pull.rebase` to true or false, then pull again.",
+        )
+    } else if says("would be overwritten") || says("local changes") {
+        Some("Uncommitted changes are in the way. Commit or stash them first.")
+    } else if says("conflict") {
+        Some("The merge stopped with conflicts. Resolve the marked files, then commit.")
+    } else if says("nothing to commit") || says("no changes added to commit") {
+        Some("Nothing is staged, so there is nothing to commit.")
+    } else if says("please tell me who you are") || says("unable to auto-detect email") {
+        Some("Git does not know who you are yet. Set `user.name` and `user.email`, then commit again.")
+    } else {
+        None
+    }
+}
+
+/// git's own words, worst-case a wall of them: keep the last few, and
+/// drop the `hint:` block when there is anything else — it explains the
+/// general case at length, which is exactly what the lead sentence above
+/// already did in one line.
+fn significant_lines(stderr: &str, limit: usize) -> String {
+    let all: Vec<&str> = stderr
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let loud: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|line| !line.trim_start().to_lowercase().starts_with("hint:"))
+        .collect();
+    let kept = if loud.is_empty() { &all } else { &loud };
+    kept[kept.len().saturating_sub(limit)..].join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What git actually prints when a push is behind the remote — the
+    /// case that started this: four lines of hints, and the reason above
+    /// them where a `tail` never reached it.
+    const REJECTED_PUSH: &str = concat!(
+        "To github.com:someone/project.git\n",
+        " ! [rejected]        main -> main (fetch first)\n",
+        "error: failed to push some refs to 'github.com:someone/project.git'\n",
+        "hint: Updates were rejected because the remote contains work that you do\n",
+        "hint: not have locally. This is usually caused by another repository pushing\n",
+        "hint: to the same ref. You may want to first integrate the remote changes\n",
+        "hint: (e.g., 'git pull ...') before pushing again.\n",
+    );
+
+    #[test]
+    fn a_rejected_push_leads_with_what_to_do() {
+        let explained = explain_failure(REJECTED_PUSH);
+        assert!(
+            explained.starts_with("The remote has commits this branch does not."),
+            "{explained}"
+        );
+    }
+
+    #[test]
+    fn a_rejected_push_keeps_gits_own_words_and_drops_its_hints() {
+        let explained = explain_failure(REJECTED_PUSH);
+        assert!(explained.contains("! [rejected]"), "{explained}");
+        assert!(explained.contains("error: failed to push"), "{explained}");
+        assert!(!explained.contains("hint:"), "{explained}");
+    }
+
+    #[test]
+    fn an_authentication_failure_is_not_read_as_a_network_one() {
+        let explained = explain_failure(
+            "fatal: unable to access 'https://github.com/a/b.git/': The requested URL returned error: 403\nfatal: Authentication failed",
+        );
+        assert!(
+            explained.starts_with("Git could not sign in"),
+            "{explained}"
+        );
+    }
+
+    #[test]
+    fn a_branch_with_no_upstream_says_how_to_give_it_one() {
+        let explained =
+            explain_failure("fatal: The current branch feature has no upstream branch.");
+        assert!(
+            explained.starts_with("This branch tracks no remote branch"),
+            "{explained}"
+        );
+    }
+
+    #[test]
+    fn a_pull_over_local_changes_says_to_commit_or_stash() {
+        let explained = explain_failure(
+            "error: Your local changes to the following files would be overwritten by merge:\n\tsrc/main.rs\nPlease commit your changes or stash them before you merge.",
+        );
+        assert!(
+            explained.starts_with("Uncommitted changes are in the way."),
+            "{explained}"
+        );
+    }
+
+    #[test]
+    fn a_failure_we_do_not_recognise_is_passed_on_whole() {
+        let explained = explain_failure("fatal: something new and strange");
+        assert_eq!(explained, "fatal: something new and strange");
+    }
+
+    #[test]
+    fn hints_are_kept_when_they_are_all_there_is() {
+        let explained = explain_failure("hint: try something else");
+        assert_eq!(explained, "hint: try something else");
+    }
+
+    #[test]
+    fn a_silent_failure_still_says_something() {
+        assert_eq!(
+            explain_failure("   \n\n"),
+            "git failed without an error message."
+        );
+    }
 
     #[test]
     fn rev_list_counts_read_behind_then_ahead() {
@@ -365,6 +549,31 @@ mod tests {
         assert_eq!(branches[1].name, "fix-login");
         assert!(branches[1].remote);
         assert!(!branches[1].current);
+    }
+
+    /// Sorting by commit date interleaves refs/heads and refs/remotes,
+    /// so a remote may be read before the local branch tracking it.
+    #[test]
+    fn a_remote_listed_before_its_local_branch_still_dedupes() {
+        let out = " \torigin/main\trefs/remotes/origin/main\n \
+                    \torigin/fix-login\trefs/remotes/origin/fix-login\n \
+                   *\tmain\trefs/heads/main\n";
+        let branches = parse_branches(out);
+        assert_eq!(branches.len(), 2);
+        // Locals first, whatever order the refs arrived in.
+        assert_eq!(branches[0].name, "main");
+        assert!(branches[0].current);
+        assert_eq!(branches[1].name, "fix-login");
+        assert!(branches[1].remote);
+    }
+
+    #[test]
+    fn the_same_branch_on_two_remotes_is_one_row() {
+        let out = " \torigin/fix-login\trefs/remotes/origin/fix-login\n \
+                    \tupstream/fix-login\trefs/remotes/upstream/fix-login\n";
+        let branches = parse_branches(out);
+        assert_eq!(branches.len(), 1);
+        assert_eq!(branches[0].name, "fix-login");
     }
 
     #[test]

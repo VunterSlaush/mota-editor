@@ -1,7 +1,9 @@
 import { CircleNotch } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { filterBranches } from "../../core/entities/branch";
 import type { GitBranch } from "../../core/ports/gitPort";
 import type { GitActionResult } from "../../core/usecases/gitActions";
+import { branchListHint } from "./branchListHint";
 
 interface Props {
   branches: readonly GitBranch[];
@@ -23,6 +25,11 @@ interface Props {
  * the app re-reads it. The picker stays up and says so for all of it —
  * a modal that vanishes onto a screen still showing the old branch is
  * what made switching feel like nothing had happened.
+ *
+ * Which branches are offered — locals until you type, everything after
+ * that, capped either way — is `filterBranches`. The cap is what keeps
+ * a repository with thousands of fetched refs from freezing the app on
+ * open, so the list below never renders more rows than it hands back.
  */
 export function BranchPicker({ branches, onPick, onClose }: Props) {
   const [query, setQuery] = useState("");
@@ -30,6 +37,7 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // On open, and again when a refused checkout hands the picker back:
   // the search box is disabled mid-checkout, which drops focus with it.
@@ -37,9 +45,17 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
     if (!checkingOut) inputRef.current?.focus();
   }, [checkingOut]);
 
-  const filtered = branches.filter((b) =>
-    b.name.toLowerCase().includes(query.trim().toLowerCase()),
-  );
+  const matches = useMemo(() => filterBranches(branches, query), [branches, query]);
+  const filtered = matches.shown;
+  const hint = branchListHint(matches);
+
+  // Arrow keys walk past the bottom of a 300px list; without this the
+  // selection is somewhere below the fold and Enter looks random.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector(".branch-picker__item--selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
   const pick = async (branch: GitBranch) => {
     if (checkingOut) return;
@@ -88,7 +104,7 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
         <input
           ref={inputRef}
           className="branch-picker__search"
-          placeholder="Search branches…"
+          placeholder="Search local and remote branches…"
           value={query}
           disabled={checkingOut !== null}
           onChange={(e) => {
@@ -112,9 +128,9 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
             {error}
           </p>
         )}
-        <div className="branch-picker__list" role="listbox">
+        <div className="branch-picker__list" role="listbox" ref={listRef}>
           {filtered.length === 0 && (
-            <div className="branch-picker__empty">No branches match "{query}"</div>
+            <div className="branch-picker__empty">{emptyText(query)}</div>
           )}
           {filtered.map((branch, index) => (
             <div
@@ -133,7 +149,19 @@ export function BranchPicker({ branches, onPick, onClose }: Props) {
             </div>
           ))}
         </div>
+        {hint && <p className="branch-picker__hint">{hint}</p>}
       </div>
     </div>
   );
+}
+
+/**
+ * Why the list is empty. With nothing typed the list holds locals only,
+ * so an empty one means this checkout has none — not that the search
+ * found nothing.
+ */
+function emptyText(query: string): string {
+  return query.trim() === ""
+    ? "No local branches — type to search the remotes."
+    : `No branches match "${query}"`;
 }

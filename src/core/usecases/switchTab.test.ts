@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { userMessage } from "../entities/message";
 import { newProject } from "../entities/project";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
@@ -45,13 +46,25 @@ function setup() {
   };
 }
 
-/** Give the tab a live provider session, as a first turn would. */
-function startConversation(store: Store) {
+/** Give the tab a live provider session, as warming it up would. */
+function warmSession(store: Store) {
   store.dispatch({
     type: "chat/sessionRecorded",
     tabId: "t1",
     provider: "claude",
     sessionId: "native-1",
+  });
+}
+
+/** ...and something for a respawned agent to re-ingest, as a first turn
+ *  would. Without this the session is live but empty, which costs
+ *  nothing to restart. */
+function startConversation(store: Store) {
+  warmSession(store);
+  store.dispatch({
+    type: "chat/messageAppended",
+    tabId: "t1",
+    message: userMessage("hello"),
   });
 }
 
@@ -73,6 +86,30 @@ describe("SelectModel before a conversation exists", () => {
     const { workspace, selectModel } = setup();
     await selectModel.execute("t1", "opus");
     expect(workspace.saved?.projects[0].model).toBe("opus");
+  });
+
+  it("applies at once on a warmed session with nothing said in it", async () => {
+    // The agent is running, but an empty conversation re-sends nothing:
+    // deferring here would charge the user a decision, not money.
+    const { store, gateway, selectModel } = setup();
+    warmSession(store);
+
+    await selectModel.execute("t1", "opus");
+
+    expect(tab(store)?.project.model).toBe("opus");
+    expect(tab(store)?.pendingSpec).toBeUndefined();
+    expect(gateway.warms).toBe(1);
+  });
+
+  it("applies effort at once on that same empty session", async () => {
+    const { store, gateway, selectEffort } = setup();
+    warmSession(store);
+
+    await selectEffort.execute("t1", "high");
+
+    expect(tab(store)?.project.effort).toBe("high");
+    expect(tab(store)?.pendingSpec).toBeUndefined();
+    expect(gateway.warms).toBe(1);
   });
 });
 

@@ -177,6 +177,9 @@ body {
   flex: none;
 }
 
+/* Tabs share the strip the way a browser's do: they shrink together
+   until the name is an ellipsis, then give up the branch, then the name,
+   rather than pushing the window's width around. */
 .tab {
   display: flex;
   align-items: center;
@@ -187,6 +190,49 @@ body {
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+}
+
+.tab__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dimmer and smaller than the name: it says which checkout, not which
+   project, and must never be read first. */
+.tab__branch {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.tab__branch::before {
+  content: "⑂ ";
+}
+
+/* Too many tabs for their branches. */
+.tab-bar--compact .tab__branch,
+.tab-bar--icons .tab__branch {
+  display: none;
+}
+
+/* Too many for their names: everything but the tab you are in becomes
+   its icon. The active one keeps its name, because losing track of
+   where you are is worse than a crowded strip. */
+.tab-bar--icons .tab:not(.tab--active) .tab__name,
+.tab-bar--icons .tab:not(.tab--active) .tab__close {
+  display: none;
+}
+
+.tab-bar--icons .tab {
+  padding: 6px 8px;
 }
 
 /* The dragged tab rides the pointer, lifted above the row, while the
@@ -214,6 +260,7 @@ body {
 }
 
 .tab__close {
+  flex: none;
   border: none;
   background: transparent;
   color: inherit;
@@ -349,6 +396,13 @@ body {
 .message-list {
   flex: 1;
   overflow-y: auto;
+  /* Explicit, and load-bearing: `overflow-y: auto` alone makes the other
+     axis `auto` too, so one over-wide line anywhere in the transcript
+     turns the whole conversation into a sideways-scrolling surface —
+     which is what a narrow-enough window (zoom in far enough and any
+     window is narrow) used to do. Wide content scrolls inside its own
+     card instead; see `.md pre` and `.md table`. */
+  overflow-x: hidden;
   padding: 16px 16px 24px;
   display: flex;
   flex-direction: column;
@@ -357,6 +411,7 @@ body {
 
 .msg {
   max-width: 82%;
+  min-width: 0;
   padding: 8px 12px;
   border-radius: 10px;
   line-height: 1.45;
@@ -1310,6 +1365,13 @@ body {
   color: var(--accent);
 }
 
+/* Something is running in one of this project's terminals. Green rather
+   than the accent, which already means "this panel is open" right next
+   to it — two meanings on one colour would say neither. */
+.icon-button--running {
+  color: var(--success);
+}
+
 /* The plan in a centred modal; shares the side panel's header and body. */
 .plan-modal {
   position: relative;
@@ -1330,6 +1392,18 @@ body {
 .md {
   line-height: 1.55;
   font-size: 13px;
+  min-width: 0;
+}
+
+/* An agent writes paths, URLs and identifiers, and none of them contain
+   a space to break at. Left alone one of those runs past the message and
+   out of the column; the width it needs is not a width the window can
+   always give it, so it breaks mid-token instead. */
+.md code,
+.md a,
+.md li,
+.md p {
+  overflow-wrap: anywhere;
 }
 
 .md h1,
@@ -1348,10 +1422,17 @@ body {
   font-size: 15px;
 }
 
+/* A table with more columns than the column has room for scrolls on its
+   own, rather than widening the transcript behind it. `display: block`
+   is what makes a table scrollable at all — as a table it sizes to its
+   content and ignores the overflow. */
 .md table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 10px 0;
-  width: 100%;
   font-size: 12px;
 }
 
@@ -1445,10 +1526,96 @@ body {
 
 /* ---- Context gauge ---- */
 .context-gauge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.context-gauge__trigger {
   display: inline-flex;
   align-items: center;
   padding: 0 2px;
-  cursor: help;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.context-gauge__trigger:hover {
+  background: var(--bg-input);
+}
+
+/* Opens upward: the gauge lives in the composer, at the window's bottom. */
+.context-gauge__panel {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 240px;
+  padding: 10px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.context-gauge__headline {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.context-gauge__percent {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-gauge__caption {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.context-gauge__bar {
+  height: 4px;
+  margin: 8px 0 10px;
+  border-radius: 2px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.context-gauge__fill {
+  height: 100%;
+  border-radius: 2px;
+}
+
+.context-gauge__rows {
+  margin: 0;
+  font-size: 12px;
+}
+
+.context-gauge__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.context-gauge__row dt {
+  color: var(--text-dim);
+}
+
+.context-gauge__row dd {
+  margin: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-gauge__note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* ---- Activity bar (far left, VS-style) ---- */
@@ -1493,6 +1660,11 @@ body {
   min-width: 0;
   overflow-y: auto;
   padding: 12px;
+}
+
+.history__toolbar {
+  display: flex;
+  gap: 6px;
 }
 
 .history__source {
@@ -2465,6 +2637,16 @@ body {
   font-size: 13px;
 }
 
+/* What the list is not showing: the rows past the cap, and the remote
+   branches that only a search reaches. */
+.branch-picker__hint {
+  margin: 0;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 /* The worktree picker borrows the branch picker's frame and rows. */
 .worktree-picker__section {
   padding: 6px 14px 2px;
@@ -2547,6 +2729,8 @@ body {
 
 .changes__action {
   flex: 1;
+  /* Anchors the pending-commits badge to the button's corner. */
+  position: relative;
   /* Fetch/Pull/Push are icon-only (the title says the rest), but Commit
      & Push keeps its label — in a sidebar that drags down to 180px, let
      that label clip rather than overflow the panel. */
@@ -2576,14 +2760,30 @@ body {
   flex: none;
 }
 
-/* Commits waiting on Pull/Push. A bare number, not a badge: the pill
-   cost more width than the label it was competing with. */
+/* Commits waiting on Pull/Push, as a badge on the corner of the button.
+   It was a bare number while those buttons carried labels and every
+   pixel of width was spoken for; now that they are icons, the badge is
+   affordable again — and it reads at a glance, which a number sitting
+   beside an arrow never did. Absolute, so it competes for no width at
+   all and the icon stays centred. */
 .changes__pending {
-  flex: none;
-  color: var(--accent);
-  font-size: 11px;
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 /* Turns slowly while the agent works, to say "this view is live". */
@@ -3670,6 +3870,28 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px 8px;
+  /* Measured against itself, not the window: the composer narrows when
+     the sidebar or a right panel opens, and that is when the toolbar
+     runs out of room — the window's width never knows about it. */
+  container-type: inline-size;
+}
+
+/* Out of room: the pickers drop to their icons. Every one of them has
+   one, and the tooltip still says the value in words. The label is
+   hidden only when an icon precedes it, so a picker showing a value no
+   option matches never collapses to an empty button. */
+@container (max-width: 540px) {
+  .composer-card__toolbar .picker__label:not(:first-child) {
+    display: none;
+  }
+
+  .composer-card__toolbar .picker__caret {
+    display: none;
+  }
+
+  .composer-card__toolbar .picker__trigger {
+    gap: 0;
+  }
 }
 
 .composer-card__group {
@@ -4398,4 +4620,23 @@ body {
   margin: 10px 0 0;
   font-size: 12px;
   color: var(--warning);
+}
+
+/* ---- Tooltips (drawn by TooltipLayer, not by the platform) ---- */
+.tooltip {
+  position: fixed;
+  /* Positioned only after it has been measured — see TooltipLayer. */
+  visibility: hidden;
+  z-index: 200;
+  max-width: 280px;
+  padding: 5px 8px;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  pointer-events: none;
 }

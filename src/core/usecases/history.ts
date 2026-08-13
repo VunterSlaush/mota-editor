@@ -141,9 +141,9 @@ export class SessionHistory {
 
   /**
    * The listing to paint NOW, from the local store alone. When
-   * `onRefresh` is given, the native listing is fetched in the
-   * background and the merged result delivered through it — or nothing,
-   * when no live session exists to ask.
+   * `onRefresh` is given, the native listing and the vendor's own store
+   * are fetched in the background and the merged result delivered
+   * through it — or nothing, when neither adds to the local paint.
    */
   async list(
     tabId: string,
@@ -168,6 +168,11 @@ export class SessionHistory {
    * paint from (and delete) our copy; local-only transcripts stay (the
    * agent may have pruned them, or never owned them); sessions the
    * agent knows and we never saw appear (created outside this app).
+   *
+   * The vendor's own store is read alongside (Claude only): it lists
+   * sessions started OUTSIDE this app without booting an agent to ask,
+   * so they appear even when no live session exists. The live agent's
+   * listing wins where the two overlap.
    */
   private async refreshFromAgent(
     tabId: string,
@@ -179,8 +184,17 @@ export class SessionHistory {
     if (!tab) return;
     const { provider, path, model, effort, mcpOverrides } = tab.project;
 
+    // Only Claude's store is readable without an agent; other vendors'
+    // history stays whatever the live agent reports.
+    const externalPromise =
+      provider === "claude"
+        ? this.transcriptStore.listExternal(path).catch(() => [])
+        : Promise.resolve([]);
+
+    let native: Awaited<ReturnType<AgentGateway["listNativeSessions"]>> = null;
+    let listError: string | undefined;
     try {
-      const native = await this.agentGateway.listNativeSessions(
+      native = await this.agentGateway.listNativeSessions(
         tabId,
         provider,
         path,
@@ -188,52 +202,71 @@ export class SessionHistory {
         effort,
         agentServers(state, provider, mcpOverrides),
       );
-      // Null = no live session to ask — the local paint stands as is.
-      if (!native) return;
-      const twins = transcriptsByProviderSession(local);
-      const nativeSessions = native
-        // One malformed entry must not throw the whole list away.
-        .filter((s) => typeof s.sessionId === "string" && s.sessionId !== "")
-        .map((s) => {
-          const known = twins.get(s.sessionId);
-          const updatedAt = s.updatedAt ? Date.parse(s.updatedAt) : Number.NaN;
-          return {
-            // Our own id when we have a copy: the row then opens, saves
-            // and deletes as that transcript instead of forking a second
-            // one the moment it is opened.
-            id: known?.id ?? s.sessionId,
-            providerSessionId: s.sessionId,
-            title: known?.title || s.title?.trim() || s.sessionId.slice(0, 8),
-            // Our transcript is saved only when a MESSAGE is sent, while
-            // the agent's `updatedAt` also bumps on a mere open (loading
-            // touches its session file). Our timestamp, when we have one,
-            // keeps the list ordered by last message, not last look.
-            savedAt: known?.savedAt ?? (Number.isNaN(updatedAt) ? 0 : updatedAt),
-            provider,
-            messageCount: known?.messageCount,
-            native: true,
-            local: known !== undefined,
-          };
-        });
-      if (nativeSessions.length === 0) return; // nothing beyond the local paint
-      const merged = new Set(nativeSessions.map((s) => s.id));
-      const sessions = [
-        ...nativeSessions,
-        ...local
-          .filter((m) => !merged.has(m.id))
-          .map((m) => ({ ...m, native: false, local: true })),
-      ].sort((a, b) => b.savedAt - a.savedAt);
-      onRefresh({ native: true, sessions });
     } catch (e) {
+      listError = e instanceof Error ? e.message : String(e);
+    }
+    const external = await externalPromise;
+
+    const twins = transcriptsByProviderSession(local);
+    const nativeSessions = (native ?? [])
+      // One malformed entry must not throw the whole list away.
+      .filter((s) => typeof s.sessionId === "string" && s.sessionId !== "")
+      .map((s) => {
+        const known = twins.get(s.sessionId);
+        const updatedAt = s.updatedAt ? Date.parse(s.updatedAt) : Number.NaN;
+        return {
+          // Our own id when we have a copy: the row then opens, saves
+          // and deletes as that transcript instead of forking a second
+          // one the moment it is opened.
+          id: known?.id ?? s.sessionId,
+          providerSessionId: s.sessionId,
+          title: known?.title || s.title?.trim() || s.sessionId.slice(0, 8),
+          // Our transcript is saved only when a MESSAGE is sent, while
+          // the agent's `updatedAt` also bumps on a mere open (loading
+          // touches its session file). Our timestamp, when we have one,
+          // keeps the list ordered by last message, not last look.
+          savedAt: known?.savedAt ?? (Number.isNaN(updatedAt) ? 0 : updatedAt),
+          provider,
+          messageCount: known?.messageCount,
+          native: true,
+          local: known !== undefined,
+        };
+      });
+    const listed = new Set(nativeSessions.map((s) => s.providerSessionId));
+    const externalSessions = external
+      .filter((s) => s.sessionId !== "" && !listed.has(s.sessionId))
+      .map((s) => {
+        const known = twins.get(s.sessionId);
+        return {
+          id: known?.id ?? s.sessionId,
+          providerSessionId: s.sessionId,
+          title: known?.title || s.title.trim() || s.sessionId.slice(0, 8),
+          savedAt: known?.savedAt ?? s.updatedAtMs,
+          provider,
+          messageCount: known?.messageCount,
+          // The store is shared with the agent, so opening truly resumes.
+          native: true,
+          local: known !== undefined,
+        };
+      });
+
+    const agentRows = [...nativeSessions, ...externalSessions];
+    if (agentRows.length === 0) {
       // Best-effort refresh: the local list already painted. Only an
       // EMPTY panel needs the failure spelled out.
-      if (local.length > 0) return;
-      onRefresh({
-        native: false,
-        sessions: [],
-        error: e instanceof Error ? e.message : String(e),
-      });
+      if (listError && local.length === 0) {
+        onRefresh({ native: false, sessions: [], error: listError });
+      }
+      return; // nothing beyond the local paint
     }
+    const merged = new Set(agentRows.map((s) => s.id));
+    const sessions = [
+      ...agentRows,
+      ...local
+        .filter((m) => !merged.has(m.id))
+        .map((m) => ({ ...m, native: false, local: true })),
+    ].sort((a, b) => b.savedAt - a.savedAt);
+    onRefresh({ native: true, sessions });
   }
 
   async open(tabId: string, item: HistoryItem): Promise<void> {

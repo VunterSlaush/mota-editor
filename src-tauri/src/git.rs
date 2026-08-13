@@ -24,7 +24,7 @@ async fn run_git(project_path: &str, args: &[&str]) -> Result<String, String> {
         Ok(stdout)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(tail(stderr.trim(), 4))
+        Err(vcs::explain_failure(stderr.trim()))
     }
 }
 
@@ -45,15 +45,17 @@ async fn run_git_diff(project_path: &str, args: &[&str]) -> Result<String, Strin
         Some(0) | Some(1) => Ok(stdout),
         _ => {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(tail(stderr.trim(), 4))
+            Err(vcs::explain_failure(stderr.trim()))
         }
     }
 }
 
-/// The last lines of git's error output — the part users act on.
+/// The last lines of git's output — for a success, where the useful
+/// part (what a pull brought down) is at the end. Failures go through
+/// `vcs::explain_failure` instead, which leads with the reason.
 fn tail(text: &str, lines: usize) -> String {
     if text.is_empty() {
-        return "git failed without an error message.".to_owned();
+        return "git said nothing.".to_owned();
     }
     let all: Vec<&str> = text.lines().collect();
     all[all.len().saturating_sub(lines)..].join("\n")
@@ -85,6 +87,22 @@ pub async fn git_remote_url(project_path: String) -> Result<String, String> {
     let out = run_git(&project_path, &["config", "--get", "remote.origin.url"])
         .await
         .unwrap_or_default(); // exits 1 when the key is unset
+    Ok(out.trim().to_owned())
+}
+
+/// The branch this checkout is on, for the tab strip.
+///
+/// One process against `.git/HEAD`, rather than the five calls the
+/// Changes panel makes: this is asked for every open project, including
+/// the ones the user has not looked at yet, so it has to stay the
+/// cheapest question we know how to ask git. Empty for a detached HEAD,
+/// a repository with no commits, or a folder that is not a repository —
+/// all normal, none of them worth an error the tab strip cannot show.
+#[tauri::command]
+pub async fn git_current_branch(project_path: String) -> Result<String, String> {
+    let out = run_git(&project_path, &["branch", "--show-current"])
+        .await
+        .unwrap_or_default();
     Ok(out.trim().to_owned())
 }
 
@@ -170,9 +188,20 @@ pub async fn git_commit(project_path: String, message: String) -> Result<String,
 pub async fn git_branches(project_path: String) -> Result<Vec<Branch>, String> {
     // --all includes remote-tracking refs, so branches that only exist
     // on the remote (fetched, never checked out) are offered too.
+    //
+    // Newest commit first, because the picker shows a bounded number of
+    // rows: on a repository with thousands of refs, alphabetical order
+    // means the top of the list is whatever happens to start with "a",
+    // while the branch someone wants is nearly always one they touched
+    // recently.
     let out = run_git(
         &project_path,
-        &["branch", "--all", "--format=%(HEAD)%09%(refname:short)%09%(refname)"],
+        &[
+            "branch",
+            "--all",
+            "--sort=-committerdate",
+            "--format=%(HEAD)%09%(refname:short)%09%(refname)",
+        ],
     )
     .await?;
     Ok(vcs::parse_branches(&out))

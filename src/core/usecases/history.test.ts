@@ -6,6 +6,7 @@ import type {
   AgentTurnRequest,
 } from "../ports/agentGateway";
 import type {
+  ExternalSessionMeta,
   PersistedTranscript,
   TranscriptMeta,
   TranscriptStore,
@@ -17,6 +18,9 @@ import { type HistoryItem, type HistoryListing, SessionHistory } from "./history
 class FakeTranscriptStore implements TranscriptStore {
   transcripts = new Map<string, PersistedTranscript>();
   planFiles = new Map<string, string>();
+  /** The vendor's own store, as `list_external_sessions` reports it. */
+  external: ExternalSessionMeta[] = [];
+  externalCalls = 0;
   async save(_p: string, t: PersistedTranscript) {
     this.transcripts.set(t.id, t);
   }
@@ -29,6 +33,10 @@ class FakeTranscriptStore implements TranscriptStore {
       providerSessionId: t.providerSessionId,
       messageCount: t.messages.length,
     }));
+  }
+  async listExternal(): Promise<ExternalSessionMeta[]> {
+    this.externalCalls += 1;
+    return this.external;
   }
   async load(_p: string, id: string): Promise<PersistedTranscript | null> {
     return this.transcripts.get(id) ?? null;
@@ -246,6 +254,97 @@ describe("SessionHistory", () => {
     });
 
     expect(refreshed.sessions.map((s) => s.id)).toEqual(["new", "old"]);
+  });
+
+  it("lists the vendor's own sessions when no live agent exists to ask", async () => {
+    const { transcripts, gateway, history } = setup();
+    gateway.nativeSessions = null; // no live session — and none is booted
+    transcripts.external = [
+      { sessionId: "cli-1", title: "started in a terminal", updatedAtMs: 900 },
+    ];
+
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
+    });
+
+    expect(refreshed.native).toBe(true);
+    const [only] = refreshed.sessions;
+    expect(only.id).toBe("cli-1");
+    expect(only.title).toBe("started in a terminal");
+    expect(only.savedAt).toBe(900);
+    expect(only.native).toBe(true); // the store is shared: opening resumes
+    expect(only.local).toBe(false); // nothing of ours to delete
+  });
+
+  it("keeps one row when the vendor's store and our transcript hold the same chat", async () => {
+    const { transcripts, gateway, history } = setup();
+    transcripts.transcripts.set("local-1", meta("local-1", 500, "cli-1"));
+    gateway.nativeSessions = null;
+    transcripts.external = [
+      { sessionId: "cli-1", title: "vendor title", updatedAtMs: 900 },
+    ];
+
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
+    });
+
+    expect(refreshed.sessions).toHaveLength(1);
+    const [only] = refreshed.sessions;
+    expect(only.id).toBe("local-1"); // ours to open, save and delete
+    expect(only.title).toBe("chat local-1");
+    expect(only.savedAt).toBe(500); // last message, not the file's mtime
+    expect(only.local).toBe(true);
+  });
+
+  it("lets the live agent's listing win over the vendor's store for the same id", async () => {
+    const { transcripts, gateway, history } = setup();
+    gateway.nativeSessions = [
+      { sessionId: "cli-1", title: "Agent title", updatedAt: "2026-08-05T10:00:00Z" },
+    ];
+    transcripts.external = [
+      { sessionId: "cli-1", title: "stale head", updatedAtMs: 1 },
+      { sessionId: "cli-2", title: "only in the store", updatedAtMs: 2 },
+    ];
+
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
+    });
+
+    const byId = new Map(refreshed.sessions.map((s) => [s.id, s]));
+    expect(refreshed.sessions).toHaveLength(2);
+    expect(byId.get("cli-1")?.title).toBe("Agent title");
+    expect(byId.get("cli-2")?.title).toBe("only in the store");
+  });
+
+  it("never reads the vendor's store for a provider that doesn't own it", async () => {
+    const store = new Store();
+    store.dispatch({
+      type: "tab/opened",
+      project: newProject("t1", "/repo", { ...DEFAULTS, provider: "codex" }),
+    });
+    const transcripts = new FakeTranscriptStore();
+    const gateway = new FakeGateway();
+    const history = new SessionHistory(store, transcripts, gateway);
+
+    await history.list("t1", () => {});
+    await settle();
+
+    expect(transcripts.externalCalls).toBe(0);
+  });
+
+  it("still lists the vendor's store when the live listing fails", async () => {
+    const { transcripts, gateway, history } = setup();
+    gateway.listError = "agent broke";
+    transcripts.external = [
+      { sessionId: "cli-1", title: "survives the failure", updatedAtMs: 900 },
+    ];
+
+    const refreshed = await new Promise<HistoryListing>((resolve) => {
+      void history.list("t1", resolve);
+    });
+
+    expect(refreshed.error).toBeUndefined();
+    expect(refreshed.sessions.map((s) => s.id)).toEqual(["cli-1"]);
   });
 
   it("surfaces a native failure only when there is nothing local to show", async () => {

@@ -1,3 +1,4 @@
+import { ArrowsClockwise } from "@phosphor-icons/react";
 import type { HistoryItem } from "../../core/usecases/history";
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
   onOpen: (item: HistoryItem) => void;
   onDelete: (sessionId: string) => void;
   onNewChat: () => void;
+  onRefresh: () => void;
 }
 
 /** UI — previous conversations of this project; click one to reopen it. */
@@ -26,17 +28,30 @@ export function HistoryPanel({
   onOpen,
   onDelete,
   onNewChat,
+  onRefresh,
 }: Props) {
   return (
     <aside className="history">
-      <button
-        type="button"
-        className="changes__action"
-        disabled={busy}
-        onClick={onNewChat}
-      >
-        + New chat
-      </button>
+      <div className="history__toolbar">
+        <button
+          type="button"
+          className="changes__action"
+          disabled={busy}
+          onClick={onNewChat}
+        >
+          + New chat
+        </button>
+        <button
+          type="button"
+          className="changes__action changes__action--icon"
+          disabled={busy || loading}
+          aria-label="Refresh sessions"
+          title="Refresh the session list"
+          onClick={onRefresh}
+        >
+          <ArrowsClockwise />
+        </button>
+      </div>
       {native && sessions.length > 0 && (
         <p className="history__source">
           From the agent's own history — opening resumes with full memory.

@@ -97,10 +97,15 @@ export class SelectVerbose {
  * Model and effort are both spawn-time over ACP, so changing either
  * respawns the agent — and the respawned agent re-ingests the whole
  * conversation. Before the first turn there is nothing to re-ingest and
- * the change is free; once a provider session exists it is not.
+ * the change is free; once a provider session exists AND the user has
+ * spoken into it, it is not. A warmed-but-empty session counts as
+ * nothing: the agent is running, but respawning it re-sends no
+ * conversation, so deferring the change would only ask the user to
+ * approve a cost that does not exist.
  */
 function conversationIsLive(tab: TabState): boolean {
-  return tab.project.providerSessions[tab.project.provider] !== undefined;
+  if (tab.project.providerSessions[tab.project.provider] === undefined) return false;
+  return tab.messages.some((message) => message.role === "user");
 }
 
 /**

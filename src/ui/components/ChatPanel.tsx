@@ -224,6 +224,7 @@ export function ChatPanel({
   };
   const [history, setHistory] = useState<HistoryListing>({ native: false, sessions: [] });
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const sidebar = useDragWidth(270, 180, 520);
   const planPanel = useDragWidth(420, 280, 760, "left");
   const terminalPanel = useDragWidth(520, 320, 900, "left");
@@ -233,6 +234,18 @@ export function ChatPanel({
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
+
+  // Which right-hand panel this project actually shows. The choice is
+  // app-wide on purpose (a running terminal must survive a tab switch),
+  // but a plan is not: most projects have none, and an empty plan panel
+  // taking a third of the window is noise. So "plan" applies only where
+  // there is a plan — the same rule PlanBar follows — and the panel
+  // comes back on its own when you return to the project that has one.
+  // A build or a server holding one of this project's terminals — worth
+  // saying on the button, because the panel it lives behind is closed.
+  const shellRunning = tab.shells.some((shell) => shell.running && !shell.exit);
+  const hasPlan = tab.plan.length > 0 || tab.planMarkdown !== undefined;
+  const shownRightPanel = rightPanel === "plan" && !hasPlan ? null : rightPanel;
 
   // Reaches memoized transcript rows — must not be a fresh arrow per render.
   const showPlan = useCallback(() => onSelectRightPanel("plan"), [onSelectRightPanel]);
@@ -313,7 +326,8 @@ export function ChatPanel({
   }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
 
   // Refresh the session list when the history view is open and the tab
-  // is idle (a finished turn may have added or updated a session). The
+  // is idle (a finished turn may have added or updated a session), or
+  // whenever the user asks for it with the refresh button. The
   // local listing paints first; the agent's native listing, when a live
   // session can be asked, lands as a second update.
   useEffect(() => {
@@ -337,7 +351,7 @@ export function ChatPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarView, tab.busy, tab.project.id]);
+  }, [sidebarView, tab.busy, tab.project.id, historyRefreshKey]);
 
   // Ctrl+` — the binding every editor uses for this. Registered here
   // rather than in a global map because the app has no shortcut registry
@@ -426,10 +440,16 @@ export function ChatPanel({
           </label>
           <button
             type="button"
-            className={`icon-button ${rightPanel === "terminal" ? "icon-button--on" : ""}`}
+            className={`icon-button ${rightPanel === "terminal" ? "icon-button--on" : ""} ${
+              shellRunning ? "icon-button--running" : ""
+            }`}
             aria-label="Terminal"
             aria-pressed={rightPanel === "terminal"}
-            title="Terminal (Ctrl+`)"
+            title={
+              shellRunning
+                ? "Terminal (Ctrl+`) — a command is running"
+                : "Terminal (Ctrl+`)"
+            }
             onClick={toggleTerminal}
           >
             <TerminalWindow size={16} />
@@ -493,6 +513,7 @@ export function ChatPanel({
                     )
                   }
                   onNewChat={onNewChat}
+                  onRefresh={() => setHistoryRefreshKey((k) => k + 1)}
                 />
               )}
             </div>
@@ -570,18 +591,20 @@ export function ChatPanel({
             pendingSpec={tab.pendingSpec}
           />
         </div>
-        {rightPanel && (
+        {shownRightPanel && (
           <div
             className="panel-resizer"
             role="separator"
             aria-orientation="vertical"
             title="Drag to resize"
             onPointerDown={
-              rightPanel === "plan" ? planPanel.startResize : terminalPanel.startResize
+              shownRightPanel === "plan"
+                ? planPanel.startResize
+                : terminalPanel.startResize
             }
           />
         )}
-        {rightPanel === "plan" && (
+        {shownRightPanel === "plan" && (
           <PlanSidePanel
             plan={tab.plan}
             planMarkdown={tab.planMarkdown}
@@ -590,7 +613,7 @@ export function ChatPanel({
             onClose={closeRightPanel}
           />
         )}
-        {rightPanel === "terminal" && (
+        {shownRightPanel === "terminal" && (
           <TerminalPanel
             sessions={tab.shells}
             activeShellId={tab.activeShellId}

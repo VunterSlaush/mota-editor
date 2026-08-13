@@ -28,6 +28,10 @@ export class TauriGitStatus implements GitPort {
     return invoke<string>("git_remote_url", { projectPath });
   }
 
+  async currentBranch(projectPath: string): Promise<string> {
+    return invoke<string>("git_current_branch", { projectPath });
+  }
+
   async upstream(projectPath: string): Promise<GitDivergence | null> {
     return invoke<GitDivergence | null>("git_upstream", { projectPath });
   }

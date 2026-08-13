@@ -667,6 +667,11 @@ pub enum Incoming {
     /// An elicitation we advertised no support for (url mode). Declined
     /// rather than errored: the agent should carry on, not fail the turn.
     UnsupportedElicitation { id: i64 },
+    /// A permission request offering nothing the user could choose. Shown
+    /// as a card it would be a dead end — no buttons, and an agent
+    /// waiting on an answer that can never come, which leaves the tab
+    /// with a turn that never ends. Cancelled instead, and said out loud.
+    UnanswerablePermission { id: i64, title: String },
     /// `session/update` notification, already translated to domain events.
     Updates(Vec<AgentEvent>),
     /// The agent wants to read a file through the client (`fs/read_text_file`).
@@ -846,7 +851,7 @@ fn classify_permission_request(id: i64, value: &Value) -> Incoming {
         .and_then(Value::as_str)
         .unwrap_or("The agent wants to perform an action")
         .to_owned();
-    let options = params
+    let options: Vec<PermissionOptionInfo> = params
         .get("options")
         .and_then(Value::as_array)
         .map(|options| options.iter().filter_map(parse_option).collect())
@@ -870,6 +875,11 @@ fn classify_permission_request(id: i64, value: &Value) -> Incoming {
         .pointer("/toolCall/kind")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    // The same rule the elicitation path follows: a request we cannot
+    // render is worse than no request, because the agent blocks on it.
+    if options.is_empty() {
+        return Incoming::UnanswerablePermission { id, title };
+    }
     Incoming::PermissionRequest {
         id,
         title,
@@ -1827,6 +1837,35 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_permission_request_with_nothing_to_choose_is_unanswerable() {
+        // A card with no buttons cannot be answered, and the agent waits
+        // on the answer forever — the tab is then stuck with a turn that
+        // can never end. Better to know that here than to draw it.
+        let none = r#"{"jsonrpc":"2.0","id":9,"method":"session/request_permission","params":{
+            "sessionId":"s","toolCall":{"toolCallId":"c1","title":"Run npm test"},
+            "options":[]}}"#
+            .replace('\n', "");
+        assert_eq!(
+            parse_incoming(&none),
+            Some(Incoming::UnanswerablePermission {
+                id: 9,
+                title: "Run npm test".to_owned()
+            })
+        );
+
+        // Same outcome by a different route: options we cannot read are
+        // options the user cannot click.
+        let unreadable = r#"{"jsonrpc":"2.0","id":9,"method":"session/request_permission","params":{
+            "sessionId":"s","toolCall":{"toolCallId":"c1","title":"Run npm test"},
+            "options":[{"id":"allow","name":"Allow Once","kind":"allow_once"}]}}"#
+            .replace('\n', "");
+        assert!(matches!(
+            parse_incoming(&unreadable),
+            Some(Incoming::UnanswerablePermission { .. })
+        ));
     }
 
     #[test]

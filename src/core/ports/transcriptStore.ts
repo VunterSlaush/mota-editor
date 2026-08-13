@@ -54,6 +54,21 @@ export interface TranscriptMeta {
   readonly messageCount?: number;
 }
 
+/**
+ * One session found in the VENDOR's own store (Claude Code's
+ * `~/.claude/projects/…`), metadata only — listable without booting an
+ * agent process, which is what lets History show conversations started
+ * outside this app (a terminal `claude`, another editor).
+ */
+export interface ExternalSessionMeta {
+  readonly sessionId: string;
+  /** First user message, or empty when the log's head held none. */
+  readonly title: string;
+  /** File mtime — the precise last-message time lives at the tail of a
+   *  multi-megabyte log; mtime orders a list without reading it. */
+  readonly updatedAtMs: number;
+}
+
 export interface TranscriptStore {
   save(projectPath: string, transcript: PersistedTranscript): Promise<void>;
   /** Newest first. */
@@ -65,6 +80,13 @@ export interface TranscriptStore {
    * projectPath was embedded.
    */
   listStats(knownProjects: readonly string[]): Promise<SessionStats[]>;
+  /**
+   * The vendor's own sessions for this project, newest first — Claude
+   * Code only (other vendors' stores are undocumented). Empty when the
+   * vendor never wrote a store: external history is an upgrade over the
+   * local list, never a prerequisite.
+   */
+  listExternal(projectPath: string): Promise<ExternalSessionMeta[]>;
   load(projectPath: string, id: string): Promise<PersistedTranscript | null>;
   remove(projectPath: string, id: string): Promise<void>;
   /**

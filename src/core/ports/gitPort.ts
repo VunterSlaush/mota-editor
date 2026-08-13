@@ -62,6 +62,13 @@ export interface GitPort {
   /** The `origin` remote's URL, or "" when the repo has none. */
   remoteUrl(projectPath: string): Promise<string>;
   /**
+   * Just the checked-out branch — one git call, for the tab strip, which
+   * asks about every open project rather than only the active one. "" on
+   * a detached HEAD, an empty repository, or a folder git knows nothing
+   * about; all normal states.
+   */
+  currentBranch(projectPath: string): Promise<string>;
+  /**
    * Commits waiting to be pulled and pushed, or null when there is
    * nothing to compare against — no upstream, a detached HEAD, or no
    * commits yet. All normal states, none of them an error.

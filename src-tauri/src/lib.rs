@@ -15,6 +15,7 @@ mod git;
 mod history_file;
 mod provider_probe;
 mod runner;
+mod session_index;
 mod shell_env;
 mod shell_history;
 mod shell_session;
@@ -82,6 +83,7 @@ pub fn run() {
             git::git_status,
             git::git_log,
             git::git_remote_url,
+            git::git_current_branch,
             git::git_list_files,
             git::git_diff,
             git::git_stage,
@@ -117,6 +119,7 @@ pub fn run() {
             history_file::delete_session,
             history_file::list_session_stats,
             billing_log::read_billed_usage,
+            session_index::list_external_sessions,
             mcp_probe::probe_mcp_server,
             extension_host::extensions_list,
             extension_host::extension_enable,

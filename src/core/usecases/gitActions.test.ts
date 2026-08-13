@@ -110,6 +110,9 @@ class FakeGit implements GitPort {
   async branchesMerged(): Promise<GitBranch[]> {
     return [];
   }
+  async currentBranch(): Promise<string> {
+    return "main";
+  }
 }
 
 function setup() {

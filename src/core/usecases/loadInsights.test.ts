@@ -19,6 +19,9 @@ class FakeTranscriptStore implements TranscriptStore {
   async list(): Promise<TranscriptMeta[]> {
     return [];
   }
+  async listExternal() {
+    return [];
+  }
   async load(): Promise<PersistedTranscript | null> {
     return null;
   }

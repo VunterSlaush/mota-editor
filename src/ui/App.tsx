@@ -14,6 +14,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { EmptyState } from "./components/EmptyState";
 import { SettingsModal } from "./components/SettingsModal";
 import { TabBar } from "./components/TabBar";
+import { TooltipLayer } from "./components/TooltipLayer";
 import { openFileExternally } from "./openFile";
 import { useAppState } from "./useAppState";
 
@@ -76,6 +77,16 @@ export function App({ context }: { context: AppContext }) {
   useEffect(() => {
     void context.zoom.apply(zoomFactor(zoomLevel)).catch(() => undefined);
   }, [context, zoomLevel]);
+
+  // Every tab's branch, so the strip can say it before you have been in
+  // that project — a restored workspace otherwise knows only the branch
+  // of whichever tab you happen to click. Re-read when the set of tabs
+  // changes (a project opened, a worktree added), not on every state
+  // change: it is one git call per project, and one is enough.
+  const tabIds = state.tabs.map((t) => t.project.id).join("\u0000");
+  useEffect(() => {
+    void context.loadBranches.execute();
+  }, [context, tabIds]);
 
   // The taskbar/dock badge — the tab dots, said once for the whole app
   // so a minimised window can still get your attention. Pushed only when
@@ -322,6 +333,8 @@ export function App({ context }: { context: AppContext }) {
           onClose={closeSettings}
         />
       )}
+      {/* Last, so it draws over everything it can describe. */}
+      <TooltipLayer />
     </div>
   );
 }

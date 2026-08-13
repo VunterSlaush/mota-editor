@@ -354,6 +354,9 @@ export type Action =
     }
   | { type: "shell/opened"; tabId: string; session: ShellSession }
   | { type: "shell/selected"; tabId: string; sessionId: string }
+  /** A command took the shell, or gave it back. Dispatched only when the
+   *  answer changes — never per keystroke. */
+  | { type: "shell/running"; tabId: string; sessionId: string; running: boolean }
   /** The shell died on its own — a `exit` typed, or a crash. */
   | { type: "shell/exited"; tabId: string; sessionId: string; code: number | null }
   /** The user dismissed the terminal; the pty is killed either way. */
@@ -799,6 +802,14 @@ export function reduce(state: AppState, action: Action): AppState {
           : tab,
       );
 
+    case "shell/running":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        shells: tab.shells.map((s) =>
+          s.id === action.sessionId ? { ...s, running: action.running } : s,
+        ),
+      }));
+
     case "shell/exited":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
@@ -806,7 +817,8 @@ export function reduce(state: AppState, action: Action): AppState {
           // First exit wins: a kill racing the shell's own exit must not
           // overwrite the status the user is looking at.
           s.id === action.sessionId && !s.exit
-            ? { ...s, exit: { code: action.code } }
+            ? // Whatever was running died with the shell.
+              { ...s, exit: { code: action.code }, running: false }
             : s,
         ),
       }));
