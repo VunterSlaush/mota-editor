@@ -7,6 +7,7 @@ import {
 import { totalBilledTokens } from "../../core/entities/billing";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import { formatUsd } from "../../core/entities/modelPricing";
+import { tabLabel } from "../../core/entities/project";
 import { formatTokens } from "../../core/entities/tokens";
 import type { AppSettings, TabState } from "../../core/state/appState";
 import { BarList, StatTile } from "./InsightsCharts";
@@ -235,7 +236,7 @@ export function SettingsUsage({ settings, onChange, tabs, loadInsights }: Props)
         return (
           <div className="usage-row" key={tab.project.id}>
             <div className="usage-row__text">
-              <span className="usage-row__name">{tab.project.name}</span>
+              <span className="usage-row__name">{tabLabel(tab.project)}</span>
               <span className="usage-row__provider">{tab.project.provider}</span>
             </div>
             {usage && usage.size > 0 ? (
