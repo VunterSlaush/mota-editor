@@ -221,6 +221,8 @@ export type Action =
     }
   | { type: "settings/changed"; patch: Partial<AppSettings> }
   | { type: "tab/opened"; project: Project }
+  /** A second tab on the folder `sourceTabId` is already open on. */
+  | { type: "tab/duplicated"; sourceTabId: string; project: Project }
   | { type: "tab/closed"; tabId: string }
   | { type: "worktree/preparing"; tabId: string }
   /** `problem` is absent when everything landed. */
@@ -368,18 +370,26 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, settings: { ...state.settings, ...action.patch } };
 
     case "tab/opened": {
+      // Picking a folder that is already open means "show me that tab".
+      // A second tab on one folder is a thing you ask for by name, and
+      // asking is `tab/duplicated`.
       const existing = state.tabs.find((t) => t.project.path === action.project.path);
       if (existing) return { ...state, activeTabId: existing.project.id };
-      const tab: TabState = {
-        project: action.project,
-        messages: [],
-        busy: false,
-        queued: [],
-        agentCommands: [],
-        plan: [],
-        shells: [],
+      return {
+        ...state,
+        tabs: [...state.tabs, openedTab(action.project)],
+        activeTabId: action.project.id,
       };
-      return { ...state, tabs: [...state.tabs, tab], activeTabId: action.project.id };
+    }
+
+    case "tab/duplicated": {
+      const from = state.tabs.findIndex((t) => t.project.id === action.sourceTabId);
+      if (from === -1) return state;
+      // Beside its source rather than at the end of the strip: a copy of
+      // the tab you are looking at belongs next to it.
+      const tabs = [...state.tabs];
+      tabs.splice(from + 1, 0, openedTab(action.project));
+      return { ...state, tabs, activeTabId: action.project.id };
     }
 
     case "tab/closed": {
@@ -836,6 +846,19 @@ export function reduce(state: AppState, action: Action): AppState {
         };
       });
   }
+}
+
+/** A tab as it starts life: a project, and nothing having happened yet. */
+function openedTab(project: Project): TabState {
+  return {
+    project,
+    messages: [],
+    busy: false,
+    queued: [],
+    agentCommands: [],
+    plan: [],
+    shells: [],
+  };
 }
 
 /**

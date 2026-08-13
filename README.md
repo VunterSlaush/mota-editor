@@ -31,6 +31,11 @@ launched at all, the tab falls back to one-shot headless CLI mode
 automatically (everything works, but approvals become safe-defaults
 instead of interactive — see ADR-0004/0005).
 
+Right-click a tab to **name** it, mark it with a **colour**, or
+**duplicate** it — a second tab on the same folder, set up the same way,
+for a fresh chat that costs the one you already have nothing. Opening a
+folder that is already open still just goes to its tab.
+
 Per tab you can also pick the **model** (type any vendor model id or
 pick a suggestion; empty = provider default — changing it restarts that
 tab's agent session on the next message), and typing `/` shows the

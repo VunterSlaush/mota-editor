@@ -13,6 +13,7 @@ interface Props {
   folderName: string;
   onRename: (label: string) => void;
   onRecolor: (color: TabColorId | undefined) => void;
+  onDuplicate: () => void;
   onClose: () => void;
 }
 
@@ -32,6 +33,7 @@ export function TabMenu({
   folderName,
   onRename,
   onRecolor,
+  onDuplicate,
   onClose,
 }: Props) {
   const [draft, setDraft] = useState(label);
@@ -101,7 +103,7 @@ export function TabMenu({
       className="tab-menu"
       ref={panel}
       role="dialog"
-      aria-label="Tab name and colour"
+      aria-label="Tab options"
       onKeyDown={onKeyDown}
     >
       <input
@@ -142,6 +144,19 @@ export function TabMenu({
           />
         ))}
       </div>
+      {/* Closing on the way out is what commits a half-typed name, so the
+          copy is made and the panel leaves in one gesture. */}
+      <button
+        type="button"
+        className="tab-menu__action"
+        title="Another tab on this folder, set up the same way — a second chat that keeps this one"
+        onClick={() => {
+          onDuplicate();
+          onClose();
+        }}
+      >
+        Duplicate tab
+      </button>
     </div>
   );
 }

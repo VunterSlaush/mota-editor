@@ -188,6 +188,7 @@ export function App({ context }: { context: AppContext }) {
         onOpenProject={() => void context.openProject.execute()}
         onRename={(tabId, label) => void context.renameTab.execute(tabId, label)}
         onRecolor={(tabId, color) => void context.recolorTab.execute(tabId, color)}
+        onDuplicate={(tabId) => void context.duplicateTab.execute(tabId)}
       />
       {tab ? (
         <ChatPanel

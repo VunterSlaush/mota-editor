@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { userMessage } from "../entities/message";
-import { newProject } from "../entities/project";
+import { duplicatedProject, newProject } from "../entities/project";
 import {
   type AppState,
   activeTab,
@@ -8,12 +8,23 @@ import {
   initialState,
   projectDefaults,
   reduce,
+  tabById,
 } from "./appState";
 
 const DEFAULTS = projectDefaults(defaultSettings);
 
 const open = (state: AppState, id: string, path: string) =>
   reduce(state, { type: "tab/opened", project: newProject(id, path, DEFAULTS) });
+
+const duplicate = (state: AppState, sourceTabId: string, id: string) => {
+  const source =
+    tabById(state, sourceTabId)?.project ?? newProject(id, "/gone", DEFAULTS);
+  return reduce(state, {
+    type: "tab/duplicated",
+    sourceTabId,
+    project: duplicatedProject(source, id),
+  });
+};
 
 const ids = (state: AppState) => state.tabs.map((t) => t.project.id);
 
@@ -31,6 +42,39 @@ describe("appState reducer", () => {
     state = open(state, "t3", "/work/alpha");
     expect(state.tabs).toHaveLength(2);
     expect(state.activeTabId).toBe("t1");
+  });
+
+  it("opens a second tab on a folder already open when one is asked for", () => {
+    // The exception to the rule above, and the only one: a folder opened
+    // again is "show me that tab", but a duplicate was asked for by name.
+    let state = open(initialState, "t1", "/work/alpha");
+    state = duplicate(state, "t1", "t2");
+    expect(state.tabs.map((t) => t.project.path)).toEqual(["/work/alpha", "/work/alpha"]);
+    expect(state.activeTabId).toBe("t2");
+  });
+
+  it("puts the copy right after the tab it came from", () => {
+    let state = open(initialState, "t1", "/a");
+    state = open(state, "t2", "/b");
+    state = duplicate(state, "t1", "copy");
+    expect(ids(state)).toEqual(["t1", "copy", "t2"]);
+  });
+
+  it("starts the copy on an empty chat", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "chat/messageAppended",
+      tabId: "t1",
+      message: userMessage("hello"),
+    });
+    state = duplicate(state, "t1", "t2");
+    expect(tabById(state, "t2")?.messages).toEqual([]);
+    expect(tabById(state, "t1")?.messages).toHaveLength(1);
+  });
+
+  it("ignores a duplicate of a tab that has since been closed", () => {
+    const state = duplicate(open(initialState, "t1", "/a"), "gone", "t2");
+    expect(state.tabs).toHaveLength(1);
   });
 
   it("closing the active tab activates the last remaining tab", () => {

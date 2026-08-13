@@ -1,12 +1,12 @@
 import { FolderSimple, GitFork } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
-import { tabLabel } from "../../core/entities/project";
 import type { TabColorId } from "../../core/entities/tabColor";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
 import { CTRL_IS_SECONDARY_CLICK, useDragReorder } from "../useDragReorder";
 import { TabMenu } from "./TabMenu";
 import { tabDensity } from "./tabDensity";
+import { tabStripLabels } from "./tabStripLabels";
 
 interface Props {
   tabs: readonly TabState[];
@@ -17,6 +17,7 @@ interface Props {
   onOpenProject: () => void;
   onRename: (tabId: string, label: string) => void;
   onRecolor: (tabId: string, color: TabColorId | undefined) => void;
+  onDuplicate: (tabId: string) => void;
 }
 
 /** UI — one tab per project, plus the "open project" affordance. */
@@ -29,10 +30,14 @@ export function TabBar({
   onOpenProject,
   onRename,
   onRecolor,
+  onDuplicate,
 }: Props) {
   const drag = useDragReorder(onReorder, ".tab");
   const strip = useRef<HTMLElement>(null);
   const density = tabDensity(useWidthOf(strip), tabs.length);
+  // Numbered where two tabs would otherwise read the same — which two
+  // tabs on one folder always would.
+  const names = tabStripLabels(tabs.map((t) => t.project));
   const [menu, setMenu] = useState<{ tabId: string; anchor: DOMRect } | null>(null);
   // Undefined once the tab is gone, so closing a tab with its menu open
   // takes the menu with it.
@@ -41,7 +46,7 @@ export function TabBar({
   return (
     // The header itself drags the window; the tabs on it drag each other.
     <header className={`tab-bar tab-bar--${density}`} data-tauri-drag-region ref={strip}>
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const id = tab.project.id;
         const isActive = id === activeTabId;
         const status = tabStatus(tab);
@@ -51,7 +56,7 @@ export function TabBar({
         const where = tab.project.worktreeOf
           ? `${at} — worktree of ${tab.project.worktreeOf}`
           : at;
-        const name = tabLabel(tab.project);
+        const name = names[index];
         // A named tab still has to say where it points: the name took the
         // folder's place in the strip, so the tooltip is where that goes.
         const named = tab.project.label ? `${tab.project.label} — ${where}` : where;
@@ -130,6 +135,7 @@ export function TabBar({
           folderName={menuTab.project.name}
           onRename={(label) => onRename(menuTab.project.id, label)}
           onRecolor={(color) => onRecolor(menuTab.project.id, color)}
+          onDuplicate={() => onDuplicate(menuTab.project.id)}
           onClose={() => setMenu(null)}
         />
       )}

@@ -49,6 +49,7 @@ import { ApplyCommandConfig } from "../core/usecases/applyCommandConfig";
 import { ApplyPendingSpec, DiscardPendingSpec } from "../core/usecases/applyPendingSpec";
 import { CancelTurn } from "../core/usecases/cancelTurn";
 import { CloseProject } from "../core/usecases/closeProject";
+import { DuplicateTab } from "../core/usecases/duplicateTab";
 import { EditDraft } from "../core/usecases/editDraft";
 import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
@@ -88,6 +89,7 @@ export interface AppContext {
   readonly store: Store;
   readonly restoreWorkspace: RestoreWorkspace;
   readonly openProject: OpenProject;
+  readonly duplicateTab: DuplicateTab;
   readonly closeProject: CloseProject;
   readonly switchTab: SwitchTab;
   readonly reorderTabs: ReorderTabs;
@@ -192,6 +194,7 @@ export function createAppContext(): AppContext {
       newId,
       gitPort,
     ),
+    duplicateTab: new DuplicateTab(store, workspaceStore, agentGateway, newId),
     closeProject,
     switchTab: new SwitchTab(store, workspaceStore),
     reorderTabs: new ReorderTabs(store, workspaceStore),

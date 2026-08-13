@@ -112,6 +112,40 @@ export function defaultsFromProject(project: Project): ProjectDefaults {
   };
 }
 
+/**
+ * A second tab on one folder, set up like the tab it was copied from —
+ * the point of a duplicate is another conversation in a setup already
+ * chosen, so everything about the project travels except the two things
+ * that cannot.
+ *
+ * The conversation is the first: provider sessions belong to the tab that
+ * started them, and two tabs resuming one session would both be writing
+ * to it. The name is the second — it stays behind so the copy can be told
+ * apart from its source, the same rule `defaultsFromProject` follows.
+ */
+export function duplicatedProject(source: Project, id: string): Project {
+  return {
+    id,
+    path: source.path,
+    name: source.name,
+    provider: source.provider,
+    mode: source.mode,
+    permission: source.permission,
+    model: source.model,
+    effort: source.effort,
+    verbose: source.verbose,
+    providerSessions: {},
+    // Absent stays absent, as in `newProject`: a key holding undefined
+    // would read as a decision that was never made.
+    ...(source.color ? { color: source.color } : {}),
+    ...(source.mcpOverrides ? { mcpOverrides: source.mcpOverrides } : {}),
+    ...(source.provisioningOverride
+      ? { provisioningOverride: source.provisioningOverride }
+      : {}),
+    worktreeOf: source.worktreeOf,
+  };
+}
+
 export function newProject(
   id: string,
   path: string,
