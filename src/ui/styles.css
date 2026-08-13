@@ -10,6 +10,17 @@
   --warning: #f0b429;
   --success: #7ee2a8;
   --tool: #b58cff;
+  /* Tab grouping colours. One set for every theme on purpose: the wash
+     mixes a hue into the tab's own background, so the theme supplies the
+     lightness and only the hue has to be chosen here. A theme that needs
+     a different hue can override the one variable. */
+  --tab-color-red: oklch(65% 0.19 25);
+  --tab-color-amber: oklch(75% 0.15 75);
+  --tab-color-green: oklch(72% 0.17 145);
+  --tab-color-teal: oklch(72% 0.11 195);
+  --tab-color-blue: oklch(65% 0.17 255);
+  --tab-color-violet: oklch(65% 0.19 300);
+  --tab-color-grey: oklch(65% 0.02 260);
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   font-size: 14px;
   color-scheme: dark;
@@ -249,6 +260,39 @@ body {
 .tab--active {
   background: var(--bg);
   color: var(--text);
+}
+
+/* One assignment per colour, on any element that carries the attribute —
+   so the tab wearing a colour and the swatch offering it both read from
+   the same variable and can never drift apart. */
+[data-color="red"] { --tab-wash: var(--tab-color-red); }
+[data-color="amber"] { --tab-wash: var(--tab-color-amber); }
+[data-color="green"] { --tab-wash: var(--tab-color-green); }
+[data-color="teal"] { --tab-wash: var(--tab-color-teal); }
+[data-color="blue"] { --tab-wash: var(--tab-color-blue); }
+[data-color="violet"] { --tab-wash: var(--tab-color-violet); }
+[data-color="grey"] { --tab-wash: var(--tab-color-grey); }
+
+/* A tab's grouping colour is a wash, never a block. Saturated-and-small
+   is status (the dot); faded-and-large is identity, so neither has to
+   shout over the other.
+
+   Mixed INTO the background the tab already had rather than replacing
+   it: the active tab is told apart by its background too, and a colour
+   must not cost you the sense of where you are. */
+.tab[data-color] {
+  background: color-mix(in oklab, var(--tab-wash) 12%, var(--bg-raised));
+}
+
+.tab--active[data-color] {
+  background: color-mix(in oklab, var(--tab-wash) 22%, var(--bg));
+}
+
+/* A dragged tab is lifted off the strip, and stays lifted when coloured —
+   the attribute selector would otherwise outrank .tab--dragging's plain
+   background and drop it back into the row. */
+.tab--dragging[data-color] {
+  background: color-mix(in oklab, var(--tab-wash) 22%, var(--bg));
 }
 
 /* Folder or worktree — the one glance that tells tabs of a repo apart. */
