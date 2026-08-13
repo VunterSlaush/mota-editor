@@ -1,11 +1,20 @@
 import { ArrowsClockwise, GitFork, MagnifyingGlass } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionScope } from "../../core/entities/sessionFilter";
-import { filterSessions, scopeCounts } from "../../core/entities/sessionFilter";
+import {
+  filterSessions,
+  matchedKeyword,
+  scopeCounts,
+} from "../../core/entities/sessionFilter";
 import type { HistoryItem } from "../../core/usecases/history";
 
 interface Props {
   sessions: readonly HistoryItem[];
+  /**
+   * What each session was about, by id — read once, the first time a
+   * search is run, because it is the one expensive read here.
+   */
+  loadKeywords: () => Promise<Map<string, readonly string[]>>;
   /** True when any are the agent's own sessions (opening = true resume). */
   native: boolean;
   /** True while the list is being fetched from the local store. */
@@ -23,6 +32,7 @@ interface Props {
 /** UI — previous conversations of this project; click one to reopen it. */
 export function HistoryPanel({
   sessions,
+  loadKeywords,
   native,
   loading,
   error,
@@ -35,11 +45,44 @@ export function HistoryPanel({
 }: Props) {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<SessionScope>("all");
+  const [keywords, setKeywords] = useState<Map<string, readonly string[]> | null>(null);
+  const [indexing, setIndexing] = useState(false);
+  // Asked for exactly once per mounting of this panel: the answer costs
+  // a walk of every transcript, and it does not change while you type.
+  const asked = useRef(false);
+
+  // The first keystroke is what pays for the index — a panel that is
+  // only ever opened and read never pays at all.
+  const searching = query.trim() !== "";
+  useEffect(() => {
+    if (!searching || asked.current) return;
+    asked.current = true;
+    let cancelled = false;
+    setIndexing(true);
+    loadKeywords()
+      .then((loaded) => {
+        if (!cancelled) setKeywords(loaded);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setIndexing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searching]);
 
   const counts = useMemo(() => scopeCounts(sessions), [sessions]);
+  // The rows the filter actually sees: their themes, once known.
+  const indexed = useMemo(
+    () =>
+      keywords ? sessions.map((s) => ({ ...s, keywords: keywords.get(s.id) })) : sessions,
+    [sessions, keywords],
+  );
   const shown = useMemo(
-    () => filterSessions(sessions, query, scope),
-    [sessions, query, scope],
+    () => filterSessions(indexed, query, scope),
+    [indexed, query, scope],
   );
   // The toggles are worth their row only where there is something to
   // toggle: a project without worktrees has one kind of session.
@@ -101,8 +144,13 @@ export function HistoryPanel({
       {!loading && !error && sessions.length === 0 && (
         <p className="changes__empty">No saved sessions for this project yet.</p>
       )}
-      {sessions.length > 0 && shown.length === 0 && (
+      {sessions.length > 0 && shown.length === 0 && !indexing && (
         <p className="changes__empty">Nothing matches that search.</p>
+      )}
+      {indexing && (
+        <p className="changes__empty history__loading">
+          Reading what these conversations were about…
+        </p>
       )}
       <ul className="history__list">
         {shown.map((session) => (
@@ -111,6 +159,7 @@ export function HistoryPanel({
             session={session}
             active={session.id === activeSessionId}
             busy={busy}
+            theme={matchedKeyword(session, query)}
             onOpen={() => onOpen(session)}
             onDelete={() => onDelete(session)}
           />
@@ -161,12 +210,15 @@ function SessionRow({
   session,
   active,
   busy,
+  theme,
   onOpen,
   onDelete,
 }: {
   session: HistoryItem;
   active: boolean;
   busy: boolean;
+  /** The word this row matched on, when the row does not show it. */
+  theme?: string;
   onOpen: () => void;
   onDelete: () => void;
 }) {
@@ -179,6 +231,15 @@ function SessionRow({
       <div className="history__title">{session.title}</div>
       <div className="history__meta">
         <span>{formatWhen(session.savedAt)}</span>
+        {/* Why this row is here at all, when its title does not say. */}
+        {theme && (
+          <span
+            className="history__theme"
+            title={`This conversation is about "${theme}"`}
+          >
+            {theme}
+          </span>
+        )}
         {/* Which checkout this conversation was had in. Only ever on the
             main checkout's tab: a worktree lists its own and needs no
             badge to say whose they are. */}

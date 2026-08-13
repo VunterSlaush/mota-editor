@@ -8,6 +8,7 @@ import type {
 import type {
   ExternalSessionMeta,
   PersistedTranscript,
+  SessionKeywords,
   TranscriptMeta,
   TranscriptStore,
 } from "../ports/transcriptStore";
@@ -44,6 +45,13 @@ class FakeTranscriptStore implements TranscriptStore {
       providerSessionId: t.providerSessionId,
       messageCount: t.messages.length,
     }));
+  }
+  /** What each folder's sessions were about, as the index reports it. */
+  keywordsByPath = new Map<string, SessionKeywords[]>();
+  keywordCalls: string[] = [];
+  async keywords(projectPath: string): Promise<SessionKeywords[]> {
+    this.keywordCalls.push(projectPath);
+    return this.keywordsByPath.get(projectPath) ?? [];
   }
   async listExternal(): Promise<ExternalSessionMeta[]> {
     this.externalCalls += 1;
@@ -790,6 +798,42 @@ describe("SessionHistory", () => {
       await history.remove("t1", row({ id: "s1", local: true }));
 
       expect(transcripts.removed).toEqual([{ path: "/repo", id: "s1" }]);
+    });
+
+    it("indexes this checkout and its worktrees, and nothing else", async () => {
+      const { transcripts, history } = withWorktree();
+      transcripts.keywordsByPath.set("/repo", [{ id: "s1", keywords: ["reducer"] }]);
+      transcripts.keywordsByPath.set("/repo-worktrees/polish", [
+        { id: "w1", keywords: ["sidebar"] },
+      ]);
+
+      const index = await history.keywords("t1");
+
+      expect(transcripts.keywordCalls).toEqual(["/repo", "/repo-worktrees/polish"]);
+      expect(index.get("s1")).toEqual(["reducer"]);
+      expect(index.get("w1")).toEqual(["sidebar"]);
+    });
+
+    it("unions the terms when two checkouts hold the same session", async () => {
+      const { transcripts, history } = withWorktree();
+      transcripts.keywordsByPath.set("/repo", [{ id: "same", keywords: ["reducer"] }]);
+      transcripts.keywordsByPath.set("/repo-worktrees/polish", [
+        { id: "same", keywords: ["reducer", "sidebar"] },
+      ]);
+
+      expect((await history.keywords("t1")).get("same")).toEqual(["reducer", "sidebar"]);
+    });
+
+    it("indexes only its own folder from a worktree's tab", async () => {
+      const { store, transcripts, history } = withWorktree();
+      store.dispatch({
+        type: "tab/opened",
+        project: newProject("t2", "/repo-worktrees/polish", DEFAULTS, "/repo"),
+      });
+
+      await history.keywords("t2");
+
+      expect(transcripts.keywordCalls).toEqual(["/repo-worktrees/polish"]);
     });
 
     it("offers the worktrees' sessions on their own, for the worktree panel", async () => {

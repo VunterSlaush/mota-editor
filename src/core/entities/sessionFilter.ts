@@ -19,6 +19,13 @@ export interface FilterableSession {
    * own folder — the distinction the scope toggles are made of.
    */
   readonly from?: { readonly label: string };
+  /**
+   * What the conversation was about, most frequent term first. Absent
+   * until the index has been built, which is why every match here is an
+   * addition to the title search and never a replacement for it: a
+   * search must return something before the index lands.
+   */
+  readonly keywords?: readonly string[];
 }
 
 /** How many rows each scope would show; the toggles say so out loud. */
@@ -43,6 +50,21 @@ export function filterSessions<T extends FilterableSession>(
   return sessions.filter((session) => inScope(session, scope) && matches(session, typed));
 }
 
+/**
+ * The theme that explains why this row matched, or undefined when the
+ * row explains itself — the title or the worktree badge already contains
+ * what was typed. A row surfacing on a word that appears nowhere on it
+ * reads as a bug; naming the word is what makes it read as an answer.
+ */
+export function matchedKeyword(
+  session: FilterableSession,
+  query: string,
+): string | undefined {
+  const typed = query.trim().toLowerCase();
+  if (typed === "" || visiblyMatches(session, typed)) return undefined;
+  return session.keywords?.find((keyword) => keyword.includes(typed));
+}
+
 export function scopeCounts(sessions: readonly FilterableSession[]): ScopeCounts {
   const worktrees = sessions.filter((session) => session.from !== undefined).length;
   return { all: sessions.length, own: sessions.length - worktrees, worktrees };
@@ -56,6 +78,14 @@ function inScope(session: FilterableSession, scope: SessionScope): boolean {
 
 function matches(session: FilterableSession, typed: string): boolean {
   if (typed === "") return true;
+  if (visiblyMatches(session, typed)) return true;
+  // A prefix, not the whole term: results have to narrow while a word is
+  // still being typed, or the list goes empty before the user is done.
+  return session.keywords?.some((keyword) => keyword.includes(typed)) ?? false;
+}
+
+/** Matched by something the row already shows. */
+function visiblyMatches(session: FilterableSession, typed: string): boolean {
   if (session.title.toLowerCase().includes(typed)) return true;
   return session.from?.label.toLowerCase().includes(typed) ?? false;
 }

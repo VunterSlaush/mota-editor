@@ -3,6 +3,7 @@ import type { SessionStats } from "../../core/entities/insights";
 import type {
   ExternalSessionMeta,
   PersistedTranscript,
+  SessionKeywords,
   TranscriptMeta,
   TranscriptStore,
 } from "../../core/ports/transcriptStore";
@@ -19,6 +20,10 @@ export class TauriTranscriptStore implements TranscriptStore {
 
   async list(projectPath: string): Promise<TranscriptMeta[]> {
     return invoke<TranscriptMeta[]>("list_sessions", { projectPath });
+  }
+
+  async keywords(projectPath: string): Promise<SessionKeywords[]> {
+    return invoke<SessionKeywords[]>("session_keywords", { projectPath });
   }
 
   async listExternal(projectPath: string): Promise<ExternalSessionMeta[]> {

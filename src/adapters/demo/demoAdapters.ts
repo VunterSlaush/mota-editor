@@ -34,6 +34,7 @@ import type {
 } from "../../core/ports/shellPort";
 import type {
   PersistedTranscript,
+  SessionKeywords,
   TranscriptMeta,
   TranscriptStore,
 } from "../../core/ports/transcriptStore";
@@ -562,6 +563,28 @@ export class DemoTranscriptStore implements TranscriptStore {
   }
   async listExternal() {
     return []; // no vendor store exists in a browser
+  }
+  /**
+   * A deliberately naive stand-in for the real extraction, which is
+   * Rust's (`agent_core::session_keywords`) and reads files this build
+   * has none of: the longest handful of distinct words. Enough for the
+   * browser demo to show keyword search working, and not worth a second
+   * copy of the ranking rules to do better.
+   */
+  async keywords(projectPath: string): Promise<SessionKeywords[]> {
+    return [...this.transcripts.values()]
+      .filter((t) => this.folders.get(t.id) === projectPath)
+      .map((t) => ({
+        id: t.id,
+        keywords: [
+          ...new Set(
+            `${t.title} ${t.messages.map((m) => m.text).join(" ")}`
+              .toLowerCase()
+              .split(/[^\p{L}\p{N}]+/u)
+              .filter((word) => word.length > 3),
+          ),
+        ].slice(0, 40),
+      }));
   }
   async load(_p: string, id: string) {
     return this.transcripts.get(id) ?? null;

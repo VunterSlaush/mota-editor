@@ -107,6 +107,8 @@ interface Props {
   /** Just the sessions had in this repo's other checkouts, for the
    *  worktrees panel's short list. */
   loadWorktreeSessions: () => Promise<readonly HistoryItem[]>;
+  /** What each session was about, for History's search. Read on demand. */
+  loadSessionKeywords: () => Promise<Map<string, readonly string[]>>;
   onOpenSession: (item: HistoryItem) => Promise<void>;
   onDeleteSession: (item: HistoryItem) => Promise<void>;
   onNewChat: () => void;
@@ -186,6 +188,7 @@ export function ChatPanel({
   onOpenSettings,
   loadHistory,
   loadWorktreeSessions,
+  loadSessionKeywords,
   onOpenSession,
   onDeleteSession,
   onNewChat,
@@ -545,6 +548,7 @@ export function ChatPanel({
               {shownSidebarView === "history" && (
                 <HistoryPanel
                   sessions={history.sessions}
+                  loadKeywords={loadSessionKeywords}
                   native={history.native}
                   loading={historyLoading}
                   error={history.error}

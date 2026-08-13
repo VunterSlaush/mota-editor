@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterSessions, scopeCounts } from "./sessionFilter";
+import { filterSessions, matchedKeyword, scopeCounts } from "./sessionFilter";
 
 const OWN = { title: "Fix the parser" };
 const POLISH = { title: "Tidy the sidebar", from: { label: "feature/polish" } };
@@ -34,6 +34,50 @@ describe("filterSessions", () => {
 
   it("ignores surrounding whitespace, which a paste always brings", () => {
     expect(filterSessions(ALL, "  parser  ", "all")).toEqual([OWN]);
+  });
+});
+
+describe("filterSessions, by what a session was about", () => {
+  const TOKENS = { title: "Tuesday's chat", keywords: ["reducer", "worktree"] };
+
+  it("finds a session by a theme its title never mentions", () => {
+    expect(filterSessions([OWN, TOKENS], "reducer", "all")).toEqual([TOKENS]);
+  });
+
+  it("matches a partly typed theme, so results narrow as you type", () => {
+    expect(filterSessions([OWN, TOKENS], "worktr", "all")).toEqual([TOKENS]);
+  });
+
+  it("keeps the title winning where both could match", () => {
+    expect(filterSessions([OWN, TOKENS], "chat", "all")).toEqual([TOKENS]);
+  });
+
+  it("costs nothing for a session that has not been indexed", () => {
+    expect(filterSessions([OWN], "reducer", "all")).toEqual([]);
+  });
+});
+
+describe("matchedKeyword", () => {
+  it("names the theme that matched, for a row whose title did not", () => {
+    expect(matchedKeyword({ title: "Tuesday", keywords: ["reducer"] }, "red")).toBe(
+      "reducer",
+    );
+  });
+
+  it("says nothing when the title already explains the match", () => {
+    expect(matchedKeyword({ title: "reducer work", keywords: ["reducer"] }, "red")).toBe(
+      undefined,
+    );
+  });
+
+  it("says nothing when there is no query to have matched", () => {
+    expect(matchedKeyword({ title: "Tuesday", keywords: ["reducer"] }, "  ")).toBe(
+      undefined,
+    );
+  });
+
+  it("says nothing when the worktree badge is what matched", () => {
+    expect(matchedKeyword(POLISH, "polish")).toBe(undefined);
   });
 });
 

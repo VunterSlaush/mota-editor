@@ -339,6 +339,45 @@ export class SessionHistory {
     onRefresh({ native: true, sessions });
   }
 
+  /**
+   * What every listed session was about, by session id — the index the
+   * panel's search matches against once the title has run out of answers.
+   *
+   * Built on demand and covering exactly the checkouts `list` covers, so
+   * a search reaches every row on screen and no folder that is not. The
+   * caller holds the result for the rest of its life: this is the one
+   * expensive read in the History panel, and it is worth paying once.
+   *
+   * Two checkouts can hold a record of the SAME conversation (a worktree
+   * forked from a session, an id that travelled with a copied folder),
+   * so colliding ids take the union of their terms rather than letting
+   * whichever folder was read last decide.
+   */
+  async keywords(tabId: string): Promise<Map<string, readonly string[]>> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return new Map();
+
+    const checkouts = tab.project.worktreeOf
+      ? []
+      : (await this.worktrees.list(tabId).catch(() => [])).filter(
+          (w) => !w.bare && !w.current && !w.prunable,
+        );
+    const paths = [tab.project.path, ...checkouts.map((w) => w.path)];
+    const lists = await Promise.all(
+      paths.map((path) => this.transcriptStore.keywords(path).catch(() => [])),
+    );
+
+    const index = new Map<string, readonly string[]>();
+    for (const entry of lists.flat()) {
+      const known = index.get(entry.id);
+      index.set(
+        entry.id,
+        known ? [...new Set([...known, ...entry.keywords])] : entry.keywords,
+      );
+    }
+    return index;
+  }
+
   async open(tabId: string, item: HistoryItem): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab || tab.busy) return;
