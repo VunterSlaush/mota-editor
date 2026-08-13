@@ -111,7 +111,7 @@ export function TabMenu({
         aria-label="Tab name"
         onChange={(event) => setDraft(event.target.value)}
       />
-      <div className="tab-menu__colors" role="group" aria-label="Tab colour">
+      <div className="tab-menu__colors">
         <button
           type="button"
           className={`tab-menu__color tab-menu__color--none ${
