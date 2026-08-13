@@ -888,6 +888,53 @@ describe("SessionHistory", () => {
       expect(transcripts.keywordCalls).toEqual(["/repo-worktrees/polish"]);
     });
 
+    it("keeps a worktree tab's badge when the agent's listing lands", async () => {
+      const { store, transcripts, gateway, history } = withWorktree();
+      store.dispatch({
+        type: "tab/opened",
+        project: newProject("t2", "/repo-worktrees/polish", DEFAULTS, "/repo"),
+      });
+      transcripts.elsewhere.set("/repo-worktrees/polish", [
+        { id: "w1", title: "in the worktree", savedAt: 500, provider: "claude" },
+      ]);
+      gateway.nativeSessions = [{ sessionId: "n1", title: "native", updatedAt: "" }];
+
+      const refreshed = await new Promise<HistoryListing>((resolve) => {
+        void history.list("t2", resolve);
+      });
+
+      // Every row here is a conversation had in this worktree — the one
+      // the agent knows about as much as the one only we do.
+      expect(refreshed.sessions.map((s) => s.from?.label)).toEqual(["polish", "polish"]);
+    });
+
+    it("shows a conversation the agent and we both know as one row", async () => {
+      const { store, transcripts, gateway, history } = withWorktree();
+      store.dispatch({
+        type: "tab/opened",
+        project: newProject("t2", "/repo-worktrees/polish", DEFAULTS, "/repo"),
+      });
+      // Our copy records the provider's id for it; our own id differs.
+      transcripts.elsewhere.set("/repo-worktrees/polish", [
+        {
+          id: "local-uuid",
+          title: "one conversation",
+          savedAt: 500,
+          provider: "claude",
+          providerSessionId: "prov-1",
+        },
+      ]);
+      gateway.nativeSessions = [{ sessionId: "prov-1", title: "same one" }];
+
+      const refreshed = await new Promise<HistoryListing>((resolve) => {
+        void history.list("t2", resolve);
+      });
+
+      expect(refreshed.sessions).toHaveLength(1);
+      expect(refreshed.sessions[0].from?.worktree).toBe(true);
+      expect(refreshed.sessions[0].native).toBe(true);
+    });
+
     it("offers the worktrees' sessions on their own, for the worktree panel", async () => {
       const { transcripts, history } = withWorktree();
       transcripts.transcripts.set("s1", meta("s1", 100));

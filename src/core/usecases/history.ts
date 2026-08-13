@@ -319,6 +319,12 @@ export class SessionHistory {
     }
     const external = await externalPromise;
 
+    // Every row below describes a conversation had in THIS tab's folder,
+    // whoever reported it — so they all carry the same origin. Building
+    // only the local ones with it is what made a worktree's badge blink
+    // out the moment the agent answered, and left one conversation
+    // wearing a badge on one row and not on its twin.
+    const own = this.ownOrigin(tab);
     const twins = transcriptsByProviderSession(local);
     const nativeSessions = (native ?? [])
       // One malformed entry must not throw the whole list away.
@@ -342,6 +348,7 @@ export class SessionHistory {
           messageCount: known?.messageCount,
           native: true,
           local: known !== undefined,
+          ...own,
         };
       });
     const listed = new Set(nativeSessions.map((s) => s.providerSessionId));
@@ -359,6 +366,7 @@ export class SessionHistory {
           // The store is shared with the agent, so opening truly resumes.
           native: true,
           local: known !== undefined,
+          ...own,
         };
       });
 
@@ -371,15 +379,22 @@ export class SessionHistory {
       }
       return; // nothing beyond the local paint
     }
-    const merged = new Set(agentRows.map((s) => s.id));
+    // One conversation is one row, matched on EITHER id: our own when
+    // the agent's row adopted it, the provider's when it did not. Ids
+    // alone missed the second case, and a transcript saved before we
+    // recorded a provider id is exactly the second case — which is how
+    // one chat came to sit in the list twice.
+    const merged = new Set(
+      agentRows.flatMap((s) => [s.id, s.providerSessionId].filter(Boolean)),
+    );
     // The worktrees' rows ride through untouched: the agent was asked
     // about THIS folder, so it has neither confirmed nor contradicted
     // them, and dropping them would make the refresh look like a purge.
     const sessions = byNewest([
       ...agentRows,
       ...local
-        .filter((m) => !merged.has(m.id))
-        .map((m) => ({ ...m, native: false, local: true })),
+        .filter((m) => !merged.has(m.id) && !merged.has(m.providerSessionId ?? ""))
+        .map((m) => ({ ...m, native: false, local: true, ...own })),
       ...elsewhere,
     ]);
     onRefresh({ native: true, sessions });
