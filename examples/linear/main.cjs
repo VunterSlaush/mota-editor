@@ -2,15 +2,17 @@
 // Plain Node (18+, for fetch), no dependencies: one JSON object per
 // stdin line in, one per stdout line out (MXP, see docs/EXTENSIONS.md).
 //
-// Signing in — the "Log in with Linear" button, two flavors:
-// - Default: a browser-assisted key setup. The extension serves a tiny
-//   localhost page with a link to Linear's API-key screen and a paste
-//   box; submitting validates the key and stores it in <dataDir>/config.json.
-// - Full OAuth, when <dataDir>/config.json carries
-//   {"oauth": {"clientId": "…", "clientSecret": "…"}} from a Linear
-//   OAuth application you registered (redirect URL: http://localhost).
-// Either way the panel refreshes itself when the browser round-trip
-// lands (`panels/refresh`). LINEAR_API_KEY in the environment also works.
+// Signing in — the "Log in with Linear" button runs real OAuth (PKCE,
+// no client secret needed): browser opens Linear's own login/consent
+// screen, tokens land in <dataDir>/config.json, and they refresh
+// themselves. Linear has no anonymous OAuth, so the very first run
+// serves a one-time setup page: create an OAuth app in your workspace
+// (link provided, callback URL spelled out), paste its Client ID, and
+// the same browser tab continues straight into the login. After that
+// it is one click forever. Personal API keys still work as a fallback
+// ({"apiKey": …} in config.json, or LINEAR_API_KEY in the environment).
+// The panel refreshes itself when the browser round-trip lands
+// (`panels/refresh`).
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -21,7 +23,13 @@ const { spawn } = require("node:child_process");
 const LINEAR_GRAPHQL = "https://api.linear.app/graphql";
 const LINEAR_OAUTH_AUTHORIZE = "https://linear.app/oauth/authorize";
 const LINEAR_OAUTH_TOKEN = "https://api.linear.app/oauth/token";
+const LINEAR_NEW_APP_PAGE = "https://linear.app/settings/api/applications/new";
 const LINEAR_KEYS_PAGE = "https://linear.app/settings/api";
+// Linear requires the registered callback URL to match exactly, so the
+// OAuth listener uses a fixed port; the setup page spells it out.
+const OAUTH_PORT = 52560;
+const OAUTH_REDIRECT = `http://localhost:${OAUTH_PORT}/callback`;
+const OAUTH_SCOPE = "read,write";
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 /** Linear's state.type values, in board order — our group order. */
 const STATE_TYPE_ORDER = ["triage", "started", "unstarted", "backlog"];
@@ -93,7 +101,7 @@ async function handle(msg) {
 // ---- The panel ----
 
 async function buildView() {
-  const auth = authHeader();
+  const auth = await freshAuthHeader();
   if (!auth) return signInView();
   try {
     const [issues, states] = await Promise.all([
@@ -106,7 +114,7 @@ async function buildView() {
     };
   } catch (e) {
     if (e && e.unauthorized) {
-      return signInView("Linear rejected the stored sign-in — log in again.");
+      return signInView("Your Linear session expired — log in again.");
     }
     throw e;
   }
@@ -115,7 +123,7 @@ async function buildView() {
 async function handleAction(params) {
   const { action, itemId, value } = params || {};
   if (action === "button" && itemId === "login") return startLogin();
-  const auth = authHeader();
+  const auth = await freshAuthHeader();
   if (!auth) return { view: signInView() };
   if (action === "select" && itemId && value) {
     await updateIssueState(auth, itemId, value);
@@ -133,8 +141,7 @@ function signInView(reason) {
     buttons: [{ id: "login", label: "Log in with Linear" }],
     emptyText:
       (reason ? `${reason} ` : "") +
-      "Sign in to see your issues — the button opens your browser. " +
-      `(Manual alternative: put {"apiKey": "lin_api_…"} in ${configPath()}.)`,
+      "Sign in with your browser to see your issues.",
   };
 }
 
@@ -167,11 +174,18 @@ function saveConfig(patch) {
   fs.writeFileSync(configPath(), `${JSON.stringify(next, null, 2)}\n`);
 }
 
-/** The Authorization header value, or null when signed out. Personal
- *  API keys go raw; OAuth access tokens go as Bearer. */
-function authHeader() {
+/** The Authorization header value, refreshed when the OAuth token is
+ *  near expiry; null when signed out. Personal API keys go raw; OAuth
+ *  access tokens go as Bearer. */
+async function freshAuthHeader() {
   if (process.env.LINEAR_API_KEY) return process.env.LINEAR_API_KEY;
-  const config = readConfig();
+  let config = readConfig();
+  const nearExpiry =
+    typeof config.expiresAt === "number" && Date.now() > config.expiresAt - 60_000;
+  if (config.accessToken && config.refreshToken && nearExpiry) {
+    await refreshTokens().catch((e) => log(`token refresh failed: ${e}`));
+    config = readConfig();
+  }
   if (typeof config.accessToken === "string" && config.accessToken.trim()) {
     return `Bearer ${config.accessToken.trim()}`;
   }
@@ -181,11 +195,42 @@ function authHeader() {
   return null;
 }
 
-function oauthApp() {
+function oauthClientId() {
   const oauth = readConfig().oauth;
-  return oauth && typeof oauth.clientId === "string" && typeof oauth.clientSecret === "string"
-    ? oauth
+  return oauth && typeof oauth.clientId === "string" && oauth.clientId.trim()
+    ? oauth.clientId.trim()
     : null;
+}
+
+async function refreshTokens() {
+  const config = readConfig();
+  const clientId = oauthClientId();
+  if (!config.refreshToken || !clientId) throw new Error("nothing to refresh with");
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: config.refreshToken,
+    client_id: clientId,
+  });
+  const oauth = config.oauth || {};
+  if (oauth.clientSecret) body.set("client_secret", oauth.clientSecret);
+  const response = await fetch(LINEAR_OAUTH_TOKEN, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  saveTokens(await response.json());
+}
+
+function saveTokens(payload) {
+  if (!payload.access_token) throw new Error("Linear sent no access token.");
+  saveConfig({
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token || readConfig().refreshToken,
+    expiresAt: payload.expires_in ? Date.now() + payload.expires_in * 1000 : undefined,
+    // A stored personal key would otherwise shadow-fight the token.
+    apiKey: undefined,
+  });
 }
 
 // ---- Browser login ----
@@ -202,79 +247,131 @@ function startLogin() {
 }
 
 async function runLoginFlow() {
-  const state = crypto.randomBytes(16).toString("hex");
-  const server = http.createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const port = server.address().port;
-  const timer = setTimeout(() => endLogin("timed out"), LOGIN_WINDOW_MS);
-  timer.unref();
-  login = { server, state, timer };
-
-  const app = oauthApp();
-  server.on("request", (request, response) => {
-    void routeLoginRequest(request, response, { state, port, app }).catch((e) => {
-      log(`login request failed: ${e}`);
-      respondHtml(response, 500, page("Something went wrong", String(e)));
-    });
-  });
-
-  if (app) {
-    const redirect = `http://localhost:${port}/callback`;
-    const url =
-      `${LINEAR_OAUTH_AUTHORIZE}?client_id=${encodeURIComponent(app.clientId)}` +
-      `&redirect_uri=${encodeURIComponent(redirect)}` +
-      `&response_type=code&scope=read,write&state=${state}&prompt=consent`;
+  const clientId = oauthClientId();
+  if (clientId) {
+    const url = await startOauthListener(clientId);
     openBrowser(url);
-    log(`OAuth login started on port ${port}`);
   } else {
-    openBrowser(`http://127.0.0.1:${port}/setup?s=${state}`);
-    log(`browser key setup started on port ${port}`);
+    await startSetupListener();
   }
 }
 
-async function routeLoginRequest(request, response, { state, port, app }) {
+/** Bind the fixed-port callback listener and return the authorize URL
+ *  (PKCE — no client secret involved). */
+async function startOauthListener(clientId) {
+  const state = crypto.randomBytes(16).toString("hex");
+  const verifier = crypto.randomBytes(32).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  const server = http.createServer();
+  try {
+    await listenOn(server, OAUTH_PORT);
+  } catch {
+    throw new Error(
+      `Port ${OAUTH_PORT} is in use — close whatever holds it and press the login button again.`,
+    );
+  }
+  beginLogin(server, state);
+  server.on("request", (request, response) => {
+    void handleOauthCallback(request, response, { clientId, state, verifier }).catch((e) => {
+      log(`oauth callback failed: ${e}`);
+      respondHtml(response, 500, page("Something went wrong", String(e)));
+    });
+  });
+  log(`OAuth listener on ${OAUTH_REDIRECT}`);
+  return (
+    `${LINEAR_OAUTH_AUTHORIZE}?client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT)}` +
+    `&response_type=code&scope=${encodeURIComponent(OAUTH_SCOPE)}` +
+    `&state=${state}&code_challenge=${challenge}&code_challenge_method=S256` +
+    "&prompt=consent"
+  );
+}
+
+async function handleOauthCallback(request, response, { clientId, state, verifier }) {
+  const url = new URL(request.url, `http://localhost:${OAUTH_PORT}`);
+  if (url.pathname !== "/callback" || request.method !== "GET") {
+    return respondHtml(response, 404, page("Not found", "This little server only does sign-in."));
+  }
+  if (url.searchParams.get("state") !== state) {
+    return respondHtml(response, 403, page("Rejected", "State mismatch — press the login button again."));
+  }
+  const code = url.searchParams.get("code");
+  if (!code) {
+    return respondHtml(response, 400, page("Cancelled", "Linear sent no code — nothing was changed."));
+  }
+  saveTokens(await exchangeCode(clientId, code, verifier));
+  finishLogin(response);
+}
+
+/** First run only: no OAuth app yet. Serve the walkthrough page; when
+ *  the Client ID is pasted, hand the SAME browser tab straight into the
+ *  real Linear login. */
+async function startSetupListener() {
+  const state = crypto.randomBytes(16).toString("hex");
+  const server = http.createServer();
+  await listenOn(server, 0);
+  const port = server.address().port;
+  beginLogin(server, state);
+  server.on("request", (request, response) => {
+    void handleSetupRequest(request, response, { state, port }).catch((e) => {
+      log(`setup request failed: ${e}`);
+      respondHtml(response, 500, page("Something went wrong", String(e)));
+    });
+  });
+  openBrowser(`http://127.0.0.1:${port}/setup?s=${state}`);
+  log(`one-time setup page on port ${port}`);
+}
+
+async function handleSetupRequest(request, response, { state, port }) {
   const url = new URL(request.url, `http://127.0.0.1:${port}`);
 
-  if (app && url.pathname === "/callback" && request.method === "GET") {
-    if (url.searchParams.get("state") !== state) {
-      return respondHtml(response, 403, page("Rejected", "State mismatch — try again."));
-    }
-    const code = url.searchParams.get("code");
-    if (!code) {
-      return respondHtml(response, 400, page("Cancelled", "Linear sent no code."));
-    }
-    const token = await exchangeCode(app, code, `http://localhost:${port}/callback`);
-    saveConfig({ accessToken: token });
-    finishLogin(response);
-    return;
-  }
-
-  if (!app && url.pathname === "/setup" && request.method === "GET") {
+  if (url.pathname === "/setup" && request.method === "GET") {
     if (url.searchParams.get("s") !== state) {
       return respondHtml(response, 403, page("Rejected", "Stale link — press the login button again."));
     }
-    return respondHtml(response, 200, setupForm(state));
+    return respondHtml(response, 200, setupPage(state));
   }
 
-  if (!app && url.pathname === "/save" && request.method === "POST") {
-    const body = await readBody(request);
-    const form = new URLSearchParams(body);
+  if (url.pathname === "/save-client" && request.method === "POST") {
+    const form = new URLSearchParams(await readBody(request));
+    if (form.get("s") !== state) {
+      return respondHtml(response, 403, page("Rejected", "Stale form — press the login button again."));
+    }
+    const clientId = (form.get("clientId") || "").trim();
+    if (!clientId) {
+      return respondHtml(response, 200, setupPage(state, "Paste the Client ID first."));
+    }
+    saveConfig({ oauth: { ...(readConfig().oauth || {}), clientId } });
+    // Swap listeners: the OAuth one must own its fixed port before this
+    // tab is sent to Linear (which will bounce it back to /callback).
+    const previous = takeoverLogin();
+    const authorizeUrl = await startOauthListener(clientId).catch((e) => {
+      respondHtml(response, 200, setupPage(state, String(e.message || e)));
+      return null;
+    });
+    closeSoon(previous);
+    if (authorizeUrl) {
+      response.writeHead(302, { Location: authorizeUrl });
+      response.end();
+    }
+    return;
+  }
+
+  if (url.pathname === "/save" && request.method === "POST") {
+    const form = new URLSearchParams(await readBody(request));
     if (form.get("s") !== state) {
       return respondHtml(response, 403, page("Rejected", "Stale form — press the login button again."));
     }
     const key = (form.get("key") || "").trim();
     if (!key) {
-      return respondHtml(response, 200, setupForm(state, "Paste a key first."));
+      return respondHtml(response, 200, setupPage(state, "Paste a key first."));
     }
     try {
       await linear(key, "query { viewer { id } }");
     } catch (e) {
-      return respondHtml(response, 200, setupForm(state, `Linear rejected that key: ${e.message}`));
+      return respondHtml(response, 200, setupPage(state, `Linear rejected that key: ${e.message}`));
     }
-    saveConfig({ apiKey: key });
+    saveConfig({ apiKey: key, accessToken: undefined, refreshToken: undefined });
     finishLogin(response);
     return;
   }
@@ -291,6 +388,33 @@ function finishLogin(response) {
   statesByTeam = null;
   endLogin("completed");
   sendPanelsRefresh();
+}
+
+function listenOn(server, port) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", resolve);
+  });
+}
+
+function beginLogin(server, state) {
+  const timer = setTimeout(() => endLogin("timed out"), LOGIN_WINDOW_MS);
+  timer.unref();
+  login = { server, state, timer };
+}
+
+/** Detach the current login (its response may still be flushing) so a
+ *  successor can take over; close the old server a beat later. */
+function takeoverLogin() {
+  const current = login;
+  login = null;
+  if (current) clearTimeout(current.timer);
+  return current;
+}
+
+function closeSoon(previous) {
+  if (!previous) return;
+  setTimeout(() => previous.server.close(), 1000).unref();
 }
 
 function endLogin(why) {
@@ -311,24 +435,25 @@ function sendPanelsRefresh() {
   });
 }
 
-async function exchangeCode(app, code, redirectUri) {
+async function exchangeCode(clientId, code, verifier) {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: OAUTH_REDIRECT,
+    client_id: clientId,
+    code_verifier: verifier,
+  });
+  const clientSecret = (readConfig().oauth || {}).clientSecret;
+  if (clientSecret) body.set("client_secret", clientSecret);
   const response = await fetch(LINEAR_OAUTH_TOKEN, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      client_id: app.clientId,
-      client_secret: app.clientSecret,
-    }).toString(),
+    body: body.toString(),
   });
   if (!response.ok) {
     throw new Error(`Token exchange failed (HTTP ${response.status}).`);
   }
-  const payload = await response.json();
-  if (!payload.access_token) throw new Error("Linear sent no access token.");
-  return payload.access_token;
+  return response.json();
 }
 
 function openBrowser(url) {
@@ -373,22 +498,38 @@ function page(title, message) {
 <h2>${title}</h2><p>${message}</p></body>`;
 }
 
-function setupForm(state, notice) {
+function setupPage(state, notice) {
   return `<!doctype html><meta charset="utf-8"><title>Connect Linear · Mota</title>
-<body style="font-family:system-ui;max-width:26rem;margin:14vh auto;line-height:1.5">
+<body style="font-family:system-ui;max-width:30rem;margin:12vh auto;line-height:1.6">
 <h2>Connect Linear to Mota</h2>
+<p>One-time setup — after this it's a single click straight into
+Linear's own login. Linear requires every app to be registered, so:</p>
 <ol>
-<li><a href="${LINEAR_KEYS_PAGE}" target="_blank" rel="noreferrer">Open Linear's API settings</a>
- and create a <b>personal API key</b>.</li>
-<li>Paste it here — it stays on this machine.</li>
+<li><a href="${LINEAR_NEW_APP_PAGE}" target="_blank" rel="noreferrer">Create the
+ OAuth application</a> in your Linear workspace (name it "Mota Editor",
+ any icon).</li>
+<li>Set its <b>callback URL</b> to exactly:<br>
+ <code style="user-select:all">${OAUTH_REDIRECT}</code></li>
+<li>Copy the app's <b>Client ID</b> and paste it below — no secret
+ needed, and this is the last thing you'll ever paste.</li>
 </ol>
 ${notice ? `<p style="color:#b00">${notice}</p>` : ""}
+<form method="post" action="/save-client">
+<input type="hidden" name="s" value="${state}">
+<input name="clientId" placeholder="Client ID" autofocus autocomplete="off"
+ style="width:100%;padding:.5rem;font-size:1rem;box-sizing:border-box">
+<button type="submit" style="margin-top:.75rem;padding:.5rem 1.25rem;font-size:1rem">
+Continue to Linear login</button>
+</form>
+<details style="margin-top:2rem"><summary>Prefer a personal API key instead?</summary>
+<p><a href="${LINEAR_KEYS_PAGE}" target="_blank" rel="noreferrer">Create one here</a>
+ and paste it — it stays on this machine.</p>
 <form method="post" action="/save">
 <input type="hidden" name="s" value="${state}">
-<input type="password" name="key" placeholder="lin_api_…" autofocus
+<input type="password" name="key" placeholder="lin_api_…"
  style="width:100%;padding:.5rem;font-size:1rem;box-sizing:border-box">
-<button type="submit" style="margin-top:.75rem;padding:.5rem 1.25rem;font-size:1rem">Save</button>
-</form></body>`;
+<button type="submit" style="margin-top:.75rem;padding:.5rem 1.25rem;font-size:1rem">Save key</button>
+</form></details></body>`;
 }
 
 // ---- Linear GraphQL ----
