@@ -29,11 +29,13 @@ export class TauriCommandOptimizer implements CommandOptimizer {
     projectPath: string,
     provider: ProviderId,
     commandName: string,
+    evidence?: string,
   ): Promise<OptimizeRun> {
     const wire = await invoke<WireOptimizeRun>("optimize_command", {
       projectPath,
       providerId: provider,
       commandName,
+      evidence: evidence ?? null,
     });
     return { text: wire.text, contentHash: wire.contentHash };
   }
@@ -43,12 +45,14 @@ export class TauriCommandOptimizer implements CommandOptimizer {
     provider: ProviderId,
     commandName: string,
     blockers: readonly OptimizationBlocker[],
+    evidence?: string,
   ): Promise<OptimizeRun> {
     const wire = await invoke<WireOptimizeRun>("rewrite_command", {
       projectPath,
       providerId: provider,
       commandName,
       blockers,
+      evidence: evidence ?? null,
     });
     return { text: wire.text, contentHash: wire.contentHash };
   }

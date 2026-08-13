@@ -67,6 +67,12 @@ Supporting decisions:
   free, there is no file store to secure, and a hostile repo edit can
   only flip the "source changed" badge (the stored `sourceHash` no
   longer matches), never the approved script itself.
+- **Analysis is grounded in run telemetry.** The command's recorded
+  turns (run count, average tokens/duration, tool calls per run by
+  kind, from `TurnStat`) are summarized (`commandRunEvidence`) and
+  folded into both analysis prompts — what a command actually DID
+  beats what its text implies. Best-effort: unreadable history never
+  blocks an optimization.
 - **Savings are derived, never persisted**, matching the Insights
   pattern: a command's turns split at `activatedAt` — before is the
   baseline, after are optimized runs — over the same billed-first,

@@ -39,9 +39,10 @@ pub async fn optimize_command(
     project_path: String,
     provider_id: String,
     command_name: String,
+    evidence: Option<String>,
 ) -> Result<OptimizeRunResult, String> {
-    run_headless_analysis(app, project_path, provider_id, command_name, |name, body| {
-        optimize_prompt(name, body)
+    run_headless_analysis(app, project_path, provider_id, command_name, move |name, body| {
+        optimize_prompt(name, body, evidence.as_deref())
     })
     .await
 }
@@ -56,9 +57,10 @@ pub async fn rewrite_command(
     provider_id: String,
     command_name: String,
     blockers: Vec<RewriteBlocker>,
+    evidence: Option<String>,
 ) -> Result<OptimizeRunResult, String> {
     run_headless_analysis(app, project_path, provider_id, command_name, move |name, body| {
-        rewrite_prompt(name, body, &blockers)
+        rewrite_prompt(name, body, &blockers, evidence.as_deref())
     })
     .await
 }

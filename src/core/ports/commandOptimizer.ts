@@ -31,12 +31,14 @@ export interface CommandOptimizer {
     projectPath: string,
     provider: ProviderId,
     commandName: string,
+    evidence?: string,
   ): Promise<OptimizeRun>;
   rewrite(
     projectPath: string,
     provider: ProviderId,
     commandName: string,
     blockers: readonly OptimizationBlocker[],
+    evidence?: string,
   ): Promise<OptimizeRun>;
   saveCopy(
     projectPath: string,

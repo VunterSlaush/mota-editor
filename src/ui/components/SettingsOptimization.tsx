@@ -245,6 +245,12 @@ export function SettingsOptimization({
         and its row says why. If a command's file changes later, its row flags the
         approved script as stale so you can re-optimize.
       </p>
+      <p className="settings-section__hint">
+        Analyzing runs one real agent turn on your account —{" "}
+        <strong>each Optimize click costs tokens</strong> (a short turn; the command's
+        recorded run history is included as evidence, which is what makes the verdict
+        good). The savings start once a script is active.
+      </p>
 
       <div className="settings-field">
         <div className="settings-field__text">
@@ -381,6 +387,7 @@ function OptimizationRow({
 }: RowProps) {
   const analyzing = activity.kind === "analyzing";
   const stale = record !== undefined && isStale(record, command.contentHash);
+  const costNote = "Runs one headless agent turn — uses your provider tokens.";
 
   return (
     <div className="optimization-row">
@@ -417,6 +424,7 @@ function OptimizationRow({
                 className="tool-add"
                 onClick={onOptimize}
                 disabled={analyzing}
+                title={costNote}
               >
                 {analyzing ? "Analyzing…" : "Re-optimize"}
               </button>
@@ -432,6 +440,7 @@ function OptimizationRow({
                   className="tool-add"
                   onClick={onRewriteCopy}
                   disabled={analyzing}
+                  title={costNote}
                 >
                   <Lightning size={14} /> {analyzing ? "Analyzing…" : "Optimize a copy"}
                 </button>
@@ -441,6 +450,7 @@ function OptimizationRow({
                 className="tool-add"
                 onClick={onOptimize}
                 disabled={analyzing}
+                title={costNote}
               >
                 {record?.status === "notOptimizable" ? (
                   analyzing ? (

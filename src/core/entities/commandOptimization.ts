@@ -1,5 +1,7 @@
 import { commandConfigKey } from "./commandConfig";
+import type { SessionStats } from "./insights";
 import type { ProviderId } from "./provider";
+import { formatTokens } from "./tokens";
 
 /**
  * Entities layer — a slash command distilled into a deterministic script.
@@ -321,4 +323,81 @@ export function isStale(
   currentHash: string | undefined,
 ): boolean {
   return currentHash !== undefined && currentHash !== optimization.sourceHash;
+}
+
+/**
+ * What a command actually did across its recorded runs — measured
+ * telemetry from past sessions, the strongest evidence the optimizer
+ * can get about which steps really happen and how mechanical they are.
+ */
+export interface CommandRunEvidence {
+  readonly runs: number;
+  readonly avgTokens: number | null;
+  readonly avgDurationMs: number | null;
+  /** Average tool calls per run, by tool kind (execute, read, edit…). */
+  readonly toolCallsPerRun: Readonly<Record<string, number>>;
+}
+
+export function commandRunEvidence(
+  sessions: readonly SessionStats[],
+  provider: ProviderId,
+  command: string,
+): CommandRunEvidence | null {
+  let runs = 0;
+  let tokens = 0;
+  let tokenRuns = 0;
+  let duration = 0;
+  let durationRuns = 0;
+  const tools = new Map<string, number>();
+
+  for (const session of sessions) {
+    if (session.provider !== provider) continue;
+    for (const turn of session.turns) {
+      if (turn.command !== command) continue;
+      runs += 1;
+      if (turn.tokens !== undefined) {
+        tokens += turn.tokens;
+        tokenRuns += 1;
+      }
+      if (turn.durationMs !== undefined) {
+        duration += turn.durationMs;
+        durationRuns += 1;
+      }
+      for (const [kind, count] of Object.entries(turn.toolCounts)) {
+        tools.set(kind, (tools.get(kind) ?? 0) + count);
+      }
+    }
+  }
+  if (runs === 0) return null;
+
+  const toolCallsPerRun = Object.fromEntries(
+    [...tools.entries()]
+      .map(([kind, total]) => [kind, Math.round((total / runs) * 10) / 10] as const)
+      .filter(([, perRun]) => perRun > 0)
+      .sort((a, b) => Number(b[1]) - Number(a[1])),
+  );
+  return {
+    runs,
+    avgTokens: tokenRuns > 0 ? Math.round(tokens / tokenRuns) : null,
+    avgDurationMs: durationRuns > 0 ? Math.round(duration / durationRuns) : null,
+    toolCallsPerRun,
+  };
+}
+
+/** The evidence as one prompt-ready paragraph; null when there is none. */
+export function formatRunEvidence(evidence: CommandRunEvidence | null): string | null {
+  if (evidence === null) return null;
+  const parts = [`${evidence.runs} recorded run${evidence.runs === 1 ? "" : "s"}`];
+  if (evidence.avgTokens !== null) {
+    parts.push(`~${formatTokens(evidence.avgTokens)} tokens per run`);
+  }
+  if (evidence.avgDurationMs !== null) {
+    parts.push(`~${Math.round(evidence.avgDurationMs / 1000)}s per run`);
+  }
+  const tools = Object.entries(evidence.toolCallsPerRun)
+    .slice(0, 6)
+    .map(([kind, perRun]) => `${kind} x${perRun}`)
+    .join(", ");
+  const toolLine = tools === "" ? "" : `; tool calls per run: ${tools}`;
+  return `${parts.join(", ")}${toolLine}.`;
 }

@@ -4,11 +4,15 @@ import type {
   RewriteProposal,
 } from "../entities/commandOptimization";
 import {
+  commandRunEvidence,
+  formatRunEvidence,
   parseOptimizationVerdict,
   parseRewriteVerdict,
 } from "../entities/commandOptimization";
 import type { ProviderId } from "../entities/provider";
 import type { CommandOptimizer, SavedCommandCopy } from "../ports/commandOptimizer";
+import type { TranscriptStore } from "../ports/transcriptStore";
+import type { Store } from "../state/store";
 
 /** What the settings row renders after an analysis run. */
 export type OptimizeOutcome =
@@ -30,16 +34,21 @@ export type RewriteOutcome =
  * the settings map, and a discarded proposal must leave no trace.
  */
 export class OptimizeCommand {
-  constructor(private readonly optimizer: CommandOptimizer) {}
+  constructor(
+    private readonly optimizer: CommandOptimizer,
+    private readonly store: Store,
+    private readonly transcriptStore: TranscriptStore,
+  ) {}
 
   async execute(
     projectPath: string,
     provider: ProviderId,
     commandName: string,
   ): Promise<OptimizeOutcome> {
+    const evidence = await this.runEvidence(provider, commandName);
     let run: { text: string; contentHash: string };
     try {
-      run = await this.optimizer.optimize(projectPath, provider, commandName);
+      run = await this.optimizer.optimize(projectPath, provider, commandName, evidence);
     } catch (error) {
       return { kind: "failed", error: String(error) };
     }
@@ -61,9 +70,16 @@ export class OptimizeCommand {
     commandName: string,
     blockers: readonly OptimizationBlocker[],
   ): Promise<RewriteOutcome> {
+    const evidence = await this.runEvidence(provider, commandName);
     let run: { text: string };
     try {
-      run = await this.optimizer.rewrite(projectPath, provider, commandName, blockers);
+      run = await this.optimizer.rewrite(
+        projectPath,
+        provider,
+        commandName,
+        blockers,
+        evidence,
+      );
     } catch (error) {
       return { kind: "failed", error: String(error) };
     }
@@ -72,6 +88,28 @@ export class OptimizeCommand {
       return { kind: "failed", error: verdict.error };
     }
     return { kind: "proposal", proposal: verdict.proposal };
+  }
+
+  /**
+   * What this command actually did in past sessions — run counts, token
+   * cost, tool calls — folded into the analysis prompt as measured
+   * evidence. Best-effort: history that cannot be read must never block
+   * an optimization, so failures collapse to "no evidence".
+   */
+  private async runEvidence(
+    provider: ProviderId,
+    commandName: string,
+  ): Promise<string | undefined> {
+    try {
+      const knownProjects = this.store.getState().tabs.map((tab) => tab.project.path);
+      const sessions = await this.transcriptStore.listStats(knownProjects);
+      return (
+        formatRunEvidence(commandRunEvidence(sessions, provider, commandName)) ??
+        undefined
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   /** Write the approved variant to disk as a NEW command file. */

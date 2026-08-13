@@ -258,6 +258,8 @@ export function createAppContext(): AppContext {
     listCommands: new ListCommands(store, commandCatalog),
     optimizeCommand: new OptimizeCommand(
       inTauri ? new TauriCommandOptimizer() : new DemoCommandOptimizer(),
+      store,
+      transcriptStore,
     ),
     listProjectFiles: new ListProjectFiles(store, gitPort),
     shells: new Shells(store, shellPort, shellHistory),

@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { CommandOptimization } from "./commandOptimization";
 import {
   activeOptimization,
+  commandRunEvidence,
+  formatRunEvidence,
   isStale,
   optimizedPrompt,
   parseOptimizationVerdict,
   parseRewriteVerdict,
 } from "./commandOptimization";
+import type { SessionStats, TurnStat } from "./insights";
 
 const ACTIVE: CommandOptimization = {
   status: "active",
@@ -233,6 +236,65 @@ describe("optimized prompt rewrite", () => {
     expect(optimizedPrompt("/commit-push", "/commit-push", plain)).not.toContain(
       "{{placeholder}}",
     );
+  });
+});
+
+describe("run evidence", () => {
+  const turn = (overrides: Partial<TurnStat>): TurnStat => ({
+    sentAt: 1_000,
+    mode: "normal",
+    permission: "default",
+    toolCounts: {},
+    ...overrides,
+  });
+  const session = (turns: TurnStat[], provider = "claude"): SessionStats => ({
+    sessionId: "s1",
+    title: "t",
+    projectDirHash: "h",
+    provider,
+    savedAt: 2_000,
+    turns,
+    touchedFiles: {},
+  });
+
+  it("aggregates runs, averages, and per-run tool calls", () => {
+    const sessions = [
+      session([
+        turn({
+          command: "/start-preview",
+          tokens: 40_000,
+          durationMs: 90_000,
+          toolCounts: { execute: 6, read: 4 },
+        }),
+        turn({
+          command: "/start-preview",
+          tokens: 20_000,
+          durationMs: 30_000,
+          toolCounts: { execute: 4 },
+        }),
+        turn({ command: "/other", tokens: 999_999 }),
+      ]),
+    ];
+    const evidence = commandRunEvidence(sessions, "claude", "/start-preview");
+    expect(evidence).toEqual({
+      runs: 2,
+      avgTokens: 30_000,
+      avgDurationMs: 60_000,
+      toolCallsPerRun: { execute: 5, read: 2 },
+    });
+    expect(formatRunEvidence(evidence)).toBe(
+      "2 recorded runs, ~30k tokens per run, ~60s per run; tool calls per run: execute x5, read x2.",
+    );
+  });
+
+  it("returns null when the command never ran", () => {
+    expect(commandRunEvidence([session([])], "claude", "/x")).toBeNull();
+    expect(formatRunEvidence(null)).toBeNull();
+  });
+
+  it("ignores other providers' runs", () => {
+    const sessions = [session([turn({ command: "/x", tokens: 5 })], "codex")];
+    expect(commandRunEvidence(sessions, "claude", "/x")).toBeNull();
   });
 });
 

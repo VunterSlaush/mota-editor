@@ -62,15 +62,30 @@ pub fn content_hash(content: &str) -> String {
     format!("{hash:016x}")
 }
 
+/// Measured telemetry from past runs, folded into an analysis prompt.
+/// The strongest evidence there is: what the command DID beats what its
+/// text implies.
+fn evidence_section(evidence: Option<&str>) -> String {
+    match evidence {
+        Some(e) if !e.trim().is_empty() => format!(
+            "\n\nTelemetry from this command's past runs (measured, not guessed — \
+weigh it over your reading of the text; heavy execute counts suggest mechanical \
+steps, heavy read counts suggest judgment):\n{e}"
+        ),
+        _ => String::new(),
+    }
+}
+
 /// The analysis prompt for distilling a command into a script. Asks for
 /// exactly one fenced JSON verdict; the frontend entity parses it. Kept
 /// here (pure, tested) so the shell only ever assembles a TurnRequest.
-pub fn optimize_prompt(command_name: &str, body: &str) -> String {
+pub fn optimize_prompt(command_name: &str, body: &str, evidence: Option<&str>) -> String {
+    let telemetry = evidence_section(evidence);
     format!(
         "You are analyzing the slash command `{command_name}` of an AI coding \
 assistant. Its full instructions are between the <command> tags below. Decide \
 whether it is DETERMINISTIC: a fixed sequence of shell steps that plays out the \
-same way every run, with no judgment beyond filling in a small value.
+same way every run, with no judgment beyond filling in a small value.{telemetry}
 
 If it is deterministic, distill it into ONE portable POSIX sh script:
 - Only commands the instructions themselves call for; no interactive prompts, \
@@ -126,7 +141,12 @@ pub struct RewriteBlocker {
 /// IS optimizable. The original file stays untouched; the model returns
 /// the rewritten command text plus the script (and residual
 /// instructions) implementing it, in one JSON verdict.
-pub fn rewrite_prompt(command_name: &str, body: &str, blockers: &[RewriteBlocker]) -> String {
+pub fn rewrite_prompt(
+    command_name: &str,
+    body: &str,
+    blockers: &[RewriteBlocker],
+    evidence: Option<&str>,
+) -> String {
     let blocker_list = if blockers.is_empty() {
         "(none listed — find the judgment steps yourself)".to_owned()
     } else {
@@ -136,12 +156,13 @@ pub fn rewrite_prompt(command_name: &str, body: &str, blockers: &[RewriteBlocker
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let telemetry = evidence_section(evidence);
     format!(
         "The slash command `{command_name}` of an AI coding assistant (full text \
 between the <command> tags below) was judged NOT automatable because of these \
 blocking instructions:
 
-{blocker_list}
+{blocker_list}{telemetry}
 
 Rewrite the command into an OPTIMIZED VARIANT, applying each blocker's advice:
 - Wherever it asked the user or weighed options, pick ONE sensible deterministic \
@@ -223,9 +244,10 @@ mod tests {
 
     #[test]
     fn optimize_prompt_carries_the_contract_and_the_body() {
-        let prompt = optimize_prompt("/commit-push", "Run npm test, then push.");
+        let prompt = optimize_prompt("/commit-push", "Run npm test, then push.", None);
         assert!(prompt.contains("`/commit-push`"));
         assert!(prompt.contains("Run npm test, then push."));
+        assert!(!prompt.contains("Telemetry"));
         assert!(prompt.contains("\"optimizable\": true"));
         assert!(prompt.contains("\"optimizable\": false"));
         assert!(prompt.contains("\"blockers\""));
@@ -241,7 +263,8 @@ mod tests {
             quote: "ask the user".to_owned(),
             advice: "Pick one policy.".to_owned(),
         }];
-        let prompt = rewrite_prompt("/start-preview", "Post /preview on the PR.", &blockers);
+        let prompt =
+            rewrite_prompt("/start-preview", "Post /preview on the PR.", &blockers, None);
         assert!(prompt.contains("`/start-preview`"));
         assert!(prompt.contains("Post /preview on the PR."));
         assert!(prompt.contains("\"ask the user\" — Pick one policy."));
@@ -249,8 +272,22 @@ mod tests {
         assert!(prompt.contains("\"script\":"));
         assert!(prompt.contains("{{placeholder}}"));
 
-        let bare = rewrite_prompt("/x", "body", &[]);
+        let bare = rewrite_prompt("/x", "body", &[], None);
         assert!(bare.contains("find the judgment steps yourself"));
+    }
+
+    #[test]
+    fn telemetry_evidence_is_folded_into_both_prompts() {
+        let evidence = "12 recorded runs, ~48k tokens per run; tool calls per run: execute x6.";
+        let analyze = optimize_prompt("/x", "body", Some(evidence));
+        assert!(analyze.contains("Telemetry from this command's past runs"));
+        assert!(analyze.contains("execute x6"));
+
+        let rewrite = rewrite_prompt("/x", "body", &[], Some(evidence));
+        assert!(rewrite.contains("execute x6"));
+
+        // Blank evidence adds nothing.
+        assert!(!optimize_prompt("/x", "body", Some("  ")).contains("Telemetry"));
     }
 
     #[test]
