@@ -7,6 +7,7 @@ import {
   type McpServerConfig,
   withProviderToggled,
 } from "../../core/entities/mcpServer";
+import { tabLabel } from "../../core/entities/project";
 import { PROVIDERS } from "../../core/entities/provider";
 import { formatTokens } from "../../core/entities/tokens";
 import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
@@ -218,7 +219,7 @@ function ProjectOverride({
   return (
     <div className="tool-row__project">
       <span className="tool-row__project-label">
-        In {tab.project.name}: <strong>{effective ? "on" : "off"}</strong>
+        In {tabLabel(tab.project)}: <strong>{effective ? "on" : "off"}</strong>
       </span>
       <div className="tool-row__project-choices">
         {(

@@ -1,5 +1,6 @@
 import { Plus, Trash } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import { tabLabel } from "../../core/entities/project";
 import type { ProvisionEntry, ProvisionStrategy } from "../../core/entities/worktree";
 import {
   effectiveProvisioning,
@@ -130,7 +131,7 @@ export function SettingsWorktrees({
 
       {activeTab && (
         <>
-          <h3 className="settings-section__subtitle">In {activeTab.project.name}</h3>
+          <h3 className="settings-section__subtitle">In {tabLabel(activeTab.project)}</h3>
           <div className="tool-row__project-choices">
             <label className="tool-row__toggle">
               <input

@@ -20,6 +20,7 @@ import type {
 import { mergeToolCall } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
+import { normalizedTabLabel } from "../entities/project";
 import type { ProviderId } from "../entities/provider";
 import {
   contextWindowFor,
@@ -28,6 +29,7 @@ import {
 } from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
+import type { TabColorId } from "../entities/tabColor";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
 import { defaultWorktreeSettings } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
@@ -249,6 +251,8 @@ export type Action =
       provisioning: readonly ProvisionEntry[] | undefined;
     }
   | { type: "tab/verboseChanged"; tabId: string; verbose: boolean }
+  | { type: "tab/labelChanged"; tabId: string; label: string }
+  | { type: "tab/colorChanged"; tabId: string; color: TabColorId | undefined }
   | { type: "tab/commandsUpdated"; tabId: string; commands: readonly CommandInfo[] }
   | { type: "tab/planUpdated"; tabId: string; plan: readonly PlanEntry[] }
   | {
@@ -512,6 +516,26 @@ export function reduce(state: AppState, action: Action): AppState {
         ...tab,
         project: { ...tab.project, verbose: action.verbose },
       }));
+
+    // Both delete their key when cleared rather than storing a blank, the
+    // same tri-state mcpOverrides and provisioningOverride already keep:
+    // absent means "the user never named one", and an empty string or an
+    // explicit undefined would read as a choice that was made.
+    case "tab/labelChanged":
+      return mapTab(state, action.tabId, (tab) => {
+        const { label: _, ...project } = tab.project;
+        const label = normalizedTabLabel(action.label);
+        return { ...tab, project: label ? { ...project, label } : project };
+      });
+
+    case "tab/colorChanged":
+      return mapTab(state, action.tabId, (tab) => {
+        const { color: _, ...project } = tab.project;
+        return {
+          ...tab,
+          project: action.color ? { ...project, color: action.color } : project,
+        };
+      });
 
     case "tab/commandsUpdated":
       return mapTab(state, action.tabId, (tab) => ({

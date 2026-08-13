@@ -299,6 +299,37 @@ describe("appState reducer", () => {
     expect(state.tabs[1].project.mode).toBe("debug");
     expect(state.tabs[1].project.effort).toBe("max");
   });
+
+  it("names a tab without disturbing what its folder is called", () => {
+    let state = open(initialState, "t1", "/work/alpha");
+    state = reduce(state, {
+      type: "tab/labelChanged",
+      tabId: "t1",
+      label: "auth rewrite",
+    });
+    expect(activeTab(state)?.project.label).toBe("auth rewrite");
+    expect(activeTab(state)?.project.name).toBe("alpha");
+  });
+
+  it("clearing a tab's name removes it instead of storing a blank", () => {
+    let state = open(initialState, "t1", "/work/alpha");
+    state = reduce(state, { type: "tab/labelChanged", tabId: "t1", label: "auth" });
+    state = reduce(state, { type: "tab/labelChanged", tabId: "t1", label: "   " });
+    // A key holding "" would beat the folder name in `tabLabel`.
+    expect("label" in (activeTab(state)?.project ?? {})).toBe(false);
+  });
+
+  it("colours a tab, and taking the colour away removes the key", () => {
+    let state = open(initialState, "t1", "/work/alpha");
+    state = reduce(state, { type: "tab/colorChanged", tabId: "t1", color: "teal" });
+    expect(activeTab(state)?.project.color).toBe("teal");
+    state = reduce(state, {
+      type: "tab/colorChanged",
+      tabId: "t1",
+      color: undefined,
+    });
+    expect("color" in (activeTab(state)?.project ?? {})).toBe(false);
+  });
 });
 
 describe("chat/turnMetaCompleted", () => {
