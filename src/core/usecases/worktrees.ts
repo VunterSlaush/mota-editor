@@ -99,13 +99,17 @@ export class Worktrees {
       worktreePath,
       {
         ...defaults,
+        // Travels regardless of inheritFromSourceTab: that toggle is a
+        // preference, this is correctness — removal must take back
+        // exactly the list this worktree was stocked with, even after a
+        // restart, so the worktree's own project carries it.
         provisioningOverride: source?.project.provisioningOverride,
-        // Travels regardless of inheritFromSourceTab, for a different
-        // reason than provisioning does: that toggle governs what the
-        // AGENT runs (provider, model, permission), and a grouping colour
-        // is not that. A worktree forked from a task's tab is that task.
-        // The label deliberately stays behind — two tabs with one name
-        // are worse than one with none.
+        // Also travels regardless of the toggle, but for its own reason:
+        // inheritFromSourceTab governs what the AGENT runs (provider,
+        // model, permission), and a grouping colour is not that. A
+        // worktree forked from a task's tab is that task. The label
+        // deliberately stays behind — two tabs with one name are worse
+        // than one with none.
         color: source?.project.color,
       },
       worktreeOf,

@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from "react";
 /** Below this many pixels a pointer gesture is still a click, not a drag. */
 const DRAG_THRESHOLD_PX = 4;
 
+/** On macOS a Control-click IS the secondary click, and it arrives as
+ *  button 0 — so it must not start a drag or select a tab. Everywhere
+ *  else Ctrl+click is an ordinary click and still should. */
+export const CTRL_IS_SECONDARY_CLICK = navigator.userAgent.includes("Mac");
+
 export interface DragReorder {
   /** The item being dragged, for styling. Null when idle. */
   readonly draggingId: string | null;
@@ -32,10 +37,10 @@ export function useDragReorder(
   useEffect(() => () => stopDragRef.current?.(), []);
 
   const startDrag = (id: string, e: React.PointerEvent) => {
-    // A right-click is a menu, not a drag — and on macOS a Control-click is
-    // the same gesture (primary button, but paired with a contextmenu
-    // event), so it needs the same bail.
-    if (e.button !== 0 || e.ctrlKey) return;
+    // A right-click is a menu, not a drag — and so, on macOS only, is a
+    // Control-click (primary button, but paired with a contextmenu event).
+    // Elsewhere Ctrl+click is an ordinary click and must still arm a drag.
+    if (e.button !== 0 || (CTRL_IS_SECONDARY_CLICK && e.ctrlKey)) return;
     // A button inside the item (a tab's close ×) is its own affordance.
     if ((e.target as HTMLElement).closest("button")) return;
     const el = e.currentTarget as HTMLElement;

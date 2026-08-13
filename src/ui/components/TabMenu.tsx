@@ -121,6 +121,10 @@ export function TabMenu({
           }`}
           aria-label="No colour"
           aria-pressed={color === undefined}
+          // Chromium and WebView2 focus a clicked button; WebKit does not.
+          // A colour click must not end the rename gesture, so the field
+          // keeps focus on every platform rather than only on some.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => onRecolor(undefined)}
         />
         {TAB_COLORS.map((swatch) => (
@@ -133,6 +137,7 @@ export function TabMenu({
             }`}
             aria-label={swatch.label}
             aria-pressed={color === swatch.id}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => onRecolor(swatch.id)}
           />
         ))}

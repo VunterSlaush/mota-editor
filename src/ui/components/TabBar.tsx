@@ -4,7 +4,7 @@ import { tabLabel } from "../../core/entities/project";
 import type { TabColorId } from "../../core/entities/tabColor";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
-import { useDragReorder } from "../useDragReorder";
+import { CTRL_IS_SECONDARY_CLICK, useDragReorder } from "../useDragReorder";
 import { TabMenu } from "./TabMenu";
 import { tabDensity } from "./tabDensity";
 
@@ -64,11 +64,14 @@ export function TabBar({
             title={statusLabel ? `${named} — ${statusLabel}` : named}
             data-color={tab.project.color}
             onPointerDown={(e) => drag.startDrag(id, e)}
-            // The click that ends a drop is the drop, not a tab switch. A
-            // Control-click is macOS's right-click, and must not select
-            // the tab it opened the menu for either.
+            // The click that ends a drop is the drop, not a tab switch. On
+            // macOS a Control-click is the right-click, and must not select
+            // the tab it opened the menu for either — elsewhere Ctrl+click
+            // is an ordinary click and still should.
             onClick={(e) => {
-              if (!drag.wasDragged() && !e.ctrlKey) onSelect(id);
+              if (!drag.wasDragged() && !(CTRL_IS_SECONDARY_CLICK && e.ctrlKey)) {
+                onSelect(id);
+              }
             }}
             // preventDefault, or the webview draws its own menu on top.
             onContextMenu={(e) => {

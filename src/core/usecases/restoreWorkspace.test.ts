@@ -275,6 +275,24 @@ describe("RestoreWorkspace tab names and colours", () => {
     expect(state.tabs[0].project.color).toBeUndefined();
   });
 
+  it("falls back to the folder name when the file has an empty label", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          label: "",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.label).toBeUndefined();
+    expect(state.tabs[0].project.name).toBe("alpha");
+  });
+
   it("loads a workspace written before tabs could be named", async () => {
     const state = await restore({
       projects: [

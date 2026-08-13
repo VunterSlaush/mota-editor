@@ -3,7 +3,7 @@ import {
   DEFAULT_MODE,
   DEFAULT_PERMISSION,
 } from "../entities/agentSettings";
-import { projectNameFromPath } from "../entities/project";
+import { normalizedTabLabel, projectNameFromPath } from "../entities/project";
 import { isTabColorId } from "../entities/tabColor";
 import type { WorktreeSettings } from "../entities/worktree";
 import { clampZoomLevel } from "../entities/zoom";
@@ -39,7 +39,9 @@ export class RestoreWorkspace {
         permission: p.permission ?? DEFAULT_PERMISSION,
         model: p.model,
         effort: p.effort,
-        label: p.label,
+        // The file is untrusted input too: an empty or oversized string
+        // must fall back to the folder name exactly as a never-set one does.
+        label: normalizedTabLabel(p.label ?? ""),
         // The file may name a colour this build does not have.
         color: p.color && isTabColorId(p.color) ? p.color : undefined,
         verbose: p.verbose ?? true,
