@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
+import { extensionPanels as panelsOfExtensions } from "../core/entities/extension";
 import type { ProviderId } from "../core/entities/provider";
 import { themeById } from "../core/entities/theme";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
@@ -12,6 +13,7 @@ import type { SidebarView } from "./components/ActivityBar";
 import type { RightPanel, ShellsView } from "./components/ChatPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { EmptyState } from "./components/EmptyState";
+import type { ExtensionPanelsView } from "./components/ExtensionPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { TabBar } from "./components/TabBar";
 import { TooltipLayer } from "./components/TooltipLayer";
@@ -180,6 +182,29 @@ export function App({ context }: { context: AppContext }) {
     [context, activeProjectId, terminalFontSize, theme],
   );
 
+  // Panels re-derive only when the extension list changes; the bundle
+  // re-binds to whichever project is active, like every other intent.
+  const panelRefs = useMemo(
+    () => panelsOfExtensions(state.extensions),
+    [state.extensions],
+  );
+  const extensionPanelsView: ExtensionPanelsView = useMemo(
+    () => ({
+      panels: panelRefs,
+      load: (panel) => context.extensionPanels.load(panel, activeProjectId, projectPath),
+      action: (panel, request) =>
+        context.extensionPanels.action(panel, request, activeProjectId, projectPath),
+      subscribe: (panel, onChanged) =>
+        context.extensionPanels.onPanelChanged((extensionId, panelId) => {
+          const mine =
+            extensionId === panel.extensionId &&
+            (panelId === undefined || panelId === panel.panelId);
+          if (mine) onChanged();
+        }),
+    }),
+    [context, panelRefs, activeProjectId, projectPath],
+  );
+
   return (
     <div className="app">
       {!context.runningInTauri && (
@@ -211,6 +236,7 @@ export function App({ context }: { context: AppContext }) {
           }}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
+          extensionPanels={extensionPanelsView}
           rightPanel={rightPanel}
           onSelectRightPanel={setRightPanel}
           shells={shells}

@@ -21,6 +21,7 @@ function extension(overrides: Partial<ExtensionDescriptor>): ExtensionDescriptor
     status: "enabled",
     commands: [],
     mcpServers: [],
+    panels: [],
     events: [],
     ...overrides,
   };

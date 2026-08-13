@@ -27,7 +27,8 @@ If that description is empty or unclear, ask what the extension should do before
    - A PROMPT COMMAND (a reusable prompt template behind /name) is pure data — no script, no process. Choose this whenever the idea is "a prompt I keep retyping".
    - A PROGRAMMATIC COMMAND runs the extension's script, which answers with actions.
    - MCP SERVERS add tools the AI agents can call (an ordinary MCP server process).
-3. Declare ONLY the permissions actually used — the user approves the exact list in a native dialog, and any later change re-asks. Vocabulary: commands:register (any commands), tools:register (MCP), events:subscribe, notifications (host/notify), agent:prompt (startTurn action — warns the user it spends credits).
+   - A SIDEBAR PANEL shows the extension's data in the app's left sidebar (a grouped list the script answers with; items can carry a dropdown and open a detail modal).
+3. Declare ONLY the permissions actually used — the user approves the exact list in a native dialog, and any later change re-asks. Vocabulary: commands:register (any commands), tools:register (MCP), events:subscribe, notifications (host/notify), ui:panel (panels), agent:prompt (startTurn action — warns the user it spends credits).
 
 ## Manifest shape
 
@@ -45,11 +46,12 @@ If that description is empty or unclear, ask what the extension should do before
         "template": "... $ARGUMENTS is replaced with what follows the command ..." },
       { "name": "y", "kind": "programmatic", "description": "..." }
     ],
-    "mcpServers": [ { "name": "tools", "command": "node", "args": ["./mcp.js"] } ]
+    "mcpServers": [ { "name": "tools", "command": "node", "args": ["./mcp.js"] } ],
+    "panels": [ { "id": "tasks", "title": "My Tasks", "icon": "checklist" } ]
   }
 }
 
-Omit "entry" entirely for pure prompt-command extensions. Programmatic commands require it.
+Omit "entry" entirely for pure prompt-command extensions. Programmatic commands and panels require it. Panel icons come from a fixed set: checklist, kanban, bug, calendar, rocket (anything else gets a generic puzzle piece).
 
 ## Script template (only when "entry" is declared) — plain Node, no dependencies
 
@@ -67,6 +69,23 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       // { type: "insertPrompt", text: "..." }              fills the composer
       // { type: "startTurn", prompt: "..." }               needs "agent:prompt"
     ]});
+  } else if (msg.method === "panel/load") {
+    // Only when contributing a panel (needs "ui:panel"). Answer with a
+    // declarative view; the host renders it. Items may carry a select
+    // (a dropdown) and are clickable.
+    reply(msg.id, { view: { groups: [
+      { title: "Todo", items: [
+        { id: "a", title: "First item", subtitle: "small print", badge: "High",
+          select: { selectedId: "todo", options: [
+            { id: "todo", label: "Todo" }, { id: "done", label: "Done" } ] } }
+      ] }
+    ], emptyText: "Shown when there are no groups." } });
+  } else if (msg.method === "panel/action") {
+    const { action, itemId, value } = msg.params;
+    // action "select": the item's dropdown changed to value — answer { view: <updated> }.
+    // action "open": the item was clicked — answer { detail: { title, subtitle,
+    //   fields: [{label, value}], body: "markdown", url: "https://…" } } for the modal.
+    reply(msg.id, {});
   } else if (msg.method === "shutdown") {
     process.exit(0);
   } else if (msg.id !== undefined) {

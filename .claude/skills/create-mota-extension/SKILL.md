@@ -25,6 +25,15 @@ Ask (unless already clear from their request):
    - A **programmatic command** — `/name` runs their script, which can
      notify, fill the composer, or start an agent turn.
    - **Agent tools (MCP)** — new tools the AI agents can call.
+   - **A sidebar panel** — the extension's data as a grouped list in the
+     app's left sidebar (items can carry a status dropdown and open a
+     detail modal). Declarative: the script answers `panel/load` /
+     `panel/action` with a view model, the host renders it. Needs
+     `"ui:panel"` and an `entry`. Manifest:
+     `"panels": [{ "id": "tasks", "title": "My Tasks", "icon": "checklist" }]`
+     (icons: checklist, kanban, bug, calendar, rocket). See the Panels
+     section of `docs/EXTENSIONS.md` and the worked example
+     `examples/linear/` in the Mota repository.
    - **Event automation** — react to `turn/completed` etc. (note: the
      host delivers events in a later Mota version; scaffold it, but say so).
 

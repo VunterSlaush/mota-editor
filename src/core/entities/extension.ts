@@ -49,6 +49,15 @@ export interface ExtensionMcpContribution {
   readonly env: Readonly<Record<string, string>>;
 }
 
+/** A sidebar panel the extension offers (ADR-0013): the host renders it
+ *  from a declarative view model, no extension code in the webview. */
+export interface ExtensionPanelContribution {
+  readonly id: string;
+  readonly title: string;
+  /** Named icon from the host's fixed set; unknown names get a default. */
+  readonly icon?: string;
+}
+
 export interface ExtensionDescriptor {
   readonly id: string;
   readonly displayName: string;
@@ -63,6 +72,7 @@ export interface ExtensionDescriptor {
   readonly error?: string;
   readonly commands: readonly ExtensionCommandContribution[];
   readonly mcpServers: readonly ExtensionMcpContribution[];
+  readonly panels: readonly ExtensionPanelContribution[];
   readonly events: readonly string[];
 }
 
@@ -209,6 +219,30 @@ export function findExtensionCommand(
  * is a filter. Enabled for every provider; the per-project overrides
  * users already have apply to these ids like any other.
  */
+/** One panel, addressed across the app: sidebar ids, load/action calls. */
+export interface ExtensionPanelRef {
+  readonly extensionId: string;
+  readonly panelId: string;
+  readonly title: string;
+  readonly icon?: string;
+}
+
+/** The panels active extensions contribute, in list order — the activity
+ *  bar draws one icon per entry. A crashed extension keeps its icon: the
+ *  next load boots (or quarantines) it, and the panel says what failed. */
+export function extensionPanels(
+  extensions: readonly ExtensionDescriptor[],
+): ExtensionPanelRef[] {
+  return extensions.filter(isActive).flatMap((extension) =>
+    extension.panels.map((panel) => ({
+      extensionId: extension.id,
+      panelId: panel.id,
+      title: panel.title,
+      icon: panel.icon,
+    })),
+  );
+}
+
 export function extensionMcpServers(
   extensions: readonly ExtensionDescriptor[],
 ): McpServerConfig[] {

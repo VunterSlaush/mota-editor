@@ -125,6 +125,8 @@ pub fn run() {
             extension_host::extension_enable,
             extension_host::extension_disable,
             extension_host::extension_invoke_command,
+            extension_host::extension_panel_load,
+            extension_host::extension_panel_action,
             extension_host::extension_publish_event,
             extension_host::extension_respond,
             extension_host::extension_read_log,

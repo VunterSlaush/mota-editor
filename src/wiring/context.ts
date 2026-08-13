@@ -52,6 +52,7 @@ import { ApplyPendingSpec, DiscardPendingSpec } from "../core/usecases/applyPend
 import { CancelTurn } from "../core/usecases/cancelTurn";
 import { CloseProject } from "../core/usecases/closeProject";
 import { EditDraft } from "../core/usecases/editDraft";
+import { ExtensionPanels } from "../core/usecases/extensionPanels";
 import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
 import { ListCommands } from "../core/usecases/listCommands";
@@ -122,6 +123,8 @@ export interface AppContext {
   readonly listProjectFiles: ListProjectFiles;
   /** Installed extensions: list, enable (native consent), disable, log. */
   readonly manageExtensions: ManageExtensions;
+  /** Extension sidebar panels: load the view, route interactions. */
+  readonly extensionPanels: ExtensionPanels;
   /** The user's terminals — the panel opens, feeds, and closes them. */
   readonly shells: Shells;
   /** Historical usage report for the settings Insights section. */
@@ -263,6 +266,7 @@ export function createAppContext(): AppContext {
     listCommands: new ListCommands(store, commandCatalog),
     listProjectFiles: new ListProjectFiles(store, gitPort),
     manageExtensions: new ManageExtensions(store, extensionHost, notifications),
+    extensionPanels: new ExtensionPanels(extensionHost),
     shells: new Shells(store, shellPort, shellHistory),
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),

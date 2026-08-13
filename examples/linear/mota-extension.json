@@ -1,0 +1,12 @@
+{
+  "name": "linear",
+  "version": "0.1.0",
+  "displayName": "Linear",
+  "description": "Your assigned Linear issues in the sidebar: grouped by status, change status inline, click one for details.",
+  "protocolVersion": 1,
+  "entry": { "command": "node", "args": ["./main.cjs"] },
+  "permissions": ["ui:panel"],
+  "contributes": {
+    "panels": [{ "id": "tasks", "title": "Linear", "icon": "checklist" }]
+  }
+}

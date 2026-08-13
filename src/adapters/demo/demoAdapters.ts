@@ -701,9 +701,27 @@ export class DemoNotifications implements NotificationPort {
  * are all exercisable without the Rust host.
  */
 export class DemoExtensionHost implements ExtensionHostPort {
-  private listener: ((extensionId: string, event: ExtensionHostEvent) => void) | null =
-    null;
+  private listeners: ((extensionId: string, event: ExtensionHostEvent) => void)[] = [];
+  private demoTaskStatus = new Map<string, string>([
+    ["task-1", "started"],
+    ["task-2", "todo"],
+    ["task-3", "todo"],
+  ]);
   private extensions: ExtensionDescriptor[] = [
+    {
+      id: "demo-tracker",
+      displayName: "Tracker (demo)",
+      version: "0.1.0",
+      description: "Your issues in the sidebar, grouped by status.",
+      origin: "user",
+      path: "~/.mota/extensions/demo-tracker",
+      permissions: ["ui:panel"],
+      status: "enabled",
+      commands: [],
+      mcpServers: [],
+      panels: [{ id: "tasks", title: "Tracker", icon: "checklist" }],
+      events: [],
+    },
     {
       id: "demo-standup",
       displayName: "Standup (demo)",
@@ -728,6 +746,7 @@ export class DemoExtensionHost implements ExtensionHostPort {
         },
       ],
       mcpServers: [],
+      panels: [],
       events: [],
     },
     {
@@ -742,12 +761,17 @@ export class DemoExtensionHost implements ExtensionHostPort {
       status: "needs-approval",
       commands: [],
       mcpServers: [],
+      panels: [],
       events: ["turn/completed"],
     },
   ];
 
   subscribe(listener: (extensionId: string, event: ExtensionHostEvent) => void): void {
-    this.listener = listener;
+    this.listeners.push(listener);
+  }
+
+  private notify(extensionId: string, event: ExtensionHostEvent): void {
+    for (const listener of this.listeners) listener(extensionId, event);
   }
 
   async list(): Promise<ExtensionDescriptor[]> {
@@ -762,7 +786,7 @@ export class DemoExtensionHost implements ExtensionHostPort {
     );
     const enabled = this.extensions.find((e) => e.id === id);
     if (!enabled) throw new Error(`Unknown extension: ${id}`);
-    this.listener?.(id, { kind: "statusChanged", status: "enabled" });
+    this.notify(id, { kind: "statusChanged", status: "enabled" });
     return enabled;
   }
 
@@ -770,7 +794,7 @@ export class DemoExtensionHost implements ExtensionHostPort {
     this.extensions = this.extensions.map((e) =>
       e.id === id ? { ...e, status: "disabled" as const } : e,
     );
-    this.listener?.(id, { kind: "statusChanged", status: "disabled" });
+    this.notify(id, { kind: "statusChanged", status: "disabled" });
   }
 
   async invokeCommand(extensionId: string, command: string): Promise<unknown> {
@@ -787,6 +811,63 @@ export class DemoExtensionHost implements ExtensionHostPort {
     };
   }
 
+  async loadPanel(): Promise<unknown> {
+    await delay(200);
+    return { view: this.demoTaskView() };
+  }
+
+  async panelAction(
+    _extensionId: string,
+    _panelId: string,
+    request: { action: string; itemId: string; value?: string },
+  ): Promise<unknown> {
+    await delay(150);
+    if (request.action === "select" && request.value) {
+      this.demoTaskStatus.set(request.itemId, request.value);
+      return { view: this.demoTaskView() };
+    }
+    if (request.action === "open") {
+      return {
+        detail: {
+          title: DEMO_TASKS.find((t) => t.id === request.itemId)?.title ?? request.itemId,
+          subtitle: "DEM-42 · Demo project",
+          fields: [
+            { label: "Priority", value: "High" },
+            { label: "Assignee", value: "You" },
+          ],
+          body: "A canned task so the browser demo can exercise the panel modal.\n\nThe real thing comes from an extension process over MXP.",
+          url: "https://example.com/DEM-42",
+        },
+      };
+    }
+    return {};
+  }
+
+  private demoTaskView(): unknown {
+    const options = [
+      { id: "todo", label: "Todo" },
+      { id: "started", label: "In Progress" },
+      { id: "done", label: "Done" },
+    ];
+    const byStatus = (status: string) =>
+      DEMO_TASKS.filter((task) => this.demoTaskStatus.get(task.id) === status).map(
+        (task) => ({
+          id: task.id,
+          title: task.title,
+          subtitle: task.key,
+          badge: task.badge,
+          select: { options, selectedId: status },
+        }),
+      );
+    return {
+      groups: [
+        { title: "In Progress", items: byStatus("started") },
+        { title: "Todo", items: byStatus("todo") },
+        { title: "Done", items: byStatus("done") },
+      ].filter((group) => group.items.length > 0),
+    };
+  }
+
   async publishEvent(): Promise<void> {}
 
   async respond(): Promise<void> {}
@@ -795,6 +876,12 @@ export class DemoExtensionHost implements ExtensionHostPort {
     return "[log] demo extension started\n[log] nothing else to report";
   }
 }
+
+const DEMO_TASKS = [
+  { id: "task-1", key: "DEM-42", title: "Wire the demo panel", badge: "High" },
+  { id: "task-2", key: "DEM-43", title: "Group tasks by status" },
+  { id: "task-3", key: "DEM-44", title: "Open a detail modal", badge: "Low" },
+];
 
 /**
  * Browser demo — a history with a clear favourite, so the greyed-out

@@ -15,12 +15,13 @@ import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { useDragWidth } from "../useDragWidth";
-import { ActivityBar, type SidebarView } from "./ActivityBar";
+import { ActivityBar, panelSidebarView, type SidebarView } from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
 import { Composer } from "./Composer";
 import { ContextFullBar } from "./ContextFullBar";
 import { DiffModal } from "./DiffModal";
+import { ExtensionPanel, type ExtensionPanelsView } from "./ExtensionPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
@@ -87,6 +88,8 @@ interface Props {
   onChangesLoaded: (projectId: string, changes: GitChanges | null) => void;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
+  /** Extension sidebar panels, bundled like `shells` (ADR-0013). */
+  extensionPanels: ExtensionPanelsView;
   /** Which right-hand panel is showing. Lifted for the same reason
    *  `sidebarView` is: this component remounts on every project switch. */
   rightPanel: RightPanel;
@@ -166,6 +169,7 @@ export function ChatPanel({
   onSelectRightPanel,
   rightPanel,
   shells,
+  extensionPanels,
   onSelectSidebarView,
   onOpenSettings,
   loadHistory,
@@ -234,6 +238,12 @@ export function ChatPanel({
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
+
+  // A disabled extension takes its sidebar view with it — the column
+  // simply shows nothing until another view is picked.
+  const activeExtensionPanel = sidebarView?.startsWith("ext:")
+    ? extensionPanels.panels.find((panel) => panelSidebarView(panel) === sidebarView)
+    : undefined;
 
   // Which right-hand panel this project actually shows. The choice is
   // app-wide on purpose (a running terminal must survive a tab switch),
@@ -464,6 +474,7 @@ export function ChatPanel({
       <div className="chat-panel__body">
         <ActivityBar
           active={sidebarView}
+          panels={extensionPanels.panels}
           onSelect={onSelectSidebarView}
           onOpenSettings={onOpenSettings}
         />
@@ -514,6 +525,13 @@ export function ChatPanel({
                   }
                   onNewChat={onNewChat}
                   onRefresh={() => setHistoryRefreshKey((k) => k + 1)}
+                />
+              )}
+              {activeExtensionPanel && (
+                <ExtensionPanel
+                  key={panelSidebarView(activeExtensionPanel)}
+                  panel={activeExtensionPanel}
+                  panels={extensionPanels}
                 />
               )}
             </div>

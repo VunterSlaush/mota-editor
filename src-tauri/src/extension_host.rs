@@ -319,6 +319,14 @@ pub struct McpServerWire {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct PanelWire {
+    pub id: String,
+    pub title: String,
+    pub icon: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtensionDescriptorWire {
     pub id: String,
     pub display_name: String,
@@ -334,6 +342,7 @@ pub struct ExtensionDescriptorWire {
     pub error: Option<String>,
     pub commands: Vec<CommandWire>,
     pub mcp_servers: Vec<McpServerWire>,
+    pub panels: Vec<PanelWire>,
     pub events: Vec<String>,
 }
 
@@ -355,6 +364,7 @@ fn describe(
         error: None,
         commands: Vec::new(),
         mcp_servers: Vec::new(),
+        panels: Vec::new(),
         events: Vec::new(),
     };
     let manifest = match &found.manifest {
@@ -410,6 +420,14 @@ fn describe(
             command,
             args,
             env: server.env.iter().cloned().collect(),
+        });
+    }
+
+    for panel in &manifest.panels {
+        base.panels.push(PanelWire {
+            id: panel.id.clone(),
+            title: panel.title.clone(),
+            icon: panel.icon.clone(),
         });
     }
 
@@ -775,8 +793,10 @@ async fn dispatch(
             None
         }
         "panels/refresh" => {
-            // Phase 3 surface — acknowledged so authors testing early
-            // aren't left hanging on a known method.
+            // The webview re-pulls the named panel if it is open — the
+            // host never renders view data it did not just ask for.
+            let panel_id = params.get("panelId").and_then(Value::as_str).map(str::to_owned);
+            emit(app, &process.id, &extension::ExtensionUiEvent::PanelChanged { panel_id });
             Some(extension::result_response(id, Value::Object(Default::default())))
         }
         // Methods in the permission table whose implementation lands in
@@ -985,6 +1005,44 @@ pub async fn extension_invoke_command(
     let id = process.request_id();
     let request =
         extension::command_execute_request(id, &command, &args, &tab_id, &project_path);
+    process.touch();
+    process.call_with_timeout(request, id, COMMAND_TIMEOUT).await
+}
+
+#[tauri::command]
+pub async fn extension_panel_load(
+    app: AppHandle,
+    host: State<'_, ExtensionHost>,
+    extension_id: String,
+    panel_id: String,
+    tab_id: String,
+    project_path: String,
+) -> Result<Value, String> {
+    let process = ensure_process(&app, &host, &extension_id).await?;
+    let id = process.request_id();
+    let request = extension::panel_load_request(id, &panel_id, &tab_id, &project_path);
+    process.touch();
+    process.call_with_timeout(request, id, COMMAND_TIMEOUT).await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri commands are flat by nature.
+pub async fn extension_panel_action(
+    app: AppHandle,
+    host: State<'_, ExtensionHost>,
+    extension_id: String,
+    panel_id: String,
+    action: String,
+    item_id: String,
+    value: Option<String>,
+    tab_id: String,
+    project_path: String,
+) -> Result<Value, String> {
+    let process = ensure_process(&app, &host, &extension_id).await?;
+    let id = process.request_id();
+    let action = extension::PanelAction { action, item_id, value };
+    let request =
+        extension::panel_action_request(id, &panel_id, &action, &tab_id, &project_path);
     process.touch();
     process.call_with_timeout(request, id, COMMAND_TIMEOUT).await
 }

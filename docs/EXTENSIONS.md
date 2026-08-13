@@ -53,6 +53,7 @@ Don't want to write it by hand? Two prompt-driven routes:
 | `permissions` | Everything you intend to do, from the table below. Unknown strings fail closed. Changing this set sends the extension back to needs-approval. |
 | `contributes.commands` | Slash commands. `kind: "prompt"` is pure data — a `template` (or `file` relative to your folder) expanded client-side, `$ARGUMENTS` replaced (or the arguments appended, matching Claude custom commands). `kind: "programmatic"` routes to your process. |
 | `contributes.mcpServers` | MCP servers handed to the user's agents, riding the app's existing MCP plumbing. Paths naming files in your folder are resolved to absolute. |
+| `contributes.panels` | Sidebar panels: `{ "id": "tasks", "title": "Linear", "icon": "checklist" }`. The host draws the activity-bar icon and asks your process for a declarative view model — see [Panels](#panels). Requires `ui:panel` and an `entry`. |
 | `contributes.events` | Workbench events you want pushed (`turn/completed`, `project/opened`, `project/closed`, `app/started`). Subscribers stay resident; command-only extensions are reaped when idle. |
 | `idleTimeoutMs` | Optional idle-shutdown override (capped at 30 min). |
 
@@ -69,7 +70,8 @@ Unknown manifest fields are ignored, so manifests can evolve additively.
 | `transcripts:read` | `host/transcripts/read` | |
 | `agent:prompt` | `agent/prompt`, `commands/run` | ⚠ spends the user's AI credits |
 | `fs:project-read` | `host/fs/read` (confined to open projects) | |
-| `ui:panel`, `ui:theme` | UI contributions (later phase) | |
+| `ui:panel` | contributing sidebar panels | |
+| `ui:theme` | color themes (later phase) | |
 | `shell:exec` | `host/exec` | ⚠ full user privileges |
 | `provider:register` | registering an AI provider (later phase) | ⚠ |
 
@@ -91,6 +93,8 @@ The host calls you:
 |---|---|---|
 | `initialize` | request | `{protocolVersion, hostVersion, extensionId, grantedPermissions, dataDir, projectPaths}` → `{protocolVersion: 1}`. Must be answered within 10 s. `dataDir` is a scratch folder that is yours to keep state in. |
 | `command/execute` | request | `{command, args, context: {tabId, projectPath}}` → `{actions: [...]}` (30 s budget) |
+| `panel/load` | request | `{panelId, context}` → `{view}` — see [Panels](#panels) (30 s budget) |
+| `panel/action` | request | `{panelId, action, itemId, value?, context}` → `{view?, detail?}` (30 s budget) |
 | `event/emit` | notification | `{event, payload}` |
 | `shutdown` | notification | flush and exit; the process is killed ~3 s later |
 | `ping` | request | `{}` → `{}` |
@@ -101,6 +105,7 @@ You call the host (each gated by a permission, above):
 |---|---|---|
 | `host/log` | notification | `{message}` — lands in your log |
 | `host/notify` | request | `{title, body}` → `{}` |
+| `panels/refresh` | request | `{panelId?}` → `{}` — "my data changed, re-pull me"; the host re-loads the panel only if it is open |
 | `host/transcripts/read`, `host/fs/read`, `host/exec`, `agent/prompt`, `commands/run` | request | reserved — the host currently answers with an error naming them unimplemented; they arrive in later phases |
 
 `command/execute` answers with an **action list** — the whole vocabulary
@@ -123,6 +128,43 @@ A full transcript of one session:
 → {"jsonrpc":"2.0","method":"host/log","params":{"message":"building the draft"}}
 → {"jsonrpc":"2.0","id":2,"result":{"actions":[{"type":"notify","title":"Standup","message":"Ready."}]}}
 ```
+
+## Panels
+
+A panel (ADR-0013) is **declarative data the host renders** — your
+process never draws anything, it answers `panel/load` with a view model
+in a closed vocabulary and the app renders it with its own components,
+themed like everything else:
+
+```json
+{ "view": {
+  "emptyText": "Shown when there are no groups — say what to do about it.",
+  "groups": [
+    { "title": "In Progress", "items": [
+      { "id": "iss-1", "title": "Fix login", "subtitle": "ENG-123",
+        "badge": "Urgent",
+        "select": { "selectedId": "started", "options": [
+          { "id": "todo", "label": "Todo" },
+          { "id": "started", "label": "In Progress" } ] } }
+    ] }
+  ] } }
+```
+
+Interactions come back as `panel/action` with a host-owned vocabulary of
+two: `"open"` (the item was clicked — answer `{detail}` and the host
+shows a modal) and `"select"` (the item's dropdown changed to `value` —
+answer `{view}` with the updated model). A detail is
+`{title, subtitle?, fields: [{label, value}], body?, url?}`; `body` is
+markdown, `url` gets an open-in-browser button (http/https only).
+
+The host validates and caps everything (20 groups, 100 items each,
+50 select options, text lengths); what it does not recognize it drops,
+so the vocabulary can grow without breaking you. Sizes beyond the caps
+are silently truncated — page in your process if you have more. The
+refresh button re-sends `panel/load`; send `panels/refresh` yourself
+when your data changes behind the user's back. A working example:
+[`examples/linear/`](../examples/linear/) — your Linear issues grouped
+by status, with inline status changes.
 
 ## Lifecycle
 

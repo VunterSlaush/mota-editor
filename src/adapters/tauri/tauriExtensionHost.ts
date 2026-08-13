@@ -8,6 +8,7 @@ import type {
 import type {
   ExtensionHostEvent,
   ExtensionHostPort,
+  PanelActionRequest,
 } from "../../core/ports/extensionHost";
 
 /**
@@ -41,6 +42,7 @@ interface WireDescriptor {
     args: string[];
     env: Record<string, string>;
   }[];
+  panels: { id: string; title: string; icon: string | null }[];
   events: string[];
 }
 
@@ -50,7 +52,8 @@ interface WireEvent {
   event:
     | { type: "statusChanged"; status: string; error?: string }
     | { type: "notifyRequested"; requestId: string; title: string; body: string }
-    | { type: "logLine"; line: string };
+    | { type: "logLine"; line: string }
+    | { type: "panelChanged"; panelId?: string };
 }
 
 const KNOWN_STATUSES: readonly ExtensionStatus[] = [
@@ -91,40 +94,49 @@ function toDomainDescriptor(wire: WireDescriptor): ExtensionDescriptor {
       template: c.template ?? undefined,
     })),
     mcpServers: wire.mcpServers,
+    panels: wire.panels.map((p) => ({
+      id: p.id,
+      title: p.title,
+      icon: p.icon ?? undefined,
+    })),
     events: wire.events,
   };
 }
 
+function toDomainEvent(event: WireEvent["event"]): ExtensionHostEvent | null {
+  switch (event.type) {
+    case "statusChanged":
+      return {
+        kind: "statusChanged",
+        status: toDomainStatus(event.status),
+        error: event.error,
+      };
+    case "notifyRequested":
+      return {
+        kind: "notifyRequested",
+        requestId: event.requestId,
+        title: event.title,
+        body: event.body,
+      };
+    case "panelChanged":
+      return { kind: "panelChanged", panelId: event.panelId };
+    default:
+      return null;
+  }
+}
+
 export class TauriExtensionHost implements ExtensionHostPort {
-  private handler: ((extensionId: string, event: ExtensionHostEvent) => void) | null =
-    null;
+  private handlers: ((extensionId: string, event: ExtensionHostEvent) => void)[] = [];
   private listening = false;
 
   subscribe(listener: (extensionId: string, event: ExtensionHostEvent) => void): void {
-    this.handler = listener;
+    this.handlers.push(listener);
     if (this.listening) return;
     this.listening = true;
     void listen<WireEvent>("extension-event", ({ payload }) => {
-      const event = payload.event;
-      switch (event.type) {
-        case "statusChanged":
-          this.handler?.(payload.extensionId, {
-            kind: "statusChanged",
-            status: toDomainStatus(event.status),
-            error: event.error,
-          });
-          break;
-        case "notifyRequested":
-          this.handler?.(payload.extensionId, {
-            kind: "notifyRequested",
-            requestId: event.requestId,
-            title: event.title,
-            body: event.body,
-          });
-          break;
-        default:
-          break; // logLine and future events — the settings log covers it
-      }
+      const event = toDomainEvent(payload.event);
+      if (!event) return; // logLine and future events — the settings log covers it
+      for (const handler of this.handlers) handler(payload.extensionId, event);
     });
   }
 
@@ -154,6 +166,33 @@ export class TauriExtensionHost implements ExtensionHostPort {
       extensionId,
       command,
       args,
+      tabId,
+      projectPath,
+    });
+  }
+
+  loadPanel(
+    extensionId: string,
+    panelId: string,
+    tabId: string,
+    projectPath: string,
+  ): Promise<unknown> {
+    return invoke("extension_panel_load", { extensionId, panelId, tabId, projectPath });
+  }
+
+  panelAction(
+    extensionId: string,
+    panelId: string,
+    request: PanelActionRequest,
+    tabId: string,
+    projectPath: string,
+  ): Promise<unknown> {
+    return invoke("extension_panel_action", {
+      extensionId,
+      panelId,
+      action: request.action,
+      itemId: request.itemId,
+      value: request.value ?? null,
       tabId,
       projectPath,
     });
