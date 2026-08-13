@@ -4,6 +4,7 @@ import {
   DEFAULT_PERMISSION,
 } from "../entities/agentSettings";
 import { projectNameFromPath } from "../entities/project";
+import { isTabColorId } from "../entities/tabColor";
 import type { WorktreeSettings } from "../entities/worktree";
 import { clampZoomLevel } from "../entities/zoom";
 import type { AgentGateway } from "../ports/agentGateway";
@@ -38,6 +39,9 @@ export class RestoreWorkspace {
         permission: p.permission ?? DEFAULT_PERMISSION,
         model: p.model,
         effort: p.effort,
+        label: p.label,
+        // The file may name a colour this build does not have.
+        color: p.color && isTabColorId(p.color) ? p.color : undefined,
         verbose: p.verbose ?? true,
         providerSessions: p.providerSessions,
         mcpOverrides: p.mcpOverrides,
