@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
+import type { OptimizationBlocker } from "../../core/entities/commandOptimization";
 import type {
   CommandSavings,
   InsightsRange,
@@ -20,10 +21,14 @@ import type {
 } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
 import type { ProvisionEntry } from "../../core/entities/worktree";
+import type { SavedCommandCopy } from "../../core/ports/commandOptimizer";
 import type { McpProbe } from "../../core/ports/mcpProbe";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
-import type { OptimizeOutcome } from "../../core/usecases/optimizeCommand";
+import type {
+  OptimizeOutcome,
+  RewriteOutcome,
+} from "../../core/usecases/optimizeCommand";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsInsights } from "./SettingsInsights";
@@ -63,6 +68,20 @@ interface Props {
     provider: ProviderId,
     commandName: string,
   ) => Promise<OptimizeOutcome>;
+  /** Rewrites a declined command into an optimizable variant. */
+  rewriteCommand: (
+    projectPath: string,
+    provider: ProviderId,
+    commandName: string,
+    blockers: readonly OptimizationBlocker[],
+  ) => Promise<RewriteOutcome>;
+  /** Writes an approved variant to disk as a new command file. */
+  saveCommandCopy: (
+    projectPath: string,
+    provider: ProviderId,
+    sourceName: string,
+    content: string,
+  ) => Promise<SavedCommandCopy>;
   /** Tokens an optimized command has saved, for its row. */
   loadCommandSavings: (
     provider: ProviderId,
@@ -115,6 +134,8 @@ export function SettingsModal({
   loadCommands,
   loadProjectCommands,
   optimizeCommand,
+  rewriteCommand,
+  saveCommandCopy,
   loadCommandSavings,
   probeProvider,
   signInProvider,
@@ -184,6 +205,8 @@ export function SettingsModal({
               activeTab={activeTab}
               loadCommands={loadProjectCommands}
               optimize={optimizeCommand}
+              rewrite={rewriteCommand}
+              saveCopy={saveCommandCopy}
               loadSavings={loadCommandSavings}
             />
           )}

@@ -2,6 +2,8 @@
 //! The shell scans the filesystem; this module only interprets what it
 //! finds (name from the file name, description from the content).
 
+use serde::Deserialize;
+
 /// `/name` derived from a command file's name (`review.md` → `/review`).
 pub fn command_name_from_file(file_name: &str) -> Option<String> {
     let stem = file_name.rsplit_once('.').map_or(file_name, |(stem, _)| stem);
@@ -112,6 +114,63 @@ or
     )
 }
 
+/// One instruction that blocked automation, quoted with the way out —
+/// produced by the analysis, echoed back into the rewrite prompt.
+#[derive(Deserialize, Clone, Debug)]
+pub struct RewriteBlocker {
+    pub quote: String,
+    pub advice: String,
+}
+
+/// The prompt for rewriting a not-optimizable command into a copy that
+/// IS optimizable. The original file stays untouched; the model returns
+/// the rewritten command text plus the script (and residual
+/// instructions) implementing it, in one JSON verdict.
+pub fn rewrite_prompt(command_name: &str, body: &str, blockers: &[RewriteBlocker]) -> String {
+    let blocker_list = if blockers.is_empty() {
+        "(none listed — find the judgment steps yourself)".to_owned()
+    } else {
+        blockers
+            .iter()
+            .map(|b| format!("- \"{}\" — {}", b.quote, b.advice))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!(
+        "The slash command `{command_name}` of an AI coding assistant (full text \
+between the <command> tags below) was judged NOT automatable because of these \
+blocking instructions:
+
+{blocker_list}
+
+Rewrite the command into an OPTIMIZED VARIANT, applying each blocker's advice:
+- Wherever it asked the user or weighed options, pick ONE sensible deterministic \
+policy and state it.
+- Reduce run-time judgment to `{{{{placeholder}}}}` values where a single value \
+suffices.
+- Drop narration and report-composing steps; a plain printed result is enough.
+- Keep the command's purpose and its useful behavior; the variant should do the \
+same job the mechanical way.
+
+Then implement the variant:
+- ONE portable POSIX sh script, only the steps the rewritten command calls for, \
+failing fast with a non-zero exit (`&&` or `set -e`), `{{{{placeholder}}}}` \
+holes where the rewritten command has them.
+- Only if a little judgment must remain, add concise standalone `instructions` \
+for it that say when to run the script.
+
+Reply with exactly one fenced JSON block and nothing else:
+
+```json
+{{\"command\": \"<the full rewritten command file content, markdown>\", \"script\": \"<the sh script>\", \"instructions\": \"<omit unless a little judgment must remain>\", \"summary\": \"<one line, what the variant does>\"}}
+```
+
+<command>
+{body}
+</command>"
+    )
+}
+
 fn tidy(description: &str) -> String {
     const MAX: usize = 80;
     let one_line = description.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -174,6 +233,24 @@ mod tests {
         assert!(prompt.contains("PARTIALLY"));
         assert!(prompt.contains("{{placeholder}}"));
         assert!(prompt.contains("POSIX sh"));
+    }
+
+    #[test]
+    fn rewrite_prompt_carries_blockers_body_and_contract() {
+        let blockers = vec![RewriteBlocker {
+            quote: "ask the user".to_owned(),
+            advice: "Pick one policy.".to_owned(),
+        }];
+        let prompt = rewrite_prompt("/start-preview", "Post /preview on the PR.", &blockers);
+        assert!(prompt.contains("`/start-preview`"));
+        assert!(prompt.contains("Post /preview on the PR."));
+        assert!(prompt.contains("\"ask the user\" — Pick one policy."));
+        assert!(prompt.contains("\"command\":"));
+        assert!(prompt.contains("\"script\":"));
+        assert!(prompt.contains("{{placeholder}}"));
+
+        let bare = rewrite_prompt("/x", "body", &[]);
+        assert!(bare.contains("find the judgment steps yourself"));
     }
 
     #[test]

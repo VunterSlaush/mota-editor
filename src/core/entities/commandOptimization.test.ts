@@ -5,6 +5,7 @@ import {
   isStale,
   optimizedPrompt,
   parseOptimizationVerdict,
+  parseRewriteVerdict,
 } from "./commandOptimization";
 
 const ACTIVE: CommandOptimization = {
@@ -139,6 +140,34 @@ describe("optimization verdict parsing", () => {
     ].join("\n");
     const verdict = parseOptimizationVerdict(reply);
     expect(verdict.kind).toBe("proposal");
+  });
+});
+
+describe("rewrite verdict parsing", () => {
+  it("reads the rewritten command, script and residual instructions", () => {
+    const reply = [
+      "```json",
+      JSON.stringify({
+        command: "---\ndescription: Preview (optimized)\n---\nPost /preview.",
+        script: "gh pr comment {{pr_number}} --body /preview",
+        instructions: "Derive {{pr_number}} from the arguments.",
+        summary: "Deterministic preview",
+      }),
+      "```",
+    ].join("\n");
+    const verdict = parseRewriteVerdict(reply);
+    expect(verdict.kind).toBe("proposal");
+    if (verdict.kind === "proposal") {
+      expect(verdict.proposal.command).toContain("Post /preview.");
+      expect(verdict.proposal.script).toContain("gh pr comment");
+      expect(verdict.proposal.instructions).toContain("{{pr_number}}");
+    }
+  });
+
+  it("requires both the command text and the script", () => {
+    expect(parseRewriteVerdict('{ "command": "text only" }').kind).toBe("invalid");
+    expect(parseRewriteVerdict('{ "script": "git push" }').kind).toBe("invalid");
+    expect(parseRewriteVerdict("no json here").kind).toBe("invalid");
   });
 });
 

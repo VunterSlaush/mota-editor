@@ -73,6 +73,13 @@ Supporting decisions:
   delta-fallback accounting as every other token ranking
   (`commandSavings` in `src/core/entities/insights.ts`).
 
+- **A declined command can be optimized as a copy.** A second analysis
+  pass applies the stored blockers' advice and returns a rewritten
+  variant; after review it is written NEXT TO the source as
+  `<name>-optimized.md` (`save_command_copy`, create-new only — never
+  overwriting, never editing the user's original) and activated as an
+  optimized command from birth.
+
 ## Consequences
 
 - A user reviews and explicitly activates every script before it can

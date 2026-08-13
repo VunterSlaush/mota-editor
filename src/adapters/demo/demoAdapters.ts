@@ -13,7 +13,11 @@ import type {
 import type { AppBadgePort } from "../../core/ports/appBadgePort";
 import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
-import type { CommandOptimizer, OptimizeRun } from "../../core/ports/commandOptimizer";
+import type {
+  CommandOptimizer,
+  OptimizeRun,
+  SavedCommandCopy,
+} from "../../core/ports/commandOptimizer";
 import type {
   GitBranch,
   GitChange,
@@ -340,6 +344,30 @@ export class DemoCommandOptimizer implements CommandOptimizer {
       text: `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
       contentHash: "demo1",
     };
+  }
+
+  async rewrite(): Promise<OptimizeRun> {
+    await delay(1200);
+    const rewrite = {
+      command:
+        "---\ndescription: Deploy (optimized variant)\n---\nBuild and deploy. Always deploys the pushed SHA; fails on a dirty tree.",
+      script: 'test -z "$(git status --porcelain)" && npm run build && npm run deploy',
+      summary: "Deterministic deploy of the pushed SHA",
+    };
+    return {
+      text: `\`\`\`json\n${JSON.stringify(rewrite)}\n\`\`\``,
+      contentHash: "demo1",
+    };
+  }
+
+  async saveCopy(
+    _projectPath: string,
+    _provider: ProviderId,
+    sourceName: string,
+    content: string,
+  ): Promise<SavedCommandCopy> {
+    await delay(200);
+    return { name: `${sourceName}-optimized`, contentHash: `demo-${content.length}` };
   }
 }
 

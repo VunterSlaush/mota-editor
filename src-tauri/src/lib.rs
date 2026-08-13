@@ -118,6 +118,8 @@ pub fn run() {
             session_index::list_external_sessions,
             mcp_probe::probe_mcp_server,
             optimize::optimize_command,
+            optimize::rewrite_command,
+            optimize::save_command_copy,
         ])
         .build(tauri::generate_context!())
         .expect("error while running mota-editor")

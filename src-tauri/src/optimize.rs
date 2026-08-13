@@ -5,14 +5,16 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use agent_core::commands::{content_hash, optimize_prompt};
+use std::io::Write;
+
+use agent_core::commands::{content_hash, optimize_prompt, rewrite_prompt, RewriteBlocker};
 use agent_core::{provider_for, AgentEvent, Mode, Permission, Provider, TurnRequest};
 use serde::Serialize;
 use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Child;
 
-use crate::command_discovery::find_command_body;
+use crate::command_discovery::{copy_target_dir, find_command_body};
 use crate::commands::{run_blocking, spawn_error};
 use crate::runner;
 
@@ -38,6 +40,36 @@ pub async fn optimize_command(
     provider_id: String,
     command_name: String,
 ) -> Result<OptimizeRunResult, String> {
+    run_headless_analysis(app, project_path, provider_id, command_name, |name, body| {
+        optimize_prompt(name, body)
+    })
+    .await
+}
+
+/// Second pass for a command judged not optimizable: ask for an
+/// optimized VARIANT — rewritten command text plus its script — with
+/// the stored blockers echoed back so the advice is what gets applied.
+#[tauri::command]
+pub async fn rewrite_command(
+    app: AppHandle,
+    project_path: String,
+    provider_id: String,
+    command_name: String,
+    blockers: Vec<RewriteBlocker>,
+) -> Result<OptimizeRunResult, String> {
+    run_headless_analysis(app, project_path, provider_id, command_name, move |name, body| {
+        rewrite_prompt(name, body, &blockers)
+    })
+    .await
+}
+
+async fn run_headless_analysis(
+    app: AppHandle,
+    project_path: String,
+    provider_id: String,
+    command_name: String,
+    build_prompt: impl FnOnce(&str, &str) -> String,
+) -> Result<OptimizeRunResult, String> {
     let provider = provider_for(&provider_id)
         .ok_or_else(|| format!("Unknown provider: {provider_id}"))?;
     let project = PathBuf::from(&project_path);
@@ -59,7 +91,7 @@ pub async fn optimize_command(
     // tool use outright — the analysis model reads the inlined markdown
     // and answers, nothing more. That is the point, not a limitation.
     let request = TurnRequest {
-        prompt: optimize_prompt(&command_name, &body),
+        prompt: build_prompt(&command_name, &body),
         project_path: project_path.clone(),
         resume_session_id: None,
         mode: Mode::Agent,
@@ -76,6 +108,65 @@ pub async fn optimize_command(
         .await
         .map_err(|_| "The analysis run timed out.".to_owned())??;
     Ok(OptimizeRunResult { text, content_hash: content_hash(&body) })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedCommandCopy {
+    /// The new command's slash name, e.g. "/start-preview-optimized".
+    pub name: String,
+    /// Hash of the written file, the new record's `sourceHash`.
+    pub content_hash: String,
+}
+
+/// Anything past this is not a command file, whatever the model says.
+const MAX_COMMAND_FILE_BYTES: usize = 256 * 1024;
+
+/// Write the rewritten variant NEXT TO its source as `<name>-optimized.md`,
+/// refusing to overwrite: the copy is a new command, never a replacement.
+#[tauri::command]
+pub async fn save_command_copy(
+    app: AppHandle,
+    project_path: String,
+    provider_id: String,
+    source_name: String,
+    content: String,
+) -> Result<SavedCommandCopy, String> {
+    if content.trim().is_empty() || content.len() > MAX_COMMAND_FILE_BYTES {
+        return Err("The rewritten command text is empty or implausibly large.".to_owned());
+    }
+    run_blocking(move || {
+        let stem = source_name.strip_prefix('/').unwrap_or(&source_name);
+        if stem.is_empty()
+            || !stem.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        {
+            return Err(format!("Invalid command name: {source_name}"));
+        }
+        let dir = copy_target_dir(&app, &project_path, &provider_id, &source_name)
+            .ok_or_else(|| {
+                format!("No folder found to place a Markdown copy of {source_name} in.")
+            })?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let new_stem = format!("{stem}-optimized");
+        let path = dir.join(format!("{new_stem}.md"));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    format!("/{new_stem} already exists — remove it first to re-create it.")
+                } else {
+                    e.to_string()
+                }
+            })?;
+        file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+        Ok(SavedCommandCopy {
+            name: format!("/{new_stem}"),
+            content_hash: content_hash(&content),
+        })
+    })
+    .await
 }
 
 /// `runner::stream_turn`'s quiet sibling: same pumping and stderr

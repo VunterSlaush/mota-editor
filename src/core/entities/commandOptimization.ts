@@ -169,6 +169,75 @@ function validateVerdict(parsed: unknown): OptimizationVerdict {
 }
 
 /**
+ * A not-optimizable command rewritten into an optimizable variant: the
+ * new command file's text plus the script (and residual instructions)
+ * implementing it. Saved as a COPY next to the original — the user's
+ * command is never edited for them.
+ */
+export interface RewriteProposal {
+  /** The rewritten command file content, markdown. */
+  readonly command: string;
+  readonly script: string;
+  readonly instructions?: string;
+  readonly summary?: string;
+}
+
+export type RewriteVerdict =
+  | { readonly kind: "proposal"; readonly proposal: RewriteProposal }
+  | { readonly kind: "invalid"; readonly error: string };
+
+/** Reads the rewrite model's reply, with the same fence tolerance. */
+export function parseRewriteVerdict(text: string): RewriteVerdict {
+  let firstError: string | null = null;
+  for (const candidate of jsonCandidates(text)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    const verdict = validateRewrite(parsed);
+    if (verdict.kind === "proposal") return verdict;
+    firstError ??= verdict.error;
+  }
+  return {
+    kind: "invalid",
+    error: firstError ?? "The reply contained no JSON rewrite.",
+  };
+}
+
+function validateRewrite(parsed: unknown): RewriteVerdict {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { kind: "invalid", error: "The rewrite is not a JSON object." };
+  }
+  const record = parsed as Record<string, unknown>;
+  const command = typeof record.command === "string" ? record.command.trim() : "";
+  const script = typeof record.script === "string" ? record.script.trim() : "";
+  if (command === "" || script === "") {
+    return {
+      kind: "invalid",
+      error: "A rewrite must carry both the command text and its script.",
+    };
+  }
+  if (command.length > MAX_SCRIPT_LENGTH || script.length > MAX_SCRIPT_LENGTH) {
+    return { kind: "invalid", error: "The proposed rewrite is implausibly large." };
+  }
+  return {
+    kind: "proposal",
+    proposal: {
+      command,
+      script,
+      ...(typeof record.instructions === "string" && record.instructions.trim() !== ""
+        ? { instructions: record.instructions.trim() }
+        : {}),
+      ...(typeof record.summary === "string" && record.summary.trim() !== ""
+        ? { summary: record.summary.trim() }
+        : {}),
+    },
+  };
+}
+
+/**
  * Blockers are advice, not the verdict — malformed entries are dropped
  * rather than failing a reply whose reason is perfectly usable.
  */

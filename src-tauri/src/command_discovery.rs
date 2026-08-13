@@ -125,6 +125,50 @@ fn resolve_dir(path: PathBuf) -> Option<PathBuf> {
     resolved.is_dir().then_some(resolved)
 }
 
+/// The commands folder an optimized copy of `name` belongs in: the
+/// folder holding the source command file, or — for a skill — the
+/// same-origin commands folder (which may not exist yet; the caller
+/// creates it). None when the source is not a Markdown command: a
+/// Gemini `.toml` cannot take a Markdown copy.
+pub fn copy_target_dir(
+    app: &AppHandle,
+    project_path: &str,
+    provider_id: &str,
+    name: &str,
+) -> Option<PathBuf> {
+    for (dir, _) in command_dirs(app, project_path, provider_id) {
+        let Some(resolved) = resolve_dir(dir) else { continue };
+        let Ok(entries) = fs::read_dir(&resolved) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let named = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(command_name_from_file)
+                .is_some_and(|n| n == name);
+            if named && path.is_file() {
+                let markdown =
+                    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e == "md");
+                return markdown.then_some(resolved);
+            }
+        }
+    }
+    let folder = name.strip_prefix('/')?;
+    if folder.is_empty() || folder.contains(['/', '\\']) || folder.contains("..") {
+        return None;
+    }
+    for (dir, origin) in skill_dirs(app, project_path, provider_id) {
+        let Some(resolved) = resolve_dir(dir) else { continue };
+        if resolved.join(folder).join("SKILL.md").is_file() {
+            return command_dirs(app, project_path, provider_id)
+                .into_iter()
+                .find(|(_, o)| *o == origin)
+                .map(|(d, _)| d);
+        }
+    }
+    None
+}
+
 fn collect_from_dir(dir: &Path, origin: CommandOrigin, commands: &mut Vec<CustomCommand>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {

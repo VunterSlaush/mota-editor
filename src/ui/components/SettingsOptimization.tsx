@@ -5,12 +5,17 @@ import { commandConfigKey } from "../../core/entities/commandConfig";
 import {
   type CommandOptimization,
   isStale,
+  type OptimizationBlocker,
 } from "../../core/entities/commandOptimization";
 import type { CommandSavings } from "../../core/entities/insights";
 import { PROVIDERS, type ProviderId } from "../../core/entities/provider";
 import { formatTokens } from "../../core/entities/tokens";
+import type { SavedCommandCopy } from "../../core/ports/commandOptimizer";
 import type { AppSettings, TabState } from "../../core/state/appState";
-import type { OptimizeOutcome } from "../../core/usecases/optimizeCommand";
+import type {
+  OptimizeOutcome,
+  RewriteOutcome,
+} from "../../core/usecases/optimizeCommand";
 import { OptionPicker } from "./OptionPicker";
 
 interface Props {
@@ -26,6 +31,20 @@ interface Props {
     provider: ProviderId,
     commandName: string,
   ) => Promise<OptimizeOutcome>;
+  /** Rewrites a declined command into an optimizable variant. */
+  rewrite: (
+    projectPath: string,
+    provider: ProviderId,
+    commandName: string,
+    blockers: readonly OptimizationBlocker[],
+  ) => Promise<RewriteOutcome>;
+  /** Writes the approved variant to disk as a NEW command file. */
+  saveCopy: (
+    projectPath: string,
+    provider: ProviderId,
+    sourceName: string,
+    content: string,
+  ) => Promise<SavedCommandCopy>;
   loadSavings: (
     provider: ProviderId,
     command: string,
@@ -43,6 +62,13 @@ type RowActivity =
       instructions?: string;
       summary?: string;
       sourceHash: string;
+    }
+  | {
+      kind: "copyProposal";
+      command: string;
+      script: string;
+      instructions?: string;
+      summary?: string;
     }
   | { kind: "error"; error: string };
 
@@ -63,6 +89,8 @@ export function SettingsOptimization({
   activeTab,
   loadCommands,
   optimize,
+  rewrite,
+  saveCopy,
   loadSavings,
 }: Props) {
   const [provider, setProvider] = useState<ProviderId>(settings.defaultProvider);
@@ -74,6 +102,8 @@ export function SettingsOptimization({
   const [commands, setCommands] = useState<readonly CommandInfo[]>([]);
   const [activity, setActivity] = useState<Record<string, RowActivity>>({});
   const [savings, setSavings] = useState<Record<string, CommandSavings>>({});
+  // Bumped when a copy is written, so the new command's row appears.
+  const [discoveredAt, setDiscoveredAt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,7 +113,7 @@ export function SettingsOptimization({
     return () => {
       cancelled = true;
     };
-  }, [projectPath, provider, loadCommands]);
+  }, [projectPath, provider, loadCommands, discoveredAt]);
 
   const optimizations = settings.commandOptimizations;
   const recordFor = (name: string): CommandOptimization | undefined =>
@@ -156,6 +186,47 @@ export function SettingsOptimization({
       activatedAt: Date.now(),
     });
     setRow(name, { kind: "idle" });
+  };
+
+  const rewriteCopy = async (name: string) => {
+    setRow(name, { kind: "analyzing" });
+    const blockers = recordFor(name)?.blockers ?? [];
+    const outcome = await rewrite(projectPath, provider, name, blockers);
+    if (outcome.kind === "failed") {
+      setRow(name, { kind: "error", error: outcome.error });
+      return;
+    }
+    setRow(name, {
+      kind: "copyProposal",
+      command: outcome.proposal.command,
+      script: outcome.proposal.script,
+      instructions: outcome.proposal.instructions,
+      summary: outcome.proposal.summary,
+    });
+  };
+
+  const createCopy = async (
+    name: string,
+    proposal: RowActivity & { kind: "copyProposal" },
+  ) => {
+    let saved: SavedCommandCopy;
+    try {
+      saved = await saveCopy(projectPath, provider, name, proposal.command);
+    } catch (error) {
+      setRow(name, { kind: "error", error: String(error) });
+      return;
+    }
+    const instructions = proposal.instructions?.trim();
+    write(saved.name, {
+      status: "active",
+      script: proposal.script,
+      ...(instructions ? { instructions } : {}),
+      summary: proposal.summary,
+      sourceHash: saved.contentHash,
+      activatedAt: Date.now(),
+    });
+    setRow(name, { kind: "idle" });
+    setDiscoveredAt(Date.now());
   };
 
   return (
@@ -248,18 +319,25 @@ export function SettingsOptimization({
                 activity={activity[command.name] ?? { kind: "idle" }}
                 savings={savings[command.name]}
                 onOptimize={() => void analyze(command.name)}
+                onRewriteCopy={() => void rewriteCopy(command.name)}
                 onActivate={(proposal) => activate(command.name, proposal)}
+                onCreateCopy={(proposal) => void createCopy(command.name, proposal)}
                 onDiscard={() => setRow(command.name, { kind: "idle" })}
                 onDeactivate={() => write(command.name, undefined)}
                 onEditScript={(script) => {
                   const current = activity[command.name];
-                  if (current?.kind === "proposal")
+                  if (current?.kind === "proposal" || current?.kind === "copyProposal")
                     setRow(command.name, { ...current, script });
                 }}
                 onEditInstructions={(instructions) => {
                   const current = activity[command.name];
-                  if (current?.kind === "proposal")
+                  if (current?.kind === "proposal" || current?.kind === "copyProposal")
                     setRow(command.name, { ...current, instructions });
+                }}
+                onEditCommand={(text) => {
+                  const current = activity[command.name];
+                  if (current?.kind === "copyProposal")
+                    setRow(command.name, { ...current, command: text });
                 }}
               />
             ))}
@@ -276,11 +354,14 @@ interface RowProps {
   activity: RowActivity;
   savings: CommandSavings | undefined;
   onOptimize: () => void;
+  onRewriteCopy: () => void;
   onActivate: (proposal: RowActivity & { kind: "proposal" }) => void;
+  onCreateCopy: (proposal: RowActivity & { kind: "copyProposal" }) => void;
   onDiscard: () => void;
   onDeactivate: () => void;
   onEditScript: (script: string) => void;
   onEditInstructions: (instructions: string) => void;
+  onEditCommand: (text: string) => void;
 }
 
 function OptimizationRow({
@@ -289,11 +370,14 @@ function OptimizationRow({
   activity,
   savings,
   onOptimize,
+  onRewriteCopy,
   onActivate,
+  onCreateCopy,
   onDiscard,
   onDeactivate,
   onEditScript,
   onEditInstructions,
+  onEditCommand,
 }: RowProps) {
   const analyzing = activity.kind === "analyzing";
   const stale = record !== undefined && isStale(record, command.contentHash);
@@ -341,19 +425,36 @@ function OptimizationRow({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              className="tool-add"
-              onClick={onOptimize}
-              disabled={analyzing}
-            >
-              <Lightning size={14} />{" "}
-              {analyzing
-                ? "Analyzing…"
-                : record?.status === "notOptimizable"
-                  ? "Try again"
-                  : "Optimize"}
-            </button>
+            <>
+              {record?.status === "notOptimizable" && (
+                <button
+                  type="button"
+                  className="tool-add"
+                  onClick={onRewriteCopy}
+                  disabled={analyzing}
+                >
+                  <Lightning size={14} /> {analyzing ? "Analyzing…" : "Optimize a copy"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="tool-add"
+                onClick={onOptimize}
+                disabled={analyzing}
+              >
+                {record?.status === "notOptimizable" ? (
+                  analyzing ? (
+                    "…"
+                  ) : (
+                    "Try again"
+                  )
+                ) : (
+                  <>
+                    <Lightning size={14} /> {analyzing ? "Analyzing…" : "Optimize"}
+                  </>
+                )}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -367,7 +468,8 @@ function OptimizationRow({
         record.blockers.length > 0 && (
           <div className="optimization-row__blockers">
             <span className="optimization-row__blockers-title">
-              To make it optimizable, edit the command file:
+              To make it optimizable, edit the command file — or let "Optimize a copy"
+              apply these for you:
             </span>
             <ul>
               {record.blockers.map((blocker) => (
@@ -445,6 +547,57 @@ function OptimizationRow({
               onClick={() => onActivate(activity)}
             >
               <Lightning size={14} /> Activate
+            </button>
+            <button type="button" className="tool-add" onClick={onDiscard}>
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activity.kind === "copyProposal" && (
+        <div className="optimization-row__proposal">
+          {activity.summary !== undefined && (
+            <p className="optimization-row__savings">{activity.summary}</p>
+          )}
+          <p className="optimization-row__reason">
+            This creates a NEW command, {command.name}-optimized, next to the original —{" "}
+            {command.name} itself is not touched. Review the rewritten command text and
+            the script that will run for it; edit anything here before creating.
+          </p>
+          <textarea
+            className="settings-input optimization-row__editor"
+            aria-label={`Rewritten command for ${command.name}`}
+            value={activity.command}
+            rows={Math.min(14, activity.command.split("\n").length + 1)}
+            onChange={(e) => onEditCommand(e.target.value)}
+            spellCheck={false}
+          />
+          {activity.instructions !== undefined && (
+            <textarea
+              className="settings-input optimization-row__editor"
+              aria-label={`Instructions for ${command.name}-optimized`}
+              value={activity.instructions}
+              rows={Math.min(8, activity.instructions.split("\n").length + 1)}
+              onChange={(e) => onEditInstructions(e.target.value)}
+              spellCheck={false}
+            />
+          )}
+          <textarea
+            className="settings-input optimization-row__editor"
+            aria-label={`Script for ${command.name}-optimized`}
+            value={activity.script}
+            rows={Math.min(12, activity.script.split("\n").length + 1)}
+            onChange={(e) => onEditScript(e.target.value)}
+            spellCheck={false}
+          />
+          <div className="optimization-row__actions">
+            <button
+              type="button"
+              className="tool-add"
+              onClick={() => onCreateCopy(activity)}
+            >
+              <Lightning size={14} /> Create copy & activate
             </button>
             <button type="button" className="tool-add" onClick={onDiscard}>
               Discard
