@@ -64,9 +64,11 @@ export function TabBar({
             title={statusLabel ? `${named} — ${statusLabel}` : named}
             data-color={tab.project.color}
             onPointerDown={(e) => drag.startDrag(id, e)}
-            // The click that ends a drop is the drop, not a tab switch.
-            onClick={() => {
-              if (!drag.wasDragged()) onSelect(id);
+            // The click that ends a drop is the drop, not a tab switch. A
+            // Control-click is macOS's right-click, and must not select
+            // the tab it opened the menu for either.
+            onClick={(e) => {
+              if (!drag.wasDragged() && !e.ctrlKey) onSelect(id);
             }}
             // preventDefault, or the webview draws its own menu on top.
             onContextMenu={(e) => {
@@ -118,6 +120,7 @@ export function TabBar({
       </button>
       {menuTab && menu && (
         <TabMenu
+          key={menu.tabId}
           anchor={menu.anchor}
           label={menuTab.project.label ?? ""}
           color={menuTab.project.color}

@@ -84,7 +84,9 @@ export function TabMenu({
   }, [onClose]);
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === "Enter") {
+    // Gated to the field: an un-gated preventDefault would swallow Enter on
+    // the swatch buttons too, closing the panel instead of activating them.
+    if (event.key === "Enter" && event.target === field.current) {
       event.preventDefault();
       onClose();
     } else if (event.key === "Escape") {

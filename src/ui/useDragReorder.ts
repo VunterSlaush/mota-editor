@@ -32,7 +32,10 @@ export function useDragReorder(
   useEffect(() => () => stopDragRef.current?.(), []);
 
   const startDrag = (id: string, e: React.PointerEvent) => {
-    if (e.button !== 0) return; // a right-click is a menu, not a drag
+    // A right-click is a menu, not a drag — and on macOS a Control-click is
+    // the same gesture (primary button, but paired with a contextmenu
+    // event), so it needs the same bail.
+    if (e.button !== 0 || e.ctrlKey) return;
     // A button inside the item (a tab's close ×) is its own affordance.
     if ((e.target as HTMLElement).closest("button")) return;
     const el = e.currentTarget as HTMLElement;
