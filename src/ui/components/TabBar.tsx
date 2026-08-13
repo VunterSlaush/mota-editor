@@ -1,5 +1,6 @@
 import { FolderSimple, GitFork } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { tabLabel } from "../../core/entities/project";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
 import { useDragReorder } from "../useDragReorder";
@@ -34,19 +35,24 @@ export function TabBar({
         const id = tab.project.id;
         const isActive = id === activeTabId;
         const status = tabStatus(tab);
-        const label = TAB_STATUS_LABELS[status];
+        const statusLabel = TAB_STATUS_LABELS[status];
         // The branch comes from the tab's cached git read, never a live call.
         const at = tab.branch ? `${tab.project.path} (${tab.branch})` : tab.project.path;
         const where = tab.project.worktreeOf
           ? `${at} — worktree of ${tab.project.worktreeOf}`
           : at;
+        const name = tabLabel(tab.project);
+        // A named tab still has to say where it points: the name took the
+        // folder's place in the strip, so the tooltip is where that goes.
+        const named = tab.project.label ? `${tab.project.label} — ${where}` : where;
         return (
           <div
             key={id}
             className={`tab ${isActive ? "tab--active" : ""} tab--${status} ${
               drag.draggingId === id ? "tab--dragging" : ""
             }`}
-            title={label ? `${where} — ${label}` : where}
+            title={statusLabel ? `${named} — ${statusLabel}` : named}
+            data-color={tab.project.color}
             onPointerDown={(e) => drag.startDrag(id, e)}
             // The click that ends a drop is the drop, not a tab switch.
             onClick={() => {
@@ -65,10 +71,10 @@ export function TabBar({
               <span
                 className={`tab__dot tab__dot--${status}`}
                 role="img"
-                aria-label={label}
+                aria-label={statusLabel}
               />
             )}
-            <span className="tab__name">{tab.project.name}</span>
+            <span className="tab__name">{name}</span>
             {/* Which checkout this is. With worktrees two tabs of one
                 repository differ by nothing else, so it earns its width
                 — and gives it back first when the strip runs short. */}
@@ -76,7 +82,7 @@ export function TabBar({
             <button
               type="button"
               className="tab__close"
-              aria-label={`Close ${tab.project.name}`}
+              aria-label={`Close ${name}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(id);
