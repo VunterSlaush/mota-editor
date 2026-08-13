@@ -123,11 +123,15 @@ export class Worktrees {
   /**
    * Create a worktree for `branch` at the derived sibling location and
    * open it. Failures come back as messages for the picker to show.
+   *
+   * `base` is where a brand-new branch starts, and only "new" mode reads
+   * it: empty leaves the start point to git, which is this tab's HEAD.
    */
   async create(
     tabId: string,
     branch: string,
     mode: WorktreeAddMode,
+    base = "",
   ): Promise<GitActionResult> {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
@@ -148,6 +152,7 @@ export class Worktrees {
         branch,
         mode,
         remote,
+        base,
       );
       await this.open(target, mainPath, tabId);
       // Stocking the worktree is not part of creating it: the tab is
@@ -233,7 +238,12 @@ export class RemoveWorktree {
   async check(tabId: string, worktreePath: string): Promise<RemovalCheck> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab)
-      return { needsForce: false, blockers: ["Unknown tab."], reclaimable: false };
+      return {
+        needsForce: false,
+        blockers: ["Unknown tab."],
+        blocked: true,
+        reclaimable: false,
+      };
 
     const worktrees = await this.git.worktrees(tab.project.path).catch(() => []);
     const target = worktrees.find((w) => samePath(w.path, worktreePath));
@@ -241,6 +251,7 @@ export class RemoveWorktree {
       return {
         needsForce: false,
         blockers: ["Not a worktree of this repository."],
+        blocked: true,
         reclaimable: false,
       };
     }

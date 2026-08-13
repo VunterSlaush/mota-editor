@@ -105,7 +105,8 @@ export interface GitPort {
   worktrees(projectPath: string): Promise<GitWorktree[]>;
   /**
    * Create a worktree at an absolute path. Resolves with a summary.
-   * `remote` is only consulted by the "remote" mode.
+   * `remote` is only consulted by the "remote" mode, `base` only by
+   * "new" — each mode's start point, named where it means something.
    */
   worktreeAdd(
     projectPath: string,
@@ -113,6 +114,12 @@ export interface GitPort {
     branch: string,
     mode: WorktreeAddMode,
     remote: string,
+    /**
+     * Where a "new" branch starts: a branch name, or "" for the asking
+     * checkout's HEAD — git's own default, and the only thing this could
+     * mean before the picker let anyone say otherwise.
+     */
+    base: string,
   ): Promise<string>;
   /**
    * Delete a linked worktree and its folder. "force" is what git needs

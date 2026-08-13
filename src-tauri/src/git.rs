@@ -278,6 +278,7 @@ pub async fn git_worktree_add(
     branch: String,
     mode: String,
     remote: String,
+    base: String,
 ) -> Result<String, String> {
     // Same reasoning as git_checkout: refs and paths that start with `-`
     // would be parsed as option flags. Legitimate branch and remote names
@@ -288,13 +289,21 @@ pub async fn git_worktree_add(
     if remote.starts_with('-') || remote.is_empty() {
         return Err(format!("Refusing to use suspicious remote name: {remote}"));
     }
+    if base.starts_with('-') {
+        return Err(format!("Refusing to use suspicious ref name: {base}"));
+    }
     if worktree_path.starts_with('-') || !std::path::Path::new(&worktree_path).is_absolute() {
         return Err(format!("Worktree path must be absolute: {worktree_path}"));
     }
     let remote_branch = format!("{remote}/{branch}");
     let args: &[&str] = match mode.as_str() {
         "existing" => &["worktree", "add", "--", &worktree_path, &branch],
-        "new" => &["worktree", "add", "-b", &branch, &worktree_path],
+        // No base is not the same as a base of "HEAD": git resolves the
+        // omitted start point itself, and saying HEAD out loud would
+        // pin the new branch to this worktree's HEAD even where git
+        // would have done something smarter.
+        "new" if base.is_empty() => &["worktree", "add", "-b", &branch, &worktree_path],
+        "new" => &["worktree", "add", "-b", &branch, &worktree_path, &base],
         "remote" => &["worktree", "add", "--track", "-b", &branch, &worktree_path, &remote_branch],
         other => return Err(format!("Unknown worktree mode: {other}")),
     };
