@@ -11,6 +11,7 @@ import type {
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { branchListHint } from "./branchListHint";
+import { RemovalConfirm } from "./WorktreeRemoval";
 
 interface Props {
   /** The repo's checkouts, decorated with what's already open. */
@@ -443,50 +444,6 @@ function RowLabel({ row, currentBranch }: { row: Row; currentBranch: string }) {
         <span className="worktree-picker__path">from {currentBranch}</span>
       )}
     </span>
-  );
-}
-
-/**
- * The second half of the two-step: what removal would cost, and the
- * button that does it. A worktree with uncommitted work says so in the
- * button itself — "Delete 3 files" is harder to click by reflex than a
- * bare "Remove", which is the point.
- */
-function RemovalConfirm({
-  check,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  check: RemovalCheck;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const blocked = check.blockers.some(
-    (b) => b.includes("main checkout") || b.startsWith("Locked") || b.includes("Not a"),
-  );
-  return (
-    <div className="worktree-picker__confirm">
-      <span className="worktree-picker__confirm-text">
-        {check.blockers.length > 0
-          ? check.blockers.join(" ")
-          : "Deletes the folder. The branch and its commits stay."}
-      </span>
-      <button type="button" className="worktree-picker__confirm-no" onClick={onCancel}>
-        Cancel
-      </button>
-      {!blocked && (
-        <button
-          type="button"
-          className="worktree-picker__confirm-yes"
-          disabled={busy}
-          onClick={onConfirm}
-        >
-          {check.needsForce ? "Delete anyway" : "Remove"}
-        </button>
-      )}
-    </div>
   );
 }
 

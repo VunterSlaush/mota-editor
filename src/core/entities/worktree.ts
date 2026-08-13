@@ -73,6 +73,12 @@ export interface RemovalCheck {
   readonly needsForce: boolean;
   /** Reasons to stop, worst first. Non-empty means "do not just do it". */
   readonly blockers: readonly string[];
+  /**
+   * No removal would succeed — not even a forced one. Uncommitted work
+   * is not this: `--force` is exactly the answer to that, which is why
+   * the two are separate answers rather than a count of blockers.
+   */
+  readonly blocked: boolean;
   /** Merged, clean and unlocked — the disk is free for the taking. */
   readonly reclaimable: boolean;
 }
@@ -108,6 +114,7 @@ export function removalCheck(
   return {
     needsForce: changedFiles > 0,
     blockers,
+    blocked: worktree.main || worktree.locked,
     reclaimable: merged && changedFiles === 0 && !worktree.locked && !worktree.main,
   };
 }

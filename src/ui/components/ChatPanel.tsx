@@ -536,6 +536,8 @@ export function ChatPanel({
                   currentPath={tab.project.path}
                   onOpen={onOpenWorktree}
                   onNewWorktree={() => setWorktreePickerOpen(true)}
+                  onCheckRemoval={onCheckWorktreeRemoval}
+                  onRemove={onRemoveWorktree}
                   onOpenSession={(item) => void onOpenSession(item)}
                   onShowAllSessions={() => onSelectSidebarView("history")}
                 />

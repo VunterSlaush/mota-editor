@@ -3468,6 +3468,18 @@ body {
   color: var(--text-dim);
 }
 
+/* Out of the way until the row is hovered, like the changed-file kebab:
+   deleting a worktree is not what the row is mostly for. */
+.worktrees__remove {
+  flex: none;
+  visibility: hidden;
+}
+
+.worktrees__item:hover .worktrees__remove,
+.worktrees__remove:focus-visible {
+  visibility: visible;
+}
+
 /* A worktree whose folder git has yet to prune: nothing to open. */
 .worktrees__item .changes__file:disabled {
   opacity: 0.45;

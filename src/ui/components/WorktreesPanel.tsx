@@ -1,11 +1,21 @@
-import { ArrowClockwise, FolderSimple, GitFork, Plus } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  FolderSimple,
+  GitFork,
+  Plus,
+  Trash,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { TAB_STATUS_LABELS } from "../../core/entities/tabStatus";
+import type { RemovalCheck } from "../../core/entities/worktree";
+import type { WorktreeRemoveMode } from "../../core/ports/gitPort";
 import type { TabState } from "../../core/state/appState";
+import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryItem } from "../../core/usecases/history";
 import type { WorktreeRow } from "../../core/usecases/worktreeOverview";
 import { worktreeOverview } from "../../core/usecases/worktreeOverview";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
+import { RemovalConfirm } from "./WorktreeRemoval";
 
 /** How many worktree sessions the panel lists before saying "see all". */
 const SESSION_LIMIT = 6;
@@ -20,8 +30,11 @@ interface Props {
   /** The checkout the panel is shown from; its row reads "current". */
   currentPath: string;
   onOpen: (path: string, mainPath: string) => void;
-  /** Opens the picker, which owns creating and removing a worktree. */
+  /** Opens the picker, which owns creating a worktree. */
   onNewWorktree: () => void;
+  /** What removing this worktree would cost, asked when Remove is armed. */
+  onCheckRemoval: (path: string) => Promise<RemovalCheck>;
+  onRemove: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
   /** Loads a session into its own worktree's tab, opening it if closed. */
   onOpenSession: (item: HistoryItem) => void;
   /** Takes the user to the full history, where the rest of them are. */
@@ -49,12 +62,19 @@ export function WorktreesPanel({
   currentPath,
   onOpen,
   onNewWorktree,
+  onCheckRemoval,
+  onRemove,
   onOpenSession,
   onShowAllSessions,
 }: Props) {
   const [worktrees, setWorktrees] = useState<readonly WorktreeItem[] | null>(null);
   const [sessions, setSessions] = useState<readonly HistoryItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  // The row whose removal has been asked about; the second click is the
+  // one that deletes. Same two-step the picker uses.
+  const [armed, setArmed] = useState<{ path: string; check: RemovalCheck } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // The listing changes when a worktree is created or removed, and both
   // of those open or close a tab — so the set of tab ids is the signal,
@@ -94,6 +114,27 @@ export function WorktreesPanel({
   const mainPath = rows.find((row) => row.main)?.path ?? currentPath;
   const linked = rows.filter((row) => !row.main);
 
+  /** First click asks git what it would cost; the second one removes. */
+  const arm = async (path: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setArmed({ path, check: await onCheckRemoval(path) });
+    setBusy(false);
+  };
+
+  const confirmRemove = async (check: RemovalCheck) => {
+    if (busy || !armed) return;
+    setBusy(true);
+    const result = await onRemove(armed.path, check.needsForce ? "force" : "safe");
+    setBusy(false);
+    setArmed(null);
+    if (!result.ok) setError(result.message);
+    // Either way: a half-succeeded removal must not leave a row behind
+    // that no longer matches what git has.
+    setRefreshKey((key) => key + 1);
+  };
+
   return (
     <aside className="worktrees">
       <div className="changes__actions">
@@ -125,14 +166,26 @@ export function WorktreesPanel({
       {rows.length > 0 && (
         <ul className="changes__list">
           {rows.map((row) => (
-            <WorktreeRowItem
-              key={row.path}
-              row={row}
-              onOpen={() => onOpen(row.path, mainPath)}
-            />
+            <li key={row.path}>
+              <WorktreeRowItem
+                row={row}
+                busy={busy}
+                onOpen={() => onOpen(row.path, mainPath)}
+                onRemove={() => void arm(row.path)}
+              />
+              {armed?.path === row.path && (
+                <RemovalConfirm
+                  check={armed.check}
+                  busy={busy}
+                  onCancel={() => setArmed(null)}
+                  onConfirm={() => void confirmRemove(armed.check)}
+                />
+              )}
+            </li>
           ))}
         </ul>
       )}
+      {error && <p className="changes__notice changes__notice--error">{error}</p>}
       {worktrees !== null && rows.length > 0 && linked.length === 0 && (
         <p className="changes__empty">
           No worktrees yet — New worktree makes one and opens it in its own tab.
@@ -196,10 +249,20 @@ function WorktreeSessions({
  * tab open is the interesting one — it is the click that brings a closed
  * worktree back.
  */
-function WorktreeRowItem({ row, onOpen }: { row: WorktreeRow; onOpen: () => void }) {
+function WorktreeRowItem({
+  row,
+  busy,
+  onOpen,
+  onRemove,
+}: {
+  row: WorktreeRow;
+  busy: boolean;
+  onOpen: () => void;
+  onRemove: () => void;
+}) {
   const name = row.branch || `detached @ ${row.head.slice(0, 7)}`;
   return (
-    <li className="changes__item worktrees__item" title={row.path}>
+    <div className="changes__item worktrees__item" title={row.path}>
       <span className="worktrees__icon">
         {row.main ? <FolderSimple size={13} /> : <GitFork size={13} />}
       </span>
@@ -216,7 +279,23 @@ function WorktreeRowItem({ row, onOpen }: { row: WorktreeRow; onOpen: () => void
         <span className="changes__dir">{row.path}</span>
       </button>
       <WorktreeState row={row} />
-    </li>
+      {/* Never the main checkout, and never the one you are standing in:
+          git refuses both, and an offer it would refuse is not an offer.
+          A prunable row keeps its button — removing it is how the stale
+          entry gets cleaned up. */}
+      {!row.main && !row.current && (
+        <button
+          type="button"
+          className="worktree-picker__remove worktrees__remove"
+          disabled={busy}
+          aria-label={`Remove the worktree at ${row.path}`}
+          title="Remove this worktree — deletes the folder, keeps the branch"
+          onClick={onRemove}
+        >
+          <Trash size={13} aria-hidden="true" />
+        </button>
+      )}
+    </div>
   );
 }
 

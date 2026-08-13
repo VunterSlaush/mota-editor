@@ -228,7 +228,12 @@ export class RemoveWorktree {
   async check(tabId: string, worktreePath: string): Promise<RemovalCheck> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab)
-      return { needsForce: false, blockers: ["Unknown tab."], reclaimable: false };
+      return {
+        needsForce: false,
+        blockers: ["Unknown tab."],
+        blocked: true,
+        reclaimable: false,
+      };
 
     const worktrees = await this.git.worktrees(tab.project.path).catch(() => []);
     const target = worktrees.find((w) => samePath(w.path, worktreePath));
@@ -236,6 +241,7 @@ export class RemoveWorktree {
       return {
         needsForce: false,
         blockers: ["Not a worktree of this repository."],
+        blocked: true,
         reclaimable: false,
       };
     }
