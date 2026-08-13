@@ -1,9 +1,11 @@
 import { FolderSimple, GitFork } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { tabLabel } from "../../core/entities/project";
+import type { TabColorId } from "../../core/entities/tabColor";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
 import { useDragReorder } from "../useDragReorder";
+import { TabMenu } from "./TabMenu";
 import { tabDensity } from "./tabDensity";
 
 interface Props {
@@ -13,6 +15,8 @@ interface Props {
   onClose: (tabId: string) => void;
   onReorder: (tabId: string, toIndex: number) => void;
   onOpenProject: () => void;
+  onRename: (tabId: string, label: string) => void;
+  onRecolor: (tabId: string, color: TabColorId | undefined) => void;
 }
 
 /** UI — one tab per project, plus the "open project" affordance. */
@@ -23,10 +27,16 @@ export function TabBar({
   onClose,
   onReorder,
   onOpenProject,
+  onRename,
+  onRecolor,
 }: Props) {
   const drag = useDragReorder(onReorder, ".tab");
   const strip = useRef<HTMLElement>(null);
   const density = tabDensity(useWidthOf(strip), tabs.length);
+  const [menu, setMenu] = useState<{ tabId: string; anchor: DOMRect } | null>(null);
+  // Undefined once the tab is gone, so closing a tab with its menu open
+  // takes the menu with it.
+  const menuTab = menu ? tabs.find((t) => t.project.id === menu.tabId) : undefined;
 
   return (
     // The header itself drags the window; the tabs on it drag each other.
@@ -57,6 +67,11 @@ export function TabBar({
             // The click that ends a drop is the drop, not a tab switch.
             onClick={() => {
               if (!drag.wasDragged()) onSelect(id);
+            }}
+            // preventDefault, or the webview draws its own menu on top.
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ tabId: id, anchor: e.currentTarget.getBoundingClientRect() });
             }}
           >
             {/* Folder vs worktree at a glance; the tooltip says which repo. */}
@@ -101,6 +116,17 @@ export function TabBar({
       >
         +
       </button>
+      {menuTab && menu && (
+        <TabMenu
+          anchor={menu.anchor}
+          label={menuTab.project.label ?? ""}
+          color={menuTab.project.color}
+          folderName={menuTab.project.name}
+          onRename={(label) => onRename(menuTab.project.id, label)}
+          onRecolor={(color) => onRecolor(menuTab.project.id, color)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </header>
   );
 }
