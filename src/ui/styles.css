@@ -186,7 +186,16 @@ body {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 8px 8px 0 0;
-  color: var(--text-dim);
+  /* Outlined, not merely dimmed. A row of unbordered labels on one
+     surface gives no answer to "where does this tab end and the next
+     begin?" — the 2px gap between them is not one. The bottom edge is
+     left open so the strip's own line is the base every tab stands on,
+     the way a browser's do. */
+  border: 1px solid var(--border);
+  border-bottom-color: transparent;
+  /* Full contrast: which tab you are IN is said by the surface below and
+     the accent above, so the others have no reason to be hard to read. */
+  color: var(--text);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -194,6 +203,11 @@ body {
   min-width: 0;
   max-width: 220px;
   overflow: hidden;
+}
+
+.tab:hover:not(.tab--active) {
+  border-color: var(--text-dim);
+  border-bottom-color: transparent;
 }
 
 .tab__name {
@@ -246,9 +260,13 @@ body {
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
 }
 
+/* The tab you are in: the editor's own surface, carried up out of the
+   strip, and an accent edge on top. Both are needed now that every tab
+   is outlined — a border alone no longer singles one out. */
 .tab--active {
   background: var(--bg);
   color: var(--text);
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 /* Folder or worktree — the one glance that tells tabs of a repo apart. */
