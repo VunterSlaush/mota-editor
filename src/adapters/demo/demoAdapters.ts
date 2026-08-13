@@ -322,6 +322,8 @@ export class DemoCommandOptimizer implements CommandOptimizer {
         ? {
             optimizable: true,
             script: 'npm run build && npm run deploy -- --message "{{release_note}}"',
+            instructions:
+              "Skim the commits since the last deploy and write a one-line release note, then run the script with it.",
             summary: "Build, then deploy with a release note",
           }
         : {

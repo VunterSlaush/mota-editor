@@ -57,6 +57,11 @@ Supporting decisions:
 - **Scripts are portable POSIX sh with `{{placeholder}}` holes** the
   agent fills at run time, so one judgment value does not disqualify an
   otherwise deterministic command.
+- **Partially deterministic commands become hybrids**: the verdict may
+  carry `instructions` — the judgment steps rewritten as concise prompt
+  text that orchestrates around the script. The rewrite sends both; the
+  agent follows the short instructions and still runs the mechanical
+  part as one call, so the saving holds even when a script alone can't.
 - **Scripts live in settings (`AppSettings.commandOptimizations`), not
   on disk.** They are a few hundred bytes; workspace.json persistence is
   free, there is no file store to secure, and a hostile repo edit can

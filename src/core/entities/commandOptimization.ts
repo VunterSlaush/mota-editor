@@ -14,6 +14,14 @@ export interface CommandOptimization {
   readonly status: "active" | "notOptimizable";
   /** POSIX sh; `{{placeholder}}` holes are filled by the agent at run time. */
   readonly script?: string;
+  /**
+   * A hybrid command's judgment steps, kept as concise prompt
+   * instructions that orchestrate around the script. Absent when the
+   * script covers everything. Still a saving: the agent reads this
+   * distillation instead of the full command file, and the mechanical
+   * part stays one tool call.
+   */
+  readonly instructions?: string;
   /** One line shown in the settings row. */
   readonly summary?: string;
   /** Why the command cannot be optimized, when it cannot. */
@@ -48,7 +56,12 @@ export interface OptimizationBlocker {
 
 /** What the analysis run proposes, before the user has seen it. */
 export type OptimizationProposal =
-  | { readonly optimizable: true; readonly script: string; readonly summary?: string }
+  | {
+      readonly optimizable: true;
+      readonly script: string;
+      readonly instructions?: string;
+      readonly summary?: string;
+    }
   | {
       readonly optimizable: false;
       readonly reason: string;
@@ -131,11 +144,23 @@ function validateVerdict(parsed: unknown): OptimizationVerdict {
   if (record.script.length > MAX_SCRIPT_LENGTH) {
     return { kind: "invalid", error: "The proposed script is implausibly large." };
   }
+  if (
+    typeof record.instructions === "string" &&
+    record.instructions.length > MAX_SCRIPT_LENGTH
+  ) {
+    return {
+      kind: "invalid",
+      error: "The proposed instructions are implausibly large.",
+    };
+  }
   return {
     kind: "proposal",
     proposal: {
       optimizable: true,
       script: record.script.trim(),
+      ...(typeof record.instructions === "string" && record.instructions.trim() !== ""
+        ? { instructions: record.instructions.trim() }
+        : {}),
       ...(typeof record.summary === "string" && record.summary.trim() !== ""
         ? { summary: record.summary.trim() }
         : {}),
@@ -183,12 +208,21 @@ export function optimizedPrompt(
 ): string {
   const args = typedText.trim().slice(command.length).trim();
   const script = optimization.script ?? "";
-  const lines = [
-    `The user ran ${command}. It has a pre-approved deterministic implementation:`,
-    "the script below. Execute the ENTIRE script in a single shell tool call.",
-    "Do not perform its steps yourself, do not add steps, and do not consult the",
-    "command's original instructions.",
-  ];
+  const instructions = optimization.instructions;
+  const lines = instructions
+    ? [
+        `The user ran ${command}. It has a pre-approved implementation: the`,
+        "instructions and the script below, which together REPLACE the command's",
+        "original instructions entirely. Follow the instructions; where they call",
+        "for the script, execute the ENTIRE script in a single shell tool call —",
+        "never perform the script's steps yourself or add steps of your own.",
+      ]
+    : [
+        `The user ran ${command}. It has a pre-approved deterministic implementation:`,
+        "the script below. Execute the ENTIRE script in a single shell tool call.",
+        "Do not perform its steps yourself, do not add steps, and do not consult the",
+        "command's original instructions.",
+      ];
   if (script.includes("{{")) {
     lines.push(
       "Before running it, replace every {{placeholder}} with a concrete value",
@@ -197,6 +231,9 @@ export function optimizedPrompt(
   }
   if (args !== "") {
     lines.push("", `Arguments: ${args}`);
+  }
+  if (instructions) {
+    lines.push("", "Instructions:", instructions);
   }
   lines.push(
     "",

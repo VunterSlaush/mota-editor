@@ -75,6 +75,33 @@ describe("optimization verdict parsing", () => {
     });
   });
 
+  it("keeps a hybrid verdict's residual instructions", () => {
+    const reply = JSON.stringify({
+      optimizable: true,
+      script: "gh pr create --title '{{title}}' --body-file /tmp/pr-body.md",
+      instructions:
+        "Write a PR description from the staged diff into /tmp/pr-body.md, then run the script.",
+      summary: "Describe and open a PR",
+    });
+    const verdict = parseOptimizationVerdict(reply);
+    expect(verdict.kind).toBe("proposal");
+    if (verdict.kind === "proposal" && verdict.proposal.optimizable) {
+      expect(verdict.proposal.instructions).toContain("Write a PR description");
+    }
+  });
+
+  it("treats blank instructions as a script-only verdict", () => {
+    const reply = JSON.stringify({
+      optimizable: true,
+      script: "git push",
+      instructions: "  ",
+    });
+    expect(parseOptimizationVerdict(reply)).toEqual({
+      kind: "proposal",
+      proposal: { optimizable: true, script: "git push" },
+    });
+  });
+
   it("rejects a reply with no JSON in it", () => {
     const verdict = parseOptimizationVerdict("I could not analyze this command.");
     expect(verdict.kind).toBe("invalid");
@@ -151,6 +178,22 @@ describe("optimized prompt rewrite", () => {
       ACTIVE,
     );
     expect(prompt).toContain("Arguments: mention the gauge fix");
+  });
+
+  it("weaves residual instructions around the script for hybrid commands", () => {
+    const hybrid = {
+      ...ACTIVE,
+      instructions: "Write the release notes first, then run the script.",
+    };
+    const prompt = optimizedPrompt("/commit-push", "/commit-push", hybrid);
+    expect(prompt).toContain("Instructions:");
+    expect(prompt).toContain("Write the release notes first");
+    expect(prompt).toContain(ACTIVE.script);
+    expect(prompt).toContain("single shell tool call");
+    // Script-only rewrites say nothing about instructions.
+    expect(optimizedPrompt("/commit-push", "/commit-push", ACTIVE)).not.toContain(
+      "Instructions:",
+    );
   });
 
   it("asks for placeholder substitution only when the script has holes", () => {

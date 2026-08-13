@@ -37,7 +37,13 @@ interface Props {
 type RowActivity =
   | { kind: "idle" }
   | { kind: "analyzing" }
-  | { kind: "proposal"; script: string; summary?: string; sourceHash: string }
+  | {
+      kind: "proposal";
+      script: string;
+      instructions?: string;
+      summary?: string;
+      sourceHash: string;
+    }
   | { kind: "error"; error: string };
 
 const GROUPS: readonly { source: CommandSource; label: string }[] = [
@@ -132,15 +138,19 @@ export function SettingsOptimization({
     setRow(name, {
       kind: "proposal",
       script: outcome.proposal.script,
+      instructions: outcome.proposal.instructions,
       summary: outcome.proposal.summary,
       sourceHash: outcome.sourceHash,
     });
   };
 
   const activate = (name: string, proposal: RowActivity & { kind: "proposal" }) => {
+    // Instructions the user blanked out mean "script-only after all".
+    const instructions = proposal.instructions?.trim();
     write(name, {
       status: "active",
       script: proposal.script,
+      ...(instructions ? { instructions } : {}),
       summary: proposal.summary,
       sourceHash: proposal.sourceHash,
       activatedAt: Date.now(),
@@ -158,9 +168,11 @@ export function SettingsOptimization({
         one tool call instead.
       </p>
       <p className="settings-section__hint">
-        Not every command qualifies: one that needs real judgment stays a prompt, and its
-        row says why. If a command's file changes later, its row flags the approved script
-        as stale so you can re-optimize.
+        A command that is mostly mechanical with a little judgment becomes a hybrid: the
+        judgment stays a short prompt, the rest becomes the script — still far cheaper
+        than the full command. One that needs judgment through and through stays a prompt,
+        and its row says why. If a command's file changes later, its row flags the
+        approved script as stale so you can re-optimize.
       </p>
 
       <div className="settings-field">
@@ -244,6 +256,11 @@ export function SettingsOptimization({
                   if (current?.kind === "proposal")
                     setRow(command.name, { ...current, script });
                 }}
+                onEditInstructions={(instructions) => {
+                  const current = activity[command.name];
+                  if (current?.kind === "proposal")
+                    setRow(command.name, { ...current, instructions });
+                }}
               />
             ))}
           </section>
@@ -263,6 +280,7 @@ interface RowProps {
   onDiscard: () => void;
   onDeactivate: () => void;
   onEditScript: (script: string) => void;
+  onEditInstructions: (instructions: string) => void;
 }
 
 function OptimizationRow({
@@ -275,6 +293,7 @@ function OptimizationRow({
   onDiscard,
   onDeactivate,
   onEditScript,
+  onEditInstructions,
 }: RowProps) {
   const analyzing = activity.kind === "analyzing";
   const stale = record !== undefined && isStale(record, command.contentHash);
@@ -287,7 +306,8 @@ function OptimizationRow({
             {command.name}
             {record?.status === "active" && (
               <span className="optimization-badge optimization-badge--active">
-                <Lightning size={11} weight="fill" /> Optimized
+                <Lightning size={11} weight="fill" />
+                {record.instructions ? "Optimized · hybrid" : "Optimized"}
               </span>
             )}
             {record?.status === "notOptimizable" && (
@@ -364,7 +384,10 @@ function OptimizationRow({
           <p className="optimization-row__savings">{savingsLine(savings)}</p>
           {record.script !== undefined && (
             <details className="optimization-row__script">
-              <summary>View script</summary>
+              <summary>
+                {record.instructions ? "View instructions and script" : "View script"}
+              </summary>
+              {record.instructions !== undefined && <pre>{record.instructions}</pre>}
               <pre>{record.script}</pre>
             </details>
           )}
@@ -389,9 +412,24 @@ function OptimizationRow({
             <p className="optimization-row__savings">{activity.summary}</p>
           )}
           <p className="optimization-row__reason">
-            Review before activating — this script will run in your repository, filled in
-            and executed by the agent in one call. Edit it here if it needs a touch-up.
+            {activity.instructions !== undefined
+              ? "Review before activating — a hybrid: the instructions stay a prompt " +
+                "for the judgment part, and the script runs in one call for the rest. " +
+                "Both replace the command's file at run time; edit either here."
+              : "Review before activating — this script will run in your repository, " +
+                "filled in and executed by the agent in one call. Edit it here if it " +
+                "needs a touch-up."}
           </p>
+          {activity.instructions !== undefined && (
+            <textarea
+              className="settings-input optimization-row__editor"
+              aria-label={`Proposed instructions for ${command.name}`}
+              value={activity.instructions}
+              rows={Math.min(8, activity.instructions.split("\n").length + 1)}
+              onChange={(e) => onEditInstructions(e.target.value)}
+              spellCheck={false}
+            />
+          )}
           <textarea
             className="settings-input optimization-row__editor"
             aria-label={`Proposed script for ${command.name}`}
