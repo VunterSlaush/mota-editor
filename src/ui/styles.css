@@ -1646,6 +1646,87 @@ body {
   color: var(--text-dim);
 }
 
+/* The list runs to every checkout of the repository, so it needs both a
+   text search and a way to say "only these". */
+.history__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+}
+
+.history__search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 0;
+  outline: none;
+}
+
+.history__scopes {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.history__scope {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 4px;
+  cursor: pointer;
+}
+
+.history__scope:hover {
+  color: var(--text);
+}
+
+.history__scope--on {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.history__scope-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* Which checkout a conversation was had in — only ever on rows the main
+   checkout borrowed from a worktree. */
+.history__worktree {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--accent);
+}
+
 .history__list {
   list-style: none;
   margin: 10px 0 0;
@@ -3401,6 +3482,37 @@ body {
   flex: none;
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* The worktrees' last conversations, in brief. Separated by a rule
+   rather than a heading alone: it is a different question from the one
+   the rows above answer. */
+.worktrees__sessions {
+  margin-top: 14px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.worktrees__session {
+  display: flex;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.worktrees__more {
+  margin-top: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.worktrees__more:hover {
+  color: var(--accent);
 }
 
 /* ---- Thought bubbles ---- */

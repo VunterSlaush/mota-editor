@@ -173,6 +173,16 @@ export function createAppContext(): AppContext {
   // Removing a worktree closes its tab, and closing a tab is exactly
   // what CloseProject does — so it is shared rather than reimplemented.
   const closeProject = new CloseProject(store, agentGateway, workspaceStore, shellPort);
+  // Shared for the same reason: the History panel opens a worktree's
+  // session by opening that worktree's tab, which is Worktrees' verb.
+  const worktrees = new Worktrees(
+    store,
+    gitPort,
+    workspaceStore,
+    agentGateway,
+    newId,
+    worktreeProvisioning,
+  );
   const selectMode = new SelectMode(store, workspaceStore);
   const selectPermission = new SelectPermission(store, workspaceStore);
   const selectEffort = new SelectEffort(store, workspaceStore, agentGateway);
@@ -205,14 +215,7 @@ export function createAppContext(): AppContext {
     loadGitChanges: new LoadGitChanges(store, gitPort),
     loadBranches: new LoadBranches(store, gitPort),
     gitActions: new GitActions(store, gitPort),
-    worktrees: new Worktrees(
-      store,
-      gitPort,
-      workspaceStore,
-      agentGateway,
-      newId,
-      worktreeProvisioning,
-    ),
+    worktrees,
     worktreeProvisioning,
     removeWorktree: new RemoveWorktree(
       store,
@@ -244,7 +247,7 @@ export function createAppContext(): AppContext {
     shells: new Shells(store, shellPort, shellHistory),
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),
-    sessionHistory: new SessionHistory(store, transcriptStore, agentGateway),
+    sessionHistory: new SessionHistory(store, transcriptStore, agentGateway, worktrees),
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),
     mcpProbe,

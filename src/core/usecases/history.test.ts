@@ -13,7 +13,13 @@ import type {
 } from "../ports/transcriptStore";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
-import { type HistoryItem, type HistoryListing, SessionHistory } from "./history";
+import {
+  type HistoryItem,
+  type HistoryListing,
+  SessionHistory,
+  type WorktreeAccess,
+} from "./history";
+import type { WorktreeItem } from "./worktrees";
 
 class FakeTranscriptStore implements TranscriptStore {
   transcripts = new Map<string, PersistedTranscript>();
@@ -24,7 +30,12 @@ class FakeTranscriptStore implements TranscriptStore {
   async save(_p: string, t: PersistedTranscript) {
     this.transcripts.set(t.id, t);
   }
-  async list(): Promise<TranscriptMeta[]> {
+  /** Transcripts belonging to another checkout, by that folder's path. */
+  elsewhere = new Map<string, TranscriptMeta[]>();
+  removed: Array<{ path: string; id: string }> = [];
+  async list(projectPath: string): Promise<TranscriptMeta[]> {
+    const other = this.elsewhere.get(projectPath);
+    if (other) return other;
     return [...this.transcripts.values()].map((t) => ({
       id: t.id,
       title: t.title,
@@ -41,7 +52,8 @@ class FakeTranscriptStore implements TranscriptStore {
   async load(_p: string, id: string): Promise<PersistedTranscript | null> {
     return this.transcripts.get(id) ?? null;
   }
-  async remove(_p: string, id: string): Promise<void> {
+  async remove(projectPath: string, id: string): Promise<void> {
+    this.removed.push({ path: projectPath, id });
     this.transcripts.delete(id);
   }
   async readPlanFile(_projectPath: string, path: string): Promise<string | null> {
@@ -96,16 +108,65 @@ class FakeGateway implements AgentGateway {
   }
 }
 
+/**
+ * Test double — the repository's other checkouts, and bringing one onto
+ * the tab bar. Opening dispatches the same `tab/opened` the real
+ * `Worktrees` does, so a session can be loaded into the tab it makes.
+ */
+class FakeWorktrees implements WorktreeAccess {
+  checkouts: WorktreeItem[] = [];
+  opened: Array<{ path: string; mainPath: string; sourceTabId?: string }> = [];
+  /** Set to leave `open` a no-op: the folder was gone by the time we looked. */
+  refusesToOpen = false;
+
+  constructor(private readonly store: Store) {}
+
+  async list(): Promise<readonly WorktreeItem[]> {
+    return this.checkouts;
+  }
+
+  async open(path: string, mainPath: string, sourceTabId?: string): Promise<void> {
+    this.opened.push({ path, mainPath, sourceTabId });
+    if (this.refusesToOpen) return;
+    const existing = this.store.getState().tabs.find((t) => t.project.path === path);
+    if (existing) {
+      this.store.dispatch({ type: "tab/activated", tabId: existing.project.id });
+      return;
+    }
+    this.store.dispatch({
+      type: "tab/opened",
+      project: newProject(`tab:${path}`, path, DEFAULTS, "/repo"),
+    });
+  }
+}
+
+/** One checkout as `git worktree list` reports it, decorated. */
+function checkout(partial: Partial<WorktreeItem> & { path: string }): WorktreeItem {
+  return {
+    branch: "feature/polish",
+    head: "abc1234",
+    main: false,
+    bare: false,
+    locked: false,
+    prunable: false,
+    openTabId: null,
+    current: false,
+    ...partial,
+  };
+}
+
 function setup() {
   const store = new Store();
   store.dispatch({ type: "tab/opened", project: newProject("t1", "/repo", DEFAULTS) });
   const transcripts = new FakeTranscriptStore();
   const gateway = new FakeGateway();
+  const worktrees = new FakeWorktrees(store);
   return {
     store,
     transcripts,
     gateway,
-    history: new SessionHistory(store, transcripts, gateway),
+    worktrees,
+    history: new SessionHistory(store, transcripts, gateway, worktrees),
   };
 }
 
@@ -324,7 +385,12 @@ describe("SessionHistory", () => {
     });
     const transcripts = new FakeTranscriptStore();
     const gateway = new FakeGateway();
-    const history = new SessionHistory(store, transcripts, gateway);
+    const history = new SessionHistory(
+      store,
+      transcripts,
+      gateway,
+      new FakeWorktrees(store),
+    );
 
     await history.list("t1", () => {});
     await settle();
@@ -602,4 +668,143 @@ describe("SessionHistory", () => {
     const infos = store.getState().tabs[0].messages.filter((m) => m.role === "info");
     expect(infos.some((m) => m.text.includes("no longer exists"))).toBe(true);
   });
+
+  describe("the repository's other checkouts", () => {
+    /** A main checkout with one worktree that has a session of its own. */
+    function withWorktree() {
+      const kit = setup();
+      kit.worktrees.checkouts = [
+        checkout({ path: "/repo", branch: "main", main: true, current: true }),
+        checkout({ path: "/repo-worktrees/polish" }),
+      ];
+      kit.transcripts.elsewhere.set("/repo-worktrees/polish", [
+        { id: "w1", title: "in the worktree", savedAt: 500, provider: "claude" },
+      ]);
+      return kit;
+    }
+
+    it("lists a worktree's sessions on the main checkout's tab", async () => {
+      const { transcripts, history } = withWorktree();
+      transcripts.transcripts.set("s1", meta("s1", 100));
+
+      const listing = await history.list("t1");
+
+      expect(listing.sessions.map((s) => s.id)).toEqual(["w1", "s1"]);
+      expect(listing.sessions[0].from).toEqual({
+        path: "/repo-worktrees/polish",
+        label: "feature/polish",
+      });
+      expect(listing.sessions[1].from).toBeUndefined();
+    });
+
+    it("names a detached worktree by its folder, having no branch to use", async () => {
+      const { worktrees, history } = withWorktree();
+      worktrees.checkouts[1] = checkout({ path: "/repo-worktrees/polish", branch: "" });
+
+      const listing = await history.list("t1");
+
+      expect(listing.sessions[0].from?.label).toBe("polish");
+    });
+
+    it("leaves out a worktree whose folder git has yet to prune", async () => {
+      const { worktrees, history } = withWorktree();
+      worktrees.checkouts[1] = {
+        ...worktrees.checkouts[1],
+        prunable: true,
+      };
+
+      expect((await history.list("t1")).sessions).toEqual([]);
+    });
+
+    it("shows a worktree tab only its own sessions", async () => {
+      const { store, transcripts, history } = withWorktree();
+      store.dispatch({
+        type: "tab/opened",
+        project: newProject("t2", "/repo-worktrees/polish", DEFAULTS, "/repo"),
+      });
+      transcripts.transcripts.set("s1", meta("s1", 100));
+
+      const listing = await history.list("t2");
+
+      // Its own folder's transcript, untagged — and never the main
+      // checkout's, which is the tab the whole-repository view lives on.
+      expect(listing.sessions.map((s) => s.id)).toEqual(["w1"]);
+      expect(listing.sessions[0].from).toBeUndefined();
+    });
+
+    it("keeps the worktrees' rows when the agent's listing lands", async () => {
+      const { gateway, history } = withWorktree();
+      gateway.nativeSessions = [{ sessionId: "n1", title: "native", updatedAt: "" }];
+
+      const refreshed = await new Promise<HistoryListing>((resolve) => {
+        void history.list("t1", resolve);
+      });
+
+      expect(refreshed.sessions.map((s) => s.id)).toEqual(["w1", "n1"]);
+    });
+
+    it("opens a worktree's session in a tab of its own", async () => {
+      const { store, worktrees, transcripts, history } = withWorktree();
+      transcripts.transcripts.set("w1", {
+        id: "w1",
+        title: "in the worktree",
+        savedAt: 500,
+        provider: "claude",
+        messages: [{ id: "m1", role: "user", text: "hello from the worktree" }],
+      });
+
+      await history.open("t1", await worktreeRow(history));
+
+      expect(worktrees.opened).toEqual([
+        { path: "/repo-worktrees/polish", mainPath: "/repo", sourceTabId: "t1" },
+      ]);
+      const opened = store.getState().tabs[1];
+      expect(opened.project.path).toBe("/repo-worktrees/polish");
+      expect(opened.historySessionId).toBe("w1");
+      expect(opened.messages[0].text).toBe("hello from the worktree");
+      // The tab it was opened FROM must be left exactly as it was.
+      expect(store.getState().tabs[0].messages).toEqual([]);
+    });
+
+    it("loads nothing when the worktree's folder could not be opened", async () => {
+      const { store, worktrees, history } = withWorktree();
+      worktrees.refusesToOpen = true;
+
+      await history.open("t1", await worktreeRow(history));
+
+      expect(store.getState().tabs).toHaveLength(1);
+      expect(store.getState().tabs[0].messages).toEqual([]);
+    });
+
+    it("deletes a worktree's transcript from the worktree's own folder", async () => {
+      const { transcripts, history } = withWorktree();
+
+      await history.remove("t1", await worktreeRow(history));
+
+      expect(transcripts.removed).toEqual([{ path: "/repo-worktrees/polish", id: "w1" }]);
+    });
+
+    it("deletes this tab's own transcript from this tab's folder", async () => {
+      const { transcripts, history } = withWorktree();
+
+      await history.remove("t1", row({ id: "s1", local: true }));
+
+      expect(transcripts.removed).toEqual([{ path: "/repo", id: "s1" }]);
+    });
+
+    it("offers the worktrees' sessions on their own, for the worktree panel", async () => {
+      const { transcripts, history } = withWorktree();
+      transcripts.transcripts.set("s1", meta("s1", 100));
+
+      const sessions = await history.listWorktreeSessions("t1");
+
+      expect(sessions.map((s) => s.id)).toEqual(["w1"]);
+    });
+  });
 });
+
+/** The listing's worktree row, as the panel would hand it back. */
+async function worktreeRow(history: SessionHistory): Promise<HistoryItem> {
+  const sessions = await history.listWorktreeSessions("t1");
+  return sessions[0];
+}

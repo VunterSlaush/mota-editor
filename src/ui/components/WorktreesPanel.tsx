@@ -2,13 +2,19 @@ import { ArrowClockwise, FolderSimple, GitFork, Plus } from "@phosphor-icons/rea
 import { useEffect, useMemo, useState } from "react";
 import { TAB_STATUS_LABELS } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
+import type { HistoryItem } from "../../core/usecases/history";
 import type { WorktreeRow } from "../../core/usecases/worktreeOverview";
 import { worktreeOverview } from "../../core/usecases/worktreeOverview";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 
+/** How many worktree sessions the panel lists before saying "see all". */
+const SESSION_LIMIT = 6;
+
 interface Props {
   /** The repository's checkouts. Asked once per refresh, not per render. */
   loadWorktrees: () => Promise<readonly WorktreeItem[]>;
+  /** Conversations had in those checkouts, newest first. */
+  loadWorktreeSessions: () => Promise<readonly HistoryItem[]>;
   /** Every open tab — a row's live status is read from here, not git. */
   tabs: readonly TabState[];
   /** The checkout the panel is shown from; its row reads "current". */
@@ -16,6 +22,10 @@ interface Props {
   onOpen: (path: string, mainPath: string) => void;
   /** Opens the picker, which owns creating and removing a worktree. */
   onNewWorktree: () => void;
+  /** Loads a session into its own worktree's tab, opening it if closed. */
+  onOpenSession: (item: HistoryItem) => void;
+  /** Takes the user to the full history, where the rest of them are. */
+  onShowAllSessions: () => void;
 }
 
 /**
@@ -34,12 +44,16 @@ interface Props {
  */
 export function WorktreesPanel({
   loadWorktrees,
+  loadWorktreeSessions,
   tabs,
   currentPath,
   onOpen,
   onNewWorktree,
+  onOpenSession,
+  onShowAllSessions,
 }: Props) {
   const [worktrees, setWorktrees] = useState<readonly WorktreeItem[] | null>(null);
+  const [sessions, setSessions] = useState<readonly HistoryItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // The listing changes when a worktree is created or removed, and both
@@ -57,6 +71,21 @@ export function WorktreesPanel({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPath, tabIds, refreshKey]);
+
+  // The sessions follow the same signal, plus every finished turn: a
+  // conversation in another checkout is saved when its turn ends, and
+  // this list is the only place the main checkout would see it appear.
+  const idleTabs = tabs.filter((tab) => !tab.busy).length;
+  useEffect(() => {
+    let cancelled = false;
+    loadWorktreeSessions().then((loaded) => {
+      if (!cancelled) setSessions(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPath, tabIds, idleTabs, refreshKey]);
 
   const rows = useMemo(
     () => worktreeOverview(worktrees ?? [], tabs, currentPath),
@@ -109,7 +138,56 @@ export function WorktreesPanel({
           No worktrees yet — New worktree makes one and opens it in its own tab.
         </p>
       )}
+      {sessions.length > 0 && (
+        <WorktreeSessions
+          sessions={sessions}
+          onOpen={onOpenSession}
+          onShowAll={onShowAllSessions}
+        />
+      )}
     </aside>
+  );
+}
+
+/**
+ * The last conversations had in the worktrees, in brief: title and
+ * where. The full list — search, scopes, this checkout's own sessions —
+ * is Session history's job, and the last row goes there rather than
+ * growing a second copy of it in a narrow column.
+ */
+function WorktreeSessions({
+  sessions,
+  onOpen,
+  onShowAll,
+}: {
+  sessions: readonly HistoryItem[];
+  onOpen: (item: HistoryItem) => void;
+  onShowAll: () => void;
+}) {
+  return (
+    <div className="worktrees__sessions">
+      <h3 className="changes__title">Recent worktree sessions</h3>
+      <ul className="changes__list">
+        {sessions.slice(0, SESSION_LIMIT).map((session) => (
+          <li key={session.id} className="worktrees__session">
+            <button
+              type="button"
+              className="changes__file"
+              title={`${session.from?.path ?? ""}\nOpens this session in that worktree's tab`}
+              onClick={() => onOpen(session)}
+            >
+              <span className="changes__filename">{session.title}</span>
+              <span className="changes__dir">{session.from?.label}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {sessions.length > SESSION_LIMIT && (
+        <button type="button" className="worktrees__more" onClick={onShowAll}>
+          {sessions.length - SESSION_LIMIT} more in Session history
+        </button>
+      )}
+    </div>
   );
 }
 

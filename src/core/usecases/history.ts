@@ -8,11 +8,13 @@ import {
   toolMessage,
 } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
+import { samePath } from "../entities/worktree";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import { startNewChat } from "./startNewChat";
+import type { WorktreeItem } from "./worktrees";
 
 /** One history row: a transcript's metadata plus how it opens. */
 export interface HistoryItem extends TranscriptMeta {
@@ -24,6 +26,34 @@ export interface HistoryItem extends TranscriptMeta {
    * delete. A row can be both: one conversation, two records of it.
    */
   readonly local: boolean;
+  /**
+   * The repository's OTHER checkout this session was had in. Absent for
+   * the tab's own folder, which is every row on a worktree's own tab.
+   *
+   * A conversation belongs to the repository, not to the folder git
+   * happened to lay it out in: work started in a worktree is the same
+   * work, and the main checkout is where you go looking for it after
+   * the worktree's tab has been closed.
+   */
+  readonly from?: SessionOrigin;
+}
+
+/** Where a session that is not this tab's own was had. */
+export interface SessionOrigin {
+  readonly path: string;
+  /** The worktree's branch, or its folder when the HEAD is detached. */
+  readonly label: string;
+}
+
+/**
+ * What history needs from the repository's other checkouts: what they
+ * are, and how to bring one onto the tab bar. Both are `Worktrees`'
+ * job — named here as the narrow slice this use case actually calls,
+ * so it depends on the two verbs rather than on that whole class.
+ */
+export interface WorktreeAccess {
+  list(tabId: string): Promise<readonly WorktreeItem[]>;
+  open(worktreePath: string, mainPath: string, sourceTabId?: string): Promise<void>;
 }
 
 /** The history list plus where it came from. */
@@ -137,12 +167,14 @@ export class SessionHistory {
     private readonly store: Store,
     private readonly transcriptStore: TranscriptStore,
     private readonly agentGateway: AgentGateway,
+    private readonly worktrees: WorktreeAccess,
   ) {}
 
   /**
-   * The listing to paint NOW, from the local store alone. When
-   * `onRefresh` is given, the native listing and the vendor's own store
-   * are fetched in the background and the merged result delivered
+   * The listing to paint NOW, from the local store alone — this tab's
+   * folder plus, on a main checkout, every worktree of the repository.
+   * When `onRefresh` is given, the native listing and the vendor's own
+   * store are fetched in the background and the merged result delivered
    * through it — or nothing, when neither adds to the local paint.
    */
   async list(
@@ -152,12 +184,45 @@ export class SessionHistory {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab) return { native: false, sessions: [] };
 
-    const local = await this.transcriptStore.list(tab.project.path).catch(() => []);
-    if (onRefresh) void this.refreshFromAgent(tabId, local, onRefresh);
+    const [local, elsewhere] = await Promise.all([
+      this.transcriptStore.list(tab.project.path).catch(() => []),
+      this.listWorktreeSessions(tabId),
+    ]);
+    if (onRefresh) void this.refreshFromAgent(tabId, local, elsewhere, onRefresh);
     return {
       native: false,
-      sessions: local.map((m) => ({ ...m, native: false, local: true })),
+      sessions: byNewest([
+        ...local.map((m) => ({ ...m, native: false, local: true })),
+        ...elsewhere,
+      ]),
     };
+  }
+
+  /**
+   * The conversations had in this repository's OTHER checkouts, newest
+   * first. Empty on a worktree's own tab: a worktree lists its own
+   * sessions and nothing else, because the whole-repository view is
+   * what the main checkout is for.
+   *
+   * Local records only. The agent's native listing is answered by a
+   * session that is already live for THIS tab's folder, so it has
+   * nothing to say about another one — a worktree's own tab is where
+   * its sessions can be resumed with the agent's memory.
+   */
+  async listWorktreeSessions(tabId: string): Promise<HistoryItem[]> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab || tab.project.worktreeOf) return [];
+
+    const checkouts = await this.worktrees.list(tabId).catch(() => []);
+    const others = checkouts.filter((w) => !w.bare && !w.current && !w.prunable);
+    const lists = await Promise.all(
+      others.map(async (worktree) => {
+        const metas = await this.transcriptStore.list(worktree.path).catch(() => []);
+        const from = { path: worktree.path, label: originLabel(worktree) };
+        return metas.map((m) => ({ ...m, native: false, local: true, from }));
+      }),
+    );
+    return byNewest(lists.flat());
   }
 
   /**
@@ -177,6 +242,7 @@ export class SessionHistory {
   private async refreshFromAgent(
     tabId: string,
     local: readonly TranscriptMeta[],
+    elsewhere: readonly HistoryItem[],
     onRefresh: (listing: HistoryListing) => void,
   ): Promise<void> {
     const state = this.store.getState();
@@ -254,29 +320,67 @@ export class SessionHistory {
     if (agentRows.length === 0) {
       // Best-effort refresh: the local list already painted. Only an
       // EMPTY panel needs the failure spelled out.
-      if (listError && local.length === 0) {
+      if (listError && local.length === 0 && elsewhere.length === 0) {
         onRefresh({ native: false, sessions: [], error: listError });
       }
       return; // nothing beyond the local paint
     }
     const merged = new Set(agentRows.map((s) => s.id));
-    const sessions = [
+    // The worktrees' rows ride through untouched: the agent was asked
+    // about THIS folder, so it has neither confirmed nor contradicted
+    // them, and dropping them would make the refresh look like a purge.
+    const sessions = byNewest([
       ...agentRows,
       ...local
         .filter((m) => !merged.has(m.id))
         .map((m) => ({ ...m, native: false, local: true })),
-    ].sort((a, b) => b.savedAt - a.savedAt);
+      ...elsewhere,
+    ]);
     onRefresh({ native: true, sessions });
   }
 
   async open(tabId: string, item: HistoryItem): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab || tab.busy) return;
+    if (item.from) {
+      await this.openInWorktree(tabId, item, item.from);
+      return;
+    }
     if (item.native) {
       await this.openNative(tabId, item);
     } else {
       await this.openLocal(tabId, item.id);
     }
+  }
+
+  /**
+   * A session had in another checkout opens where it belongs: its own
+   * worktree tab, brought back when it was closed and simply activated
+   * when it was not. Loading it into THIS tab would point an agent
+   * confined to the main checkout at a conversation about files it
+   * cannot reach.
+   *
+   * The transcript paints; the agent starts fresh. Resuming with the
+   * agent's own memory needs its native listing, which only that tab
+   * can ask for — and its History panel offers exactly that, one click
+   * away, once you are there.
+   */
+  private async openInWorktree(
+    tabId: string,
+    item: HistoryItem,
+    from: SessionOrigin,
+  ): Promise<void> {
+    const tab = tabById(this.store.getState(), tabId)!;
+    const mainPath = tab.project.worktreeOf ?? tab.project.path;
+    await this.worktrees.open(from.path, mainPath, tabId);
+
+    const opened = this.store
+      .getState()
+      .tabs.find((t) => samePath(t.project.path, from.path));
+    // The folder may be gone from under us — git listed it, opening it
+    // is what finds out. Nothing to load into a tab that never opened.
+    if (!opened || opened.busy) return;
+    await this.openLocal(opened.project.id, item.id);
   }
 
   /** True resume: the agent replays and REMEMBERS the conversation. */
@@ -431,11 +535,27 @@ export class SessionHistory {
     await startNewChat(this.store, this.agentGateway, tabId);
   }
 
-  async remove(tabId: string, sessionId: string): Promise<void> {
+  /** Delete the transcript where it lives — the worktree's folder for a
+   *  worktree's session, this tab's for its own. */
+  async remove(tabId: string, item: HistoryItem): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab) return;
-    await this.transcriptStore.remove(tab.project.path, sessionId).catch(() => undefined);
+    const path = item.from?.path ?? tab.project.path;
+    await this.transcriptStore.remove(path, item.id).catch(() => undefined);
   }
+}
+
+/** Newest first — the order every history list is read in. */
+function byNewest<T extends { readonly savedAt: number }>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => b.savedAt - a.savedAt);
+}
+
+/** What a worktree's rows are badged with: its branch, or its folder
+ *  when there is no branch to name (a detached HEAD). */
+function originLabel(worktree: WorktreeItem): string {
+  if (worktree.branch) return worktree.branch;
+  const trimmed = worktree.path.replace(/[\\/]+$/, "");
+  return trimmed.slice(Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\")) + 1);
 }
 
 /**

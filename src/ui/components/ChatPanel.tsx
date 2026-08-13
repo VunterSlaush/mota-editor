@@ -104,8 +104,11 @@ interface Props {
   /** Resolves with the instant local listing; `onRefresh` delivers the
    *  merged native listing later, when a live agent could be asked. */
   loadHistory: (onRefresh: (listing: HistoryListing) => void) => Promise<HistoryListing>;
+  /** Just the sessions had in this repo's other checkouts, for the
+   *  worktrees panel's short list. */
+  loadWorktreeSessions: () => Promise<readonly HistoryItem[]>;
   onOpenSession: (item: HistoryItem) => Promise<void>;
-  onDeleteSession: (sessionId: string) => Promise<void>;
+  onDeleteSession: (item: HistoryItem) => Promise<void>;
   onNewChat: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
   onDraftChange: (draft: string, attachments: readonly string[]) => void;
@@ -182,6 +185,7 @@ export function ChatPanel({
   onSelectSidebarView,
   onOpenSettings,
   loadHistory,
+  loadWorktreeSessions,
   onOpenSession,
   onDeleteSession,
   onNewChat,
@@ -527,10 +531,13 @@ export function ChatPanel({
               {shownSidebarView === "worktrees" && (
                 <WorktreesPanel
                   loadWorktrees={loadWorktrees}
+                  loadWorktreeSessions={loadWorktreeSessions}
                   tabs={tabs}
                   currentPath={tab.project.path}
                   onOpen={onOpenWorktree}
                   onNewWorktree={() => setWorktreePickerOpen(true)}
+                  onOpenSession={(item) => void onOpenSession(item)}
+                  onShowAllSessions={() => onSelectSidebarView("history")}
                 />
               )}
               {shownSidebarView === "history" && (
@@ -542,11 +549,11 @@ export function ChatPanel({
                   activeSessionId={tab.historySessionId}
                   busy={tab.busy}
                   onOpen={(item) => void onOpenSession(item)}
-                  onDelete={(id) =>
-                    void onDeleteSession(id).then(() =>
+                  onDelete={(item) =>
+                    void onDeleteSession(item).then(() =>
                       setHistory({
                         ...history,
-                        sessions: history.sessions.filter((s) => s.id !== id),
+                        sessions: history.sessions.filter((s) => s.id !== item.id),
                       }),
                     )
                   }

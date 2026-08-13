@@ -539,11 +539,18 @@ export class DemoWorktreeProvisioning implements WorktreeProvisioning {
 
 export class DemoTranscriptStore implements TranscriptStore {
   private transcripts = new Map<string, PersistedTranscript>();
-  async save(_p: string, transcript: PersistedTranscript) {
+  /** Which folder each transcript belongs to. The real store keeps them
+   *  in a per-project directory; history asks it about one checkout at a
+   *  time, so a store that answered with all of them would make every
+   *  session look like it happened everywhere. */
+  private folders = new Map<string, string>();
+  async save(projectPath: string, transcript: PersistedTranscript) {
     this.transcripts.set(transcript.id, transcript);
+    this.folders.set(transcript.id, projectPath);
   }
-  async list(): Promise<TranscriptMeta[]> {
+  async list(projectPath: string): Promise<TranscriptMeta[]> {
     return [...this.transcripts.values()]
+      .filter((t) => this.folders.get(t.id) === projectPath)
       .map((t) => ({
         id: t.id,
         title: t.title,
@@ -561,6 +568,7 @@ export class DemoTranscriptStore implements TranscriptStore {
   }
   async remove(_p: string, id: string) {
     this.transcripts.delete(id);
+    this.folders.delete(id);
   }
   async readPlanFile(_projectPath: string, _path: string): Promise<string | null> {
     return "# Demo plan\n\n1. Step one\n2. Step two";
