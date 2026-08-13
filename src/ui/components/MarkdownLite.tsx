@@ -1,4 +1,5 @@
-import { memo } from "react";
+import { Check, Copy } from "@phosphor-icons/react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openExternalLink } from "../externalLink";
@@ -30,7 +31,51 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
 
 const REMARK_PLUGINS = [remarkGfm];
 
+/** How long "Copied" stays up before the button offers itself again. */
+const COPIED_MS = 1_500;
+
+/**
+ * A fenced block with a copy button — commands and snippets are there to
+ * be run, and selecting one out of a scrolling transcript by hand is the
+ * fiddliest thing the chat asks of you.
+ *
+ * The text is read back off the rendered `<pre>` rather than reassembled
+ * from the markdown children: what the button copies is then exactly
+ * what the eye is reading, highlighting and nesting included.
+ */
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const block = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <div className="md__block">
+      <pre ref={block}>{children}</pre>
+      <button
+        type="button"
+        className="md__copy"
+        title={copied ? "Copied" : "Copy to clipboard"}
+        aria-label={copied ? "Copied" : "Copy code"}
+        onClick={() =>
+          void navigator.clipboard
+            .writeText(block.current?.textContent ?? "")
+            .then(() => setCopied(true))
+            .catch(() => undefined)
+        }
+      >
+        {copied ? <Check size={13} /> : <Copy size={13} />}
+      </button>
+    </div>
+  );
+}
+
 const COMPONENTS: Components = {
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, children }) => (
     <a
       href={href}

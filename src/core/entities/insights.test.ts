@@ -374,6 +374,47 @@ describe("buildInsights token rankings", () => {
     expect(byCommand.get("/second")).toBe(7_000);
   });
 
+  it("does not let the last turn absorb what the session spent after it", () => {
+    // One provider session can outlive the transcript that recorded part
+    // of it — resumed from the vendor's CLI, split across chats. A local
+    // command that costs nothing was ending up charged for all of it.
+    const s = session({
+      providerSessionId: "provider-1",
+      savedAt: NOW - DAY + 3_000,
+      turns: [turn({ command: "/usage", sentAt: NOW - DAY, durationMs: 2_000 })],
+    });
+    const report = build([s], {
+      billed: [
+        billed({ requestId: "own", timestampMs: NOW - DAY + 1_000, inputTokens: 400 }),
+        // Hours later, under the same provider session, with no turn of
+        // ours to account for it.
+        billed({
+          requestId: "later",
+          timestampMs: NOW - DAY + 3_600_000,
+          inputTokens: 7_000_000,
+        }),
+      ],
+    });
+    expect(report.tokens.byCommand[0]).toMatchObject({ command: "/usage", tokens: 400 });
+    // Still counted as spend — it just belongs to no turn we recorded.
+    expect(report.billed?.tokens.inputTokens).toBe(7_000_400);
+  });
+
+  it("bounds a turn with no duration stamp by the transcript's last save", () => {
+    const s = session({
+      providerSessionId: "provider-1",
+      savedAt: NOW - DAY + 5_000,
+      turns: [turn({ command: "/review", sentAt: NOW - DAY })],
+    });
+    const report = build([s], {
+      billed: [
+        billed({ requestId: "in", timestampMs: NOW - DAY + 4_000, inputTokens: 900 }),
+        billed({ requestId: "out", timestampMs: NOW - DAY + 9_000, inputTokens: 50_000 }),
+      ],
+    });
+    expect(report.tokens.byCommand[0]).toMatchObject({ command: "/review", tokens: 900 });
+  });
+
   it("marks a command estimated when any of its turns had no vendor log", () => {
     const logged = session({
       providerSessionId: "provider-1",

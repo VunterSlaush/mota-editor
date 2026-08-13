@@ -1579,6 +1579,38 @@ body {
   padding: 0;
 }
 
+/* The copy button rides on the wrapper, not the <pre>, so it stays put
+   while a long line scrolls under it. */
+.md__block {
+  position: relative;
+}
+
+.md__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.md__block:hover .md__copy,
+.md__copy:focus-visible {
+  opacity: 1;
+}
+
+.md__copy:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .md blockquote {
   margin: 8px 0;
   padding: 2px 12px;

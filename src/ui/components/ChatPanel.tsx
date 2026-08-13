@@ -101,9 +101,10 @@ interface Props {
   onSelectRightPanel: (panel: RightPanel) => void;
   shells: ShellsView;
   onOpenSettings: () => void;
-  /** Resolves with the instant local listing; `onRefresh` delivers the
-   *  merged native listing later, when a live agent could be asked. */
-  loadHistory: (onRefresh: (listing: HistoryListing) => void) => Promise<HistoryListing>;
+  /** Resolves with the instant local listing; `onRefresh`, when given,
+   *  delivers the merged native listing later. Omit it to read the local
+   *  store alone — the only half that is safe to ask mid-turn. */
+  loadHistory: (onRefresh?: (listing: HistoryListing) => void) => Promise<HistoryListing>;
   /** Just the sessions had in this repo's other checkouts, for the
    *  worktrees panel's short list. */
   loadWorktreeSessions: () => Promise<readonly HistoryItem[]>;
@@ -356,22 +357,30 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
 
-  // Refresh the session list when the history view is open and the tab
-  // is idle (a finished turn may have added or updated a session), or
-  // whenever the user asks for it with the refresh button. The
-  // local listing paints first; the agent's native listing, when a live
-  // session can be asked, lands as a second update.
+  // Refresh the session list whenever the history view is open: on the
+  // tab going idle (a finished turn may have added or updated a
+  // session), and whenever the user asks with the refresh button.
+  //
+  // The local listing paints first and needs no agent, so it runs even
+  // mid-turn — gating the whole read on `busy` left the panel showing
+  // "no saved sessions" for as long as a session took to start, which is
+  // exactly when you go looking for one. Only the agent's native listing
+  // waits: asking it means talking to a process already mid-prompt, and
+  // it lands as a second update once the tab is idle.
   useEffect(() => {
-    if (shownSidebarView !== "history" || tab.busy) return;
+    if (shownSidebarView !== "history") return;
     let cancelled = false;
     let refreshed = false;
     setHistoryLoading(true);
-    loadHistory((merged) => {
-      if (cancelled) return;
-      refreshed = true;
-      setHistory(merged);
-      setHistoryLoading(false);
-    }).then((loaded) => {
+    const askAgent = tab.busy
+      ? undefined
+      : (merged: HistoryListing) => {
+          if (cancelled) return;
+          refreshed = true;
+          setHistory(merged);
+          setHistoryLoading(false);
+        };
+    loadHistory(askAgent).then((loaded) => {
       // The merged listing may already have landed — a stale local
       // paint must not overwrite it.
       if (cancelled || refreshed) return;

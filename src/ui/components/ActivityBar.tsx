@@ -13,8 +13,8 @@ interface Props {
 
 const ITEMS: readonly { view: SidebarView; Icon: Icon; title: string }[] = [
   { view: "changes", Icon: GitBranch, title: "Source control" },
-  { view: "worktrees", Icon: GitFork, title: "Worktrees" },
   { view: "history", Icon: ClockCounterClockwise, title: "Session history" },
+  { view: "worktrees", Icon: GitFork, title: "Worktrees" },
 ];
 
 /** Every view, for the tabs that offer all of them. */
