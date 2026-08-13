@@ -111,6 +111,20 @@ pub struct McpContribution {
     pub env: Vec<(String, String)>,
 }
 
+/// A sidebar panel the extension offers (ADR-0013). The host draws the
+/// activity-bar icon and asks the process for a declarative view model
+/// (`panel/load`, `panel/action`); the extension never renders anything.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PanelContribution {
+    /// Panel id, unique within the extension: `[a-z0-9-]`.
+    pub id: String,
+    /// Shown as the icon tooltip and the panel heading.
+    pub title: String,
+    /// Named icon from the host's small fixed set; the host falls back
+    /// to a generic one for names it does not know.
+    pub icon: Option<String>,
+}
+
 /// How to launch the extension process, when it has one. Pure-data
 /// extensions (prompt commands, themes) omit it and never spawn.
 #[derive(Debug, Clone, PartialEq)]
@@ -131,6 +145,7 @@ pub struct ExtensionManifest {
     pub permissions: Vec<Permission>,
     pub commands: Vec<CommandContribution>,
     pub mcp_servers: Vec<McpContribution>,
+    pub panels: Vec<PanelContribution>,
     /// Workbench events the extension wants (`turn/completed`, …).
     pub events: Vec<String>,
     pub idle_timeout_ms: Option<u64>,
@@ -229,6 +244,7 @@ pub fn parse_manifest(text: &str) -> Result<ExtensionManifest, ManifestError> {
         .unwrap_or_default();
     let commands = parse_commands(&contributes)?;
     let mcp_servers = parse_mcp_servers(&contributes)?;
+    let panels = parse_panels(&contributes)?;
     let events = string_list(contributes.get("events"), "contributes.events")?;
 
     // Contribution permissions are part of informed consent: an extension
@@ -243,13 +259,17 @@ pub fn parse_manifest(text: &str) -> Result<ExtensionManifest, ManifestError> {
     if !events.is_empty() && !has(Permission::EventsSubscribe) {
         return Err(invalid("Subscribing to events requires permission events:subscribe"));
     }
+    if !panels.is_empty() && !has(Permission::UiPanel) {
+        return Err(invalid("Contributing panels requires permission ui:panel"));
+    }
     let needs_process = commands
         .iter()
         .any(|c| matches!(c.kind, CommandKind::Programmatic))
-        || !events.is_empty();
+        || !events.is_empty()
+        || !panels.is_empty();
     if needs_process && entry.is_none() {
         return Err(invalid(
-            "Programmatic commands and event subscriptions require an \"entry\" process",
+            "Programmatic commands, event subscriptions, and panels require an \"entry\" process",
         ));
     }
 
@@ -263,6 +283,7 @@ pub fn parse_manifest(text: &str) -> Result<ExtensionManifest, ManifestError> {
         permissions,
         commands,
         mcp_servers,
+        panels,
         events,
         idle_timeout_ms: obj.get("idleTimeoutMs").and_then(Value::as_u64),
     })
@@ -373,6 +394,33 @@ fn parse_mcp_servers(
     Ok(servers)
 }
 
+fn parse_panels(
+    contributes: &Map<String, Value>,
+) -> Result<Vec<PanelContribution>, ManifestError> {
+    let Some(list) = contributes.get("panels") else {
+        return Ok(Vec::new());
+    };
+    let list = list
+        .as_array()
+        .ok_or_else(|| invalid("\"contributes.panels\" must be an array"))?;
+    let mut panels = Vec::new();
+    for entry in list {
+        let obj = entry
+            .as_object()
+            .ok_or_else(|| invalid("Each panel contribution must be an object"))?;
+        let id = required_string(obj, "id")?;
+        if !is_valid_id(&id) {
+            return Err(invalid(format!("Invalid panel id (want [a-z0-9-]): {id}")));
+        }
+        panels.push(PanelContribution {
+            id,
+            title: required_string(obj, "title")?,
+            icon: optional_string(obj, "icon"),
+        });
+    }
+    Ok(panels)
+}
+
 fn required_string(obj: &Map<String, Value>, key: &str) -> Result<String, ManifestError> {
     obj.get(key)
         .and_then(Value::as_str)
@@ -474,6 +522,48 @@ pub fn command_execute_request(
             "context": { "tabId": tab_id, "projectPath": project_path }
         }
     })
+}
+
+pub fn panel_load_request(id: i64, panel_id: &str, tab_id: &str, project_path: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "panel/load",
+        "params": {
+            "panelId": panel_id,
+            "context": { "tabId": tab_id, "projectPath": project_path }
+        }
+    })
+}
+
+/// One user interaction inside a panel, routed to the extension. The
+/// action vocabulary is host-owned and tiny (ADR-0013): `"open"` — an
+/// item was clicked, answer with a `detail`; `"select"` — an item's
+/// select control changed to `value`, answer with the updated `view`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PanelAction {
+    pub action: String,
+    pub item_id: String,
+    pub value: Option<String>,
+}
+
+pub fn panel_action_request(
+    id: i64,
+    panel_id: &str,
+    action: &PanelAction,
+    tab_id: &str,
+    project_path: &str,
+) -> Value {
+    let mut params = json!({
+        "panelId": panel_id,
+        "action": action.action,
+        "itemId": action.item_id,
+        "context": { "tabId": tab_id, "projectPath": project_path }
+    });
+    if let Some(value) = &action.value {
+        params["value"] = json!(value);
+    }
+    json!({ "jsonrpc": "2.0", "id": id, "method": "panel/action", "params": params })
 }
 
 pub fn event_emit_notification(event: &str, payload: &Value) -> Value {
@@ -613,6 +703,13 @@ pub enum ExtensionUiEvent {
     },
     #[serde(rename_all = "camelCase")]
     LogLine { line: String },
+    /// The extension asked (`panels/refresh`) for its panel to be
+    /// re-pulled; the webview re-loads it only if it is open.
+    #[serde(rename_all = "camelCase")]
+    PanelChanged {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        panel_id: Option<String>,
+    },
 }
 
 #[cfg(test)]
@@ -735,6 +832,79 @@ mod tests {
         // Same manifest without the permission is rejected.
         let text = text.replace("\"tools:register\"", "\"notifications\"");
         assert!(parse_manifest(&text).is_err());
+    }
+
+    #[test]
+    fn panel_contributions_parse_and_gate() {
+        let text = r#"{ "name": "linear", "version": "1", "protocolVersion": 1,
+                        "entry": { "command": "node", "args": ["./main.js"] },
+                        "permissions": ["ui:panel"],
+                        "contributes": { "panels": [
+                            { "id": "tasks", "title": "Linear", "icon": "checklist" } ] } }"#;
+        let manifest = parse_manifest(text).unwrap();
+        assert_eq!(
+            manifest.panels,
+            vec![PanelContribution {
+                id: "tasks".to_owned(),
+                title: "Linear".to_owned(),
+                icon: Some("checklist".to_owned()),
+            }]
+        );
+        // The same manifest without the permission is rejected.
+        let bare = text.replace("\"ui:panel\"", "\"notifications\"");
+        assert!(matches!(parse_manifest(&bare), Err(ManifestError::Invalid(_))));
+    }
+
+    #[test]
+    fn panels_require_an_entry_process() {
+        let text = r#"{ "name": "linear", "version": "1", "protocolVersion": 1,
+                        "permissions": ["ui:panel"],
+                        "contributes": { "panels": [
+                            { "id": "tasks", "title": "Linear" } ] } }"#;
+        assert!(matches!(parse_manifest(text), Err(ManifestError::Invalid(_))));
+    }
+
+    #[test]
+    fn rejects_panel_ids_that_could_escape_a_path_join() {
+        let text = r#"{ "name": "linear", "version": "1", "protocolVersion": 1,
+                        "entry": { "command": "node" },
+                        "permissions": ["ui:panel"],
+                        "contributes": { "panels": [
+                            { "id": "../up", "title": "X" } ] } }"#;
+        assert!(parse_manifest(text).is_err());
+    }
+
+    #[test]
+    fn panel_requests_carry_the_context() {
+        let load = panel_load_request(7, "tasks", "t1", "G:/repo");
+        assert_eq!(load["method"], "panel/load");
+        assert_eq!(load["params"]["panelId"], "tasks");
+        assert_eq!(load["params"]["context"]["projectPath"], "G:/repo");
+
+        let select = panel_action_request(
+            8,
+            "tasks",
+            &PanelAction {
+                action: "select".to_owned(),
+                item_id: "iss-1".to_owned(),
+                value: Some("state-2".to_owned()),
+            },
+            "t1",
+            "G:/repo",
+        );
+        assert_eq!(select["method"], "panel/action");
+        assert_eq!(select["params"]["action"], "select");
+        assert_eq!(select["params"]["itemId"], "iss-1");
+        assert_eq!(select["params"]["value"], "state-2");
+
+        let open = panel_action_request(
+            9,
+            "tasks",
+            &PanelAction { action: "open".to_owned(), item_id: "iss-1".to_owned(), value: None },
+            "t1",
+            "G:/repo",
+        );
+        assert!(open["params"].get("value").is_none());
     }
 
     #[test]
