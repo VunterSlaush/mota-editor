@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EMPTY_LINE, type InputLine, typeInto } from "./inputLine";
 import type { ShellSession } from "./shellSession";
 import {
+  idleShell,
   nextShellTitle,
   shellAfterClosing,
   shellExitLabel,
@@ -88,6 +89,40 @@ describe("shellRunningAfter", () => {
 
   it("runs after a pasted command that arrives in one chunk", () => {
     expect(send(false, ["npm run dev\r"])).toBe(true);
+  });
+});
+
+describe("idleShell", () => {
+  const busy = (id: string, title: string) =>
+    ({ id, title, running: true }) satisfies ShellSession;
+
+  it("is the terminal the user is looking at", () => {
+    const open = [session("a", "Terminal 1"), session("b", "Terminal 2")];
+    expect(idleShell(open, "b")?.id).toBe("b");
+  });
+
+  it("falls back to the first free one when that terminal is busy", () => {
+    const open = [busy("a", "Terminal 1"), session("b", "Terminal 2")];
+    expect(idleShell(open, "a")?.id).toBe("b");
+  });
+
+  it("skips a shell that has exited", () => {
+    const open = [session("a", "Terminal 1", { code: 0 }), session("b", "Terminal 2")];
+    expect(idleShell(open, "a")?.id).toBe("b");
+  });
+
+  it("finds nothing when every terminal is busy", () => {
+    expect(
+      idleShell([busy("a", "Terminal 1"), busy("b", "Terminal 2")], "a"),
+    ).toBeUndefined();
+  });
+
+  it("finds nothing when there are no terminals at all", () => {
+    expect(idleShell([], undefined)).toBeUndefined();
+  });
+
+  it("still answers when the selection points at a terminal that is gone", () => {
+    expect(idleShell([session("b", "Terminal 2")], "a")?.id).toBe("b");
   });
 });
 

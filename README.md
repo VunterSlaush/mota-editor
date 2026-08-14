@@ -38,6 +38,13 @@ tab's agent session on the next message), and typing `/` shows the
 built-ins, skills, and custom commands over ACP, so what you see is what
 that CLI actually supports.
 
+A line that starts with **`!`** never reaches the agent: it runs in that
+project's **terminal** instead, in your own shell, and the terminal panel
+opens to show the output. `!git status` costs nothing where asking an
+agent to run it costs a turn and a permission prompt (see ADR-0014). It
+completes as you type, from the same history the terminal suggests from —
+**Tab** or **→** to take the rest.
+
 ## Extensions
 
 Mota is extensible: an extension is **a folder** — a JSON manifest plus,
