@@ -99,3 +99,40 @@ is the shorter path — not a local runner bolted beside the pty.
   rule someone will meet by surprise once.
 - The composer tints a `!` line in the tool colour so which of the two
   readers is about to get it is visible before Enter, not after.
+
+## Addendum — the suggestion comes along too
+
+ADR-0009's greyed-out completion belongs to a `!` line as much as to the
+terminal, and it is the same ranked history either way: a command learned
+in one place is offered in the other, including the ones `runLine` itself
+ran.
+
+The terminal is *pushed* its suggestion, through the `onSuggest` callback
+its session was opened with. The composer has no session — and before the
+first terminal opens, no history has been read at all — so it **asks**
+instead: `Shells.suggestFor(prefix)`, which warms the history the same
+lazy way and returns the suffix to draw. The history stays private to the
+use case for the reason above: through the reducer it would re-render the
+workbench once per keystroke.
+
+Two keys accept it, and which two is the one thing borrowed from Warp
+rather than from our own terminal. Warp's inline history suggestion and
+its completions dropdown coexist because their accept keys differ, so:
+
+- **Right arrow**, from the end of the line only — anywhere else it has a
+  caret to move, exactly as in the terminal.
+- **Tab**, but only while nothing is greyed in *and* no menu is open. The
+  `/` and `@` menus keep Tab and Enter whenever they are showing, and the
+  suggestion hides while they are: two guesses on screen at once is a
+  question about which key the user meant.
+
+`shellPrefix` exists for this and not for running: it strips the bang and
+the space after it but **keeps trailing space**, because a suggestion is
+drawn past the caret and so has to be predicted from a prefix that ends
+exactly where the caret does. Predicting from a trimmed `git` while the
+draft reads `!git ` comes back one space too wide.
+
+Not taken: a dropdown of matching history lines, and Warp's other half —
+completion of arguments and paths from command specs. Both are much
+larger features, and the point of this one is that the ranking, the
+corpus and the accept keys were all already here.

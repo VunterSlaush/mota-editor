@@ -167,6 +167,7 @@ export function App({ context }: { context: AppContext }) {
         context.shells.resize(sessionId, size),
       select: (sessionId: string) => context.shells.select(activeProjectId, sessionId),
       close: (sessionId: string) => void context.shells.close(activeProjectId, sessionId),
+      suggestLine: (prefix: string) => context.shells.suggestFor(prefix),
     }),
     [context, activeProjectId, terminalFontSize, theme],
   );

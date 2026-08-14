@@ -122,6 +122,28 @@ export class Shells {
   }
 
   /**
+   * What the composer should grey in after a half-typed "!" line, or ""
+   * for nothing — the same ranked history the terminals suggest from, so
+   * a command learned in one place is offered in the other.
+   *
+   * A query rather than the `onSuggest` callback a terminal gets: the
+   * composer has no session to attach one to, and it re-renders on the
+   * keystroke anyway. The history stays private for the reason ADR-0009
+   * gives — through the reducer it would re-render the workbench once
+   * per keystroke.
+   *
+   * `prefix` must be `shellPrefix(draft)`, whose trailing space is
+   * load-bearing; the suffix is what to draw past the caret.
+   */
+  suggestFor(prefix: string): string {
+    if (!this.suggestionsWanted()) return "";
+    // Nothing has needed the history yet if no terminal has opened, and
+    // the first "!" line is exactly when it starts to matter.
+    this.warmHistory();
+    return suggestionSuffix(this.history, prefix);
+  }
+
+  /**
    * The parked "!" line, now that this project has a terminal again.
    *
    * Typed ahead of the shell's first prompt on purpose: a pty buffers

@@ -17,9 +17,24 @@ export function isShellLine(draft: string): boolean {
   return draft.startsWith(PREFIX);
 }
 
+/**
+ * What has been typed so far, as the history should be searched for it:
+ * the draft past its "!", with the space people put after the bang
+ * removed.
+ *
+ * Trailing space is kept, and that is the whole reason this is not
+ * `shellCommand`. A guess is shown *after* what is on screen, so the
+ * prefix has to end exactly where the caret does — predict against a
+ * trimmed `git` while the draft reads `!git ` and the suggestion comes
+ * back as ` status`, one space too many.
+ */
+export function shellPrefix(draft: string): string {
+  return isShellLine(draft) ? draft.slice(PREFIX.length).replace(/^[ \t]+/, "") : "";
+}
+
 /** The command a shell line carries; "" when the "!" stands alone. */
 export function shellCommand(draft: string): string {
-  return isShellLine(draft) ? draft.slice(PREFIX.length).trim() : "";
+  return shellPrefix(draft).trim();
 }
 
 /**

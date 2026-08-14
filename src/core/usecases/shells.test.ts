@@ -402,6 +402,88 @@ describe("running a line typed at the prompt", () => {
   });
 });
 
+describe("suggesting a command for the composer", () => {
+  const past = ["git status", "npm run build", "npm test", "npm test", "npm test"];
+  /** The history is read lazily; let that land before asking again. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("suggests from the same history the terminals use", async () => {
+    const { shells } = setUp(past);
+
+    shells.suggestFor("npm "); // the read starts here
+    await settle();
+
+    expect(shells.suggestFor("npm ")).toBe("test");
+  });
+
+  it("reads the history file without a terminal ever opening", async () => {
+    const { shells, pastCommands } = setUp(past);
+
+    shells.suggestFor("g");
+    await settle();
+
+    expect(pastCommands.reads).toBe(1);
+    expect(shells.suggestFor("g")).toBe("it status");
+  });
+
+  it("offers a command it watched a terminal run", async () => {
+    const { shells, tabId } = setUp();
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
+    shells.write("shell-1", "cargo clippy\r");
+
+    expect(shells.suggestFor("car")).toBe("go clippy");
+  });
+
+  it("offers one the composer itself ran", async () => {
+    const { shells, tabId } = setUp();
+    await shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
+
+    shells.runLine(tabId, "cargo clippy");
+
+    expect(shells.suggestFor("car")).toBe("go clippy");
+  });
+
+  it("says nothing when there is no match", async () => {
+    const { shells } = setUp(past);
+    shells.suggestFor("z");
+    await settle();
+    expect(shells.suggestFor("zig build")).toBe("");
+  });
+
+  it("says nothing for an empty prefix — a bare bang guesses nothing", async () => {
+    const { shells } = setUp(past);
+    shells.suggestFor("g");
+    await settle();
+    expect(shells.suggestFor("")).toBe("");
+  });
+
+  it("says nothing about a prefix that is already the whole command", async () => {
+    const { shells } = setUp(past);
+    shells.suggestFor("npm test");
+    await settle();
+    expect(shells.suggestFor("npm test")).toBe("");
+  });
+
+  it("stays quiet, and unread, when suggestions are switched off", async () => {
+    const { store, shells, pastCommands } = setUp(past);
+    store.dispatch({ type: "settings/changed", patch: { terminalSuggestions: false } });
+
+    shells.suggestFor("npm ");
+    await settle();
+
+    expect(shells.suggestFor("npm ")).toBe("");
+    expect(pastCommands.reads).toBe(0);
+  });
+});
+
 describe("suggesting the next command", () => {
   const past = ["git status", "npm run build", "npm test", "npm test", "npm test"];
 

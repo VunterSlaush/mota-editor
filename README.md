@@ -41,7 +41,9 @@ that CLI actually supports.
 A line that starts with **`!`** never reaches the agent: it runs in that
 project's **terminal** instead, in your own shell, and the terminal panel
 opens to show the output. `!git status` costs nothing where asking an
-agent to run it costs a turn and a permission prompt (see ADR-0013).
+agent to run it costs a turn and a permission prompt (see ADR-0013). It
+completes as you type, from the same history the terminal suggests from —
+**Tab** or **→** to take the rest.
 
 ## Development
 

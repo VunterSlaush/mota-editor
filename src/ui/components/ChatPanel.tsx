@@ -49,6 +49,10 @@ export interface ShellsView {
   readonly resize: (sessionId: string, size: ShellSize) => void;
   readonly select: (sessionId: string) => void;
   readonly close: (sessionId: string) => void;
+  /** The greyed-in rest of a "!" line in the composer — the terminals'
+   *  own history, asked rather than pushed (there is no session to push
+   *  to before one is open). */
+  readonly suggestLine: (prefix: string) => string;
 }
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
@@ -644,6 +648,7 @@ export function ChatPanel({
             onPickFiles={onPickFiles}
             onPasteImage={onPasteImage}
             loadProjectFiles={loadProjectFiles}
+            suggestShellLine={shells.suggestLine}
             onSelectMode={onSelectMode}
             onSelectPermission={onSelectPermission}
             onSelectModel={onSelectModel}

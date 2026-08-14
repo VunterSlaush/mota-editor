@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isShellLine, shellCommand, shellKeystrokes } from "./shellLine";
+import { isShellLine, shellCommand, shellKeystrokes, shellPrefix } from "./shellLine";
 
 describe("isShellLine", () => {
   it("recognises a draft that opens with the bang", () => {
@@ -36,6 +36,26 @@ describe("shellCommand", () => {
 
   it("is empty for a prompt, which is not its to answer", () => {
     expect(shellCommand("please run the tests")).toBe("");
+  });
+});
+
+describe("shellPrefix", () => {
+  it("keeps the trailing space, which is where the caret is", () => {
+    expect(shellPrefix("!git ")).toBe("git ");
+  });
+
+  it("drops the space after the bang, which no history line has", () => {
+    expect(shellPrefix("! npm t")).toBe("npm t");
+  });
+
+  it("is empty for a bare bang and for a prompt", () => {
+    expect(shellPrefix("!")).toBe("");
+    expect(shellPrefix("run the tests")).toBe("");
+  });
+
+  it("agrees with shellCommand once the ends are trimmed", () => {
+    expect(shellCommand("!  npm test  ")).toBe("npm test");
+    expect(shellPrefix("!  npm test  ")).toBe("npm test  ");
   });
 });
 
