@@ -345,6 +345,39 @@ fn significant_lines(stderr: &str, limit: usize) -> String {
     kept[kept.len().saturating_sub(limit)..].join("\n")
 }
 
+/// Whether git refused to diff this file as text.
+///
+/// git decides that on a NUL byte in the first 8000 of the file, which
+/// is true of a PNG and equally true of a source file with a `"\0"`
+/// literal in it — so this is a question about git's answer, never
+/// about the file.
+pub fn reported_as_binary(diff: &str) -> bool {
+    diff.lines()
+        .any(|line| line.starts_with("Binary files ") || line.starts_with("GIT binary patch"))
+}
+
+/// Whether a diff taken with `--text` is worth putting on screen.
+///
+/// Forcing text out of a real binary produces a screenful of noise, so
+/// the content has to answer for itself: bytes that were not valid
+/// UTF-8 reached us as replacement characters, and control characters
+/// that text does not use are counted with them. A stray NUL or two in
+/// a source file stays far under the ceiling; a JPEG never does.
+pub fn is_displayable_text(diff: &str) -> bool {
+    let total = diff.chars().count();
+    let noise = diff.chars().filter(|c| is_noise(*c)).count();
+    noise <= TOLERATED_NOISE_CHARS || noise * 100 <= total
+}
+
+/// The handful a deliberate `"\0"` puts in a one-line change, where a
+/// share of the whole would be too tight to measure.
+const TOLERATED_NOISE_CHARS: usize = 8;
+
+fn is_noise(c: char) -> bool {
+    c == char::REPLACEMENT_CHARACTER
+        || (c.is_control() && c != '\n' && c != '\r' && c != '\t')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -656,5 +689,33 @@ mod tests {
         let commits = parse_log("aaa\tsubject\tauthor\t5 min ago\n\n");
         assert_eq!(commits.len(), 1);
         assert!(parse_log("").is_empty());
+    }
+
+    #[test]
+    fn a_diff_git_would_not_show_as_text_is_recognised() {
+        assert!(reported_as_binary(
+            "diff --git a/app.tsx b/app.tsx\nBinary files a/app.tsx and b/app.tsx differ\n"
+        ));
+        assert!(reported_as_binary("GIT binary patch\ndelta 12\n"));
+        assert!(!reported_as_binary("@@ -1 +1 @@\n-old\n+new\n"));
+        // The phrase inside a changed line is a change, not a verdict.
+        assert!(!reported_as_binary("@@ -1 +1 @@\n+Binary files differ\n"));
+    }
+
+    #[test]
+    fn a_source_file_holding_a_nul_is_still_displayable() {
+        let diff = format!("@@ -1 +1 @@\n-const separator = \"{}\";\n+const sep = \"|\";\n", '\0');
+        assert!(is_displayable_text(&diff));
+        assert!(is_displayable_text(""));
+    }
+
+    #[test]
+    fn a_forced_binary_diff_is_not_displayable() {
+        // What lossy decoding leaves of bytes that were never text.
+        let noise: String = std::iter::repeat_n('\u{FFFD}', 40).collect();
+        assert!(!is_displayable_text(&format!("@@ -1 +1 @@\n+{noise}\n")));
+        // Every other byte a NUL — a UTF-16 file, which this cannot render.
+        let utf16: String = "hello world".chars().flat_map(|c| [c, '\0']).collect();
+        assert!(!is_displayable_text(&utf16));
     }
 }

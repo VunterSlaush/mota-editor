@@ -93,6 +93,8 @@ class FakeGit implements GitPort {
   }
   async stage() {}
   async unstage() {}
+  async stageAll() {}
+  async unstageAll() {}
   async commit() {
     return "";
   }

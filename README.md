@@ -41,9 +41,33 @@ that CLI actually supports.
 A line that starts with **`!`** never reaches the agent: it runs in that
 project's **terminal** instead, in your own shell, and the terminal panel
 opens to show the output. `!git status` costs nothing where asking an
-agent to run it costs a turn and a permission prompt (see ADR-0013). It
+agent to run it costs a turn and a permission prompt (see ADR-0014). It
 completes as you type, from the same history the terminal suggests from —
 **Tab** or **→** to take the rest.
+
+## Extensions
+
+Mota is extensible: an extension is **a folder** — a JSON manifest plus,
+optionally, a script in any language — dropped into
+`~/.mota/extensions/`. Extensions add slash commands, hand MCP tools to
+your agents, and (soon) automate the workbench on events. Enabling one
+shows a native dialog listing exactly what it may do.
+
+- **Create one from a prompt — built into every install:** type
+  `/create-extension` in any chat and describe what you want (e.g.
+  */create-extension a command that drafts release notes from recent
+  commits*). The agent scaffolds the folder, explains the permissions it
+  requested, and tells you how to approve it. No repo checkout needed.
+- **Write one by hand:** the guide is
+  [docs/EXTENSIONS.md](docs/EXTENSIONS.md); a complete working example
+  lives in [examples/standup/](examples/standup/) (~45 lines of plain
+  Node, no SDK).
+- **Outside Mota** (plain Claude Code): copy the agent skill
+  [`.claude/skills/create-mota-extension/`](.claude/skills/create-mota-extension/SKILL.md)
+  into `~/.claude/skills/` and use `/create-mota-extension` anywhere.
+- **Design:** [ADR-0012](docs/adr/0012-extensions-over-stdio.md) —
+  out-of-process, JSON-RPC over stdio (the same wire family as ACP/MCP),
+  declared permissions, native consent, lazy processes.
 
 ## Development
 

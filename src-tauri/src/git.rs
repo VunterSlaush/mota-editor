@@ -29,7 +29,7 @@ async fn run_git(project_path: &str, args: &[&str]) -> Result<String, String> {
 }
 
 /// Like `run_git`, but a diff that found differences (exit code 1) is a
-/// success, not a failure. Only `git diff --no-index` reports that way.
+/// success, not a failure — which is how `git diff --no-index` reports.
 async fn run_git_diff(project_path: &str, args: &[&str]) -> Result<String, String> {
     let mut full_args = vec!["-C".to_owned(), project_path.to_owned()];
     full_args.extend(args.iter().map(|a| (*a).to_owned()));
@@ -125,6 +125,11 @@ pub async fn git_list_files(project_path: String) -> Result<Vec<String>, String>
 /// A unified diff for one file. Untracked files have nothing to diff
 /// against, so they are compared with the null device instead, which
 /// renders the whole file as added.
+///
+/// A file git calls binary is asked for a second time with `--text`:
+/// git decides that on a NUL byte in the first 8000, which a source
+/// file holding a `"\0"` literal has and its author still wants to
+/// read. The forced diff is only kept if it is text after all.
 #[tauri::command]
 pub async fn git_diff(
     project_path: String,
@@ -132,18 +137,37 @@ pub async fn git_diff(
     staged: bool,
     untracked: bool,
 ) -> Result<String, String> {
-    let out = if untracked {
-        run_git_diff(
-            &project_path,
-            &["diff", "--no-index", "--no-color", "--", NULL_DEVICE, &path],
-        )
-        .await?
+    let out = run_diff(&project_path, &diff_args(&path, staged, untracked, &[])).await?;
+    if !vcs::reported_as_binary(&out) {
+        return Ok(head(&out, MAX_DIFF_LINES));
+    }
+    let forced =
+        run_diff(&project_path, &diff_args(&path, staged, untracked, &["--text"])).await?;
+    let readable = if vcs::is_displayable_text(&forced) { &forced } else { &out };
+    Ok(head(readable, MAX_DIFF_LINES))
+}
+
+/// The git arguments for one file's diff: which side of the change is
+/// wanted, plus whatever the reading needs (`--text` for the retry).
+fn diff_args(path: &str, staged: bool, untracked: bool, extra: &[&str]) -> Vec<String> {
+    let mut args = vec!["diff".to_owned(), "--no-color".to_owned()];
+    if untracked {
+        args.push("--no-index".to_owned());
     } else if staged {
-        run_git(&project_path, &["diff", "--cached", "--no-color", "--", &path]).await?
-    } else {
-        run_git(&project_path, &["diff", "--no-color", "--", &path]).await?
-    };
-    Ok(head(&out, MAX_DIFF_LINES))
+        args.push("--cached".to_owned());
+    }
+    args.extend(extra.iter().map(|flag| (*flag).to_owned()));
+    args.push("--".to_owned());
+    if untracked {
+        args.push(NULL_DEVICE.to_owned());
+    }
+    args.push(path.to_owned());
+    args
+}
+
+async fn run_diff(project_path: &str, args: &[String]) -> Result<String, String> {
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git_diff(project_path, &borrowed).await
 }
 
 /// A generated file can be millions of lines; the modal renders every
@@ -173,6 +197,19 @@ pub async fn git_unstage(project_path: String, path: String) -> Result<(), Strin
     run_git(&project_path, &["restore", "--staged", "--", &path])
         .await
         .map(|_| ())
+}
+
+/// Stage every change in the working tree, deletions included — the
+/// whole repository, not just the folder git happens to be run from.
+#[tauri::command]
+pub async fn git_stage_all(project_path: String) -> Result<(), String> {
+    run_git(&project_path, &["add", "--all"]).await.map(|_| ())
+}
+
+/// Empty the index back to HEAD, leaving the working tree alone.
+#[tauri::command]
+pub async fn git_unstage_all(project_path: String) -> Result<(), String> {
+    run_git(&project_path, &["reset", "--quiet"]).await.map(|_| ())
 }
 
 #[tauri::command]

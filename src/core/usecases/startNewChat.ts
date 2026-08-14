@@ -1,7 +1,7 @@
-import { serversForProvider } from "../entities/mcpServer";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { agentServers } from "./agentServers";
 
 /**
  * Use case (shared step) — a new conversation means a NEW AGENT CONTEXT,
@@ -45,7 +45,7 @@ export async function startNewChat(
       path,
       model,
       effort,
-      serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
+      agentServers(state, provider, mcpOverrides),
     )
     .catch(() => undefined); // warm-up is best-effort
 }

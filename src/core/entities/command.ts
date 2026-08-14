@@ -1,25 +1,43 @@
+import {
+  CREATE_EXTENSION_COMMAND,
+  CREATE_EXTENSION_DESCRIPTION,
+} from "./createExtensionGuide";
 import type { ProviderId } from "./provider";
 
 /**
  * Entities layer — a slash command the user can send to an agent.
  */
 /** Where a command comes from: the CLI itself, the project's command
- *  folder, or the user's home command folder. */
-export type CommandSource = "builtin" | "project" | "user";
+ *  folder, the user's home command folder, or an installed extension. */
+export type CommandSource = "builtin" | "project" | "user" | "extension";
 
 export interface CommandInfo {
   readonly name: string;
   readonly description: string;
   readonly source: CommandSource;
+  /** Which extension contributed it, for `source: "extension"`. */
+  readonly extensionId?: string;
 }
 
 /**
- * Built-in commands each CLI understands in headless mode. Custom
- * commands (project/user command folders) are discovered at runtime and
- * merged by the ListCommands use case.
+ * Mota's own command, available with every provider: it never reaches
+ * the agent as a slash command — SendPrompt expands it into the full
+ * scaffolding brief (`createExtensionPrompt`) client-side.
+ */
+const CREATE_EXTENSION: CommandInfo = {
+  name: CREATE_EXTENSION_COMMAND,
+  description: CREATE_EXTENSION_DESCRIPTION,
+  source: "builtin",
+};
+
+/**
+ * Built-in commands each CLI understands in headless mode (plus Mota's
+ * own, above). Custom commands (project/user command folders) are
+ * discovered at runtime and merged by the ListCommands use case.
  */
 export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[]>> = {
   claude: [
+    CREATE_EXTENSION,
     {
       name: "/init",
       description: "Create or refresh CLAUDE.md with project guidance",
@@ -37,6 +55,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
   ],
   codex: [
+    CREATE_EXTENSION,
     {
       name: "/init",
       description: "Create AGENTS.md with project guidance",
@@ -44,7 +63,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
-  gemini: [],
+  gemini: [CREATE_EXTENSION],
 };
 
 /**

@@ -4,6 +4,7 @@ import {
   GitFork,
   Palette,
   PlugsConnected,
+  PuzzlePiece,
   Sliders,
   Terminal,
   TerminalWindow,
@@ -12,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
+import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
 import type { ProvisionEntry } from "../../core/entities/worktree";
@@ -20,6 +22,7 @@ import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
+import { SettingsExtensions } from "./SettingsExtensions";
 import { SettingsInsights } from "./SettingsInsights";
 import { SettingsProviders } from "./SettingsProviders";
 import { SettingsTerminal } from "./SettingsTerminal";
@@ -32,6 +35,7 @@ export type SettingsSection =
   | "defaults"
   | "commands"
   | "tools"
+  | "extensions"
   | "providers"
   | "worktrees"
   | "terminal"
@@ -57,6 +61,12 @@ interface Props {
   /** The active project's own heavy-folder list; undefined follows the default. */
   onScopeProvisioning: (entries: readonly ProvisionEntry[] | undefined) => void;
   newId: () => string;
+  /** Installed extensions and their lifecycle, for the Extensions section. */
+  extensions: readonly ExtensionDescriptor[];
+  onEnableExtension: (id: string) => void;
+  onDisableExtension: (id: string) => void;
+  onReloadExtensions: () => void;
+  readExtensionLog: (id: string) => Promise<string>;
   /** Whether this disk clones; null until the probe answers. */
   supportsCow: boolean | null;
   /** The active project's folders, for the Worktrees path suggestions. */
@@ -69,6 +79,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
     { id: "defaults", label: "Defaults", Icon: Sliders },
     { id: "commands", label: "Commands", Icon: TerminalWindow },
     { id: "tools", label: "Tools", Icon: Toolbox },
+    { id: "extensions", label: "Extensions", Icon: PuzzlePiece },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
     { id: "worktrees", label: "Worktrees", Icon: GitFork },
     { id: "terminal", label: "Terminal", Icon: Terminal },
@@ -95,6 +106,11 @@ export function SettingsModal({
   onScopeMcpServer,
   onScopeProvisioning,
   newId,
+  extensions,
+  onEnableExtension,
+  onDisableExtension,
+  onReloadExtensions,
+  readExtensionLog,
   supportsCow,
   loadFolders,
   onClose,
@@ -154,6 +170,15 @@ export function SettingsModal({
               activeTab={activeTab}
               mcpProbe={mcpProbe}
               onOverrideChange={onScopeMcpServer}
+            />
+          )}
+          {section === "extensions" && (
+            <SettingsExtensions
+              extensions={extensions}
+              onEnable={onEnableExtension}
+              onDisable={onDisableExtension}
+              onReload={onReloadExtensions}
+              readLog={readExtensionLog}
             />
           )}
           {section === "providers" && (

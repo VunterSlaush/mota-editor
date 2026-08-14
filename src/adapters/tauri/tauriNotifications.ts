@@ -28,6 +28,11 @@ export class TauriNotifications implements NotificationPort {
     });
   }
 
+  async show(title: string, body: string): Promise<void> {
+    if (!(await this.ensurePermission())) return;
+    sendNotification({ title, body });
+  }
+
   private async ensurePermission(): Promise<boolean> {
     if (!this.permissionChecked) {
       this.permissionGranted = await isPermissionGranted();

@@ -9,7 +9,7 @@ import type {
   GitWorktree,
   WorktreeAddMode,
 } from "../ports/gitPort";
-import { defaultSettings, projectDefaults } from "../state/appState";
+import { defaultSettings, projectDefaults, tabById } from "../state/appState";
 import { Store } from "../state/store";
 import { GitActions } from "./gitActions";
 import { LoadGitChanges } from "./loadGitChanges";
@@ -62,6 +62,12 @@ class FakeGit implements GitPort {
   async unstage(_p: string, path: string): Promise<void> {
     this.calls.push(`unstage:${path}`);
   }
+  async stageAll(): Promise<void> {
+    this.calls.push("stageAll");
+  }
+  async unstageAll(): Promise<void> {
+    this.calls.push("unstageAll");
+  }
   async commit(_p: string, message: string): Promise<string> {
     if (this.failCommitWith) throw new Error(this.failCommitWith);
     this.calls.push(`commit:${message}`);
@@ -72,7 +78,10 @@ class FakeGit implements GitPort {
     return `Switched to branch '${branch}'`;
   }
   failCommitWith: string | null = null;
+  /** Holds `push` open, so a test can look at the tab mid-verb. */
+  pushPending: Promise<void> | null = null;
   async push(): Promise<string> {
+    if (this.pushPending) await this.pushPending;
     if (this.failPushWith) throw new Error(this.failPushWith);
     return "Everything up-to-date";
   }
@@ -169,6 +178,38 @@ describe("git use cases", () => {
     await actions.stage("t1", "a.rs");
     await actions.unstage("t1", "b.rs");
     expect(git.calls).toEqual(["stage:a.rs", "unstage:b.rs"]);
+  });
+
+  it("stages and unstages everything in one call, not one per file", async () => {
+    const { git, actions } = setup();
+    await actions.stageAll("t1");
+    await actions.unstageAll("t1");
+    expect(git.calls).toEqual(["stageAll", "unstageAll"]);
+  });
+
+  it("the verb in flight is on the tab, so leaving the panel keeps it", async () => {
+    const { store, git, actions } = setup();
+    let finishPush = () => {};
+    git.pushPending = new Promise<void>((resolve) => {
+      finishPush = resolve;
+    });
+
+    const pushing = actions.push("t1");
+    expect(tabById(store.getState(), "t1")?.gitVerb).toBe("push");
+
+    finishPush();
+    await pushing;
+
+    const tab = tabById(store.getState(), "t1");
+    expect(tab?.gitVerb).toBeUndefined();
+    expect(tab?.gitNotice).toEqual({ ok: true, message: "Everything up-to-date" });
+  });
+
+  it("a verb that says nothing leaves no notice behind", async () => {
+    const { store, actions } = setup();
+    await actions.pull("t1");
+    await actions.stage("t1", "a.rs");
+    expect(tabById(store.getState(), "t1")?.gitNotice).toBeUndefined();
   });
 
   it("push errors come back as messages, not exceptions", async () => {

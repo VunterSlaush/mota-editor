@@ -10,6 +10,8 @@ import {
 } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
+import type { ExtensionDescriptor, ExtensionStatus } from "../entities/extension";
+import type { GitActionResult, GitVerb } from "../entities/gitAction";
 import type { McpServerConfig } from "../entities/mcpServer";
 import type {
   ChatMessage,
@@ -127,6 +129,14 @@ export interface TabState {
    *  tooltips read this instead of asking git on every hover. */
   readonly branch?: string;
   /**
+   * The git verb running against this project, and what the last one
+   * said. Here rather than in the Changes panel because switching tabs
+   * remounts it: a push mid-flight has to still look like one on the way
+   * back, and its outcome has to survive being away for it.
+   */
+  readonly gitVerb?: GitVerb;
+  readonly gitNotice?: GitActionResult;
+  /**
    * The terminals open in this project.
    *
    * Here rather than in the panel's own React state because switching
@@ -194,6 +204,8 @@ export interface AppState {
   readonly tabs: readonly TabState[];
   readonly activeTabId: string | null;
   readonly settings: AppSettings;
+  /** Installed extensions, as the host last described them. */
+  readonly extensions: readonly ExtensionDescriptor[];
 }
 
 export const defaultSettings: AppSettings = {
@@ -218,6 +230,7 @@ export const initialState: AppState = {
   tabs: [],
   activeTabId: null,
   settings: defaultSettings,
+  extensions: [],
 };
 
 export type Action =
@@ -278,6 +291,8 @@ export type Action =
     }
   | { type: "tab/sessionStageChanged"; tabId: string; stage: string | undefined }
   | { type: "tab/branchUpdated"; tabId: string; branch: string | undefined }
+  | { type: "git/started"; tabId: string; verb: GitVerb }
+  | { type: "git/finished"; tabId: string; result: GitActionResult }
   /** The backend agent session was ended on purpose: forget everything
    *  tied to it (resume id, usage, advertised commands). */
   | { type: "chat/sessionReset"; tabId: string; provider: ProviderId }
@@ -353,6 +368,13 @@ export type Action =
       provider: ProviderId;
       sessionId: string;
     }
+  | { type: "extensions/loaded"; extensions: readonly ExtensionDescriptor[] }
+  | {
+      type: "extensions/statusChanged";
+      extensionId: string;
+      status: ExtensionStatus;
+      error?: string;
+    }
   | { type: "shell/opened"; tabId: string; session: ShellSession }
   | { type: "shell/selected"; tabId: string; sessionId: string }
   /** A command took the shell, or gave it back. Dispatched only when the
@@ -371,9 +393,23 @@ export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "workspace/restored":
       return {
+        ...state,
         tabs: action.tabs,
         activeTabId: action.activeTabId,
         settings: action.settings ?? state.settings,
+      };
+
+    case "extensions/loaded":
+      return { ...state, extensions: action.extensions };
+
+    case "extensions/statusChanged":
+      return {
+        ...state,
+        extensions: state.extensions.map((e) =>
+          e.id === action.extensionId
+            ? { ...e, status: action.status, error: action.error }
+            : e,
+        ),
       };
 
     case "settings/changed":
@@ -611,6 +647,22 @@ export function reduce(state: AppState, action: Action): AppState {
 
     case "tab/branchUpdated":
       return mapTab(state, action.tabId, (tab) => ({ ...tab, branch: action.branch }));
+
+    case "git/started":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        gitVerb: action.verb,
+        gitNotice: undefined,
+      }));
+
+    // A verb that said nothing succeeded quietly — staging a file, most
+    // often — and the panel showing the change is the whole report.
+    case "git/finished":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        gitVerb: undefined,
+        gitNotice: action.result.message ? action.result : undefined,
+      }));
 
     case "chat/messageAppended":
       return mapTab(state, action.tabId, (tab) => ({

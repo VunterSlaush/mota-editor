@@ -1,7 +1,7 @@
-import { serversForProvider } from "../entities/mcpServer";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { agentServers } from "./agentServers";
 
 /**
  * Use case (shared step) — pre-start a tab's agent session with its
@@ -21,7 +21,7 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
       path,
       model,
       effort,
-      serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
+      agentServers(state, provider, mcpOverrides),
     )
     .catch(() => undefined);
 }

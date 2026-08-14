@@ -11,6 +11,7 @@ pub mod badge;
 pub mod billing;
 pub mod commands;
 pub mod event;
+pub mod extension;
 pub mod history;
 pub mod mcp;
 pub mod provider;

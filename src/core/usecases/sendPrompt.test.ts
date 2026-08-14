@@ -95,6 +95,7 @@ class FakeNotifications {
   async turnCompleted(projectName: string, providerName: string, tabActive: boolean) {
     this.calls.push({ projectName, providerName, tabActive });
   }
+  async show() {}
 }
 
 class FakeTranscriptStore implements TranscriptStore {
