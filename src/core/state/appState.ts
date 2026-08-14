@@ -32,6 +32,7 @@ import {
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
 import type { TabColorId } from "../entities/tabColor";
+import { tabIsWorking } from "../entities/tabStatus";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
 import { defaultWorktreeSettings } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
@@ -1018,4 +1019,9 @@ export function activeTab(state: AppState): TabState | null {
 
 export function tabById(state: AppState, tabId: string): TabState | null {
   return state.tabs.find((t) => t.project.id === tabId) ?? null;
+}
+
+/** Every tab with agent work in flight — what a close has to ask about. */
+export function workingTabs(state: AppState): readonly TabState[] {
+  return state.tabs.filter(tabIsWorking);
 }

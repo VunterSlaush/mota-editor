@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentGateway } from "../ports/agentGateway";
+import type { TranscriptStore } from "../ports/transcriptStore";
 import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
 import { type AppSettings, defaultSettings } from "../state/appState";
 import { Store } from "../state/store";
@@ -18,12 +19,20 @@ class FakeAgentGateway {
   async warmSession(): Promise<void> {}
 }
 
+/** Nothing was ever saved — restore has only the workspace file to go on. */
+class EmptyTranscriptStore {
+  async load(): Promise<null> {
+    return null;
+  }
+}
+
 async function restore(workspace: PersistedWorkspace | null) {
   const store = new Store();
   await new RestoreWorkspace(
     store,
     new FakeWorkspaceStore(workspace),
     new FakeAgentGateway() as unknown as AgentGateway,
+    new EmptyTranscriptStore() as unknown as TranscriptStore,
   ).execute();
   return store.getState();
 }

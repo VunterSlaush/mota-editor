@@ -196,13 +196,17 @@ pub fn native_mode_id(
     permission: Permission,
 ) -> Option<&'static str> {
     match (provider_id, mode) {
-        ("claude", Mode::Plan) => Some("plan"),
+        // Ask rides plan mode's enforcement: what both need from the CLI
+        // is "read anything, write nothing", and that is the only
+        // read-only tier either vendor exposes. What separates them is
+        // `turn::mode_preamble`, which Ask keeps even here.
+        ("claude", Mode::Plan | Mode::Ask) => Some("plan"),
         // Claude's native `auto`: its own permission system approves what
         // it calls safe and asks about the rest — exactly the app's Auto
         // policy, judged by the CLI instead of approximated here.
         ("claude", _) if permission == Permission::Auto => Some("auto"),
         ("claude", _) => Some("default"),
-        ("codex", Mode::Plan) => Some("read-only"),
+        ("codex", Mode::Plan | Mode::Ask) => Some("read-only"),
         ("codex", _) => Some("agent"),
         _ => None,
     }
@@ -1823,6 +1827,25 @@ mod tests {
         assert_eq!(native_mode_id("claude", Mode::Agent, Permission::Auto), Some("auto"));
         assert_eq!(native_mode_id("claude", Mode::Plan, Permission::Auto), Some("plan"));
         assert_eq!(native_mode_id("codex", Mode::Agent, Permission::Auto), Some("agent"));
+        // Ask borrows the read-only tier, and must keep it even under a
+        // permission policy that would otherwise hand it write access.
+        assert_eq!(native_mode_id("claude", Mode::Ask, manual), Some("plan"));
+        assert_eq!(native_mode_id("claude", Mode::Ask, Permission::Auto), Some("plan"));
+        assert_eq!(native_mode_id("claude", Mode::Ask, Permission::Bypass), Some("plan"));
+        assert_eq!(native_mode_id("codex", Mode::Ask, manual), Some("read-only"));
+        assert_eq!(native_mode_id("codex", Mode::Ask, Permission::Bypass), Some("read-only"));
+    }
+
+    #[test]
+    fn ask_mode_keeps_its_preamble_on_a_native_provider() {
+        // Plan mode's preamble is dropped for Claude because the session
+        // mode enforces it. Ask's must not be: the enforcement it
+        // borrows is plan's, and the wording is all that says otherwise.
+        let request = TurnRequest { mode: Mode::Ask, ..test_request("why is this slow?") };
+        let claude = prompt_request_for_provider(3, "s", "claude", &request);
+        let text = claude["params"]["prompt"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("You are in ASK MODE."));
+        assert!(text.ends_with("why is this slow?"));
     }
 
     #[test]

@@ -66,6 +66,22 @@ export function tabStatus(tab: {
   return "idle";
 }
 
+/**
+ * True while this tab has agent work in flight — a turn running, or
+ * prompts queued behind it.
+ *
+ * Narrower than "not idle" on purpose: an unanswered approval or a
+ * failed turn is a tab you can walk away from, while a running turn
+ * dies with the process and cannot be got back. This is what a close
+ * has to stop and ask about.
+ */
+export function tabIsWorking(tab: {
+  readonly busy: boolean;
+  readonly queued: readonly unknown[];
+}): boolean {
+  return tab.busy || tab.queued.length > 0;
+}
+
 /** Screen-reader / tooltip wording for each state. */
 export const TAB_STATUS_LABELS: Readonly<Record<TabStatus, string>> = {
   needsInput: "waiting for you",

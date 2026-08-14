@@ -7,7 +7,8 @@ use crate::turn::{effective_prompt, external_attachment_dirs, Mode, Permission, 
 /// Adapter for Anthropic's Claude Code CLI in headless mode:
 /// `claude -p <prompt> --output-format stream-json --verbose [--resume <id>]`
 ///
-/// Mode mapping: plan is native (`--permission-mode plan`); debug is a
+/// Mode mapping: plan is native (`--permission-mode plan`); ask borrows
+/// that same read-only tier and adds its own preamble; debug is a
 /// prompt preamble. Permission bypass maps to
 /// `--dangerously-skip-permissions`, auto to `--permission-mode auto` —
 /// the CLI's own permission system approves safe actions and asks about
@@ -33,7 +34,10 @@ impl Provider for Claude {
             "--verbose".to_owned(),
         ];
         match (request.mode, request.permission) {
-            (Mode::Plan, _) => {
+            // Ask is read-only too, and plan is the only read-only
+            // permission mode the CLI has — the preamble is what keeps
+            // the two apart. See `turn::mode_preamble`.
+            (Mode::Plan | Mode::Ask, _) => {
                 args.push("--permission-mode".to_owned());
                 args.push("plan".to_owned());
             }
@@ -161,6 +165,22 @@ mod tests {
         assert!(args.contains(&"plan".to_owned()));
         assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
         assert_eq!(args[1], "plan it"); // no preamble: plan is native
+    }
+
+    #[test]
+    fn ask_mode_is_read_only_too_and_still_carries_its_preamble() {
+        let request = TurnRequest {
+            mode: Mode::Ask,
+            permission: Permission::Bypass,
+            ..test_request("where is auth handled?")
+        };
+        let args = Claude.build_command(&request).args;
+        assert!(args.contains(&"--permission-mode".to_owned()));
+        assert!(args.contains(&"plan".to_owned()));
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+        // Unlike plan, the preamble stays: the flag is plan's, and only
+        // the wording tells the agent to answer instead of planning.
+        assert!(args[1].starts_with("You are in ASK MODE."));
     }
 
     #[test]

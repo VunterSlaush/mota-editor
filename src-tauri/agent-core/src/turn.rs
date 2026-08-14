@@ -10,6 +10,7 @@ pub enum Mode {
     #[default]
     Agent,
     Plan,
+    Ask,
     Debug,
 }
 
@@ -49,17 +50,29 @@ files, and do not run commands that change state. Analyze the project and produc
 detailed step-by-step implementation plan: the files you would change, in what order, \
 and why. Wait for approval before implementing anything.";
 
+const ASK_PREAMBLE: &str = "You are in ASK MODE. Answer the question below about this \
+project. Read whatever you need to answer it well, but do not create, modify, or delete \
+any files, and do not run commands that change state. Answer the question directly — it \
+is a question, not a request for an implementation plan.";
+
 const DEBUG_PREAMBLE: &str = "You are in DEBUG MODE. Focus on diagnosing the problem \
 described below: reproduce it if possible, trace the root cause, and explain your \
 reasoning with evidence (logs, failing tests) before proposing a minimal, targeted fix.";
 
 /// The instruction preamble a mode needs, given whether the transport
-/// enforces plan mode natively. Debug is always a preamble — no CLI has
-/// a debug concept.
+/// enforces plan mode natively.
+///
+/// Debug and Ask are always preambles. No CLI has a debug concept, and
+/// no CLI has an ask one either: Ask borrows plan mode's read-only
+/// enforcement (see `acp::native_mode_id`), which stops the writing but
+/// would otherwise have the agent answer a question with a plan. The
+/// preamble is the whole difference between the two modes, so it has to
+/// survive the native mapping rather than be skipped by it.
 pub fn mode_preamble(mode: Mode, plan_is_native: bool) -> Option<&'static str> {
     match mode {
         Mode::Agent => None,
         Mode::Debug => Some(DEBUG_PREAMBLE),
+        Mode::Ask => Some(ASK_PREAMBLE),
         Mode::Plan => (!plan_is_native).then_some(PLAN_PREAMBLE),
     }
 }
@@ -153,6 +166,31 @@ mod tests {
     fn debug_mode_prepends_the_debug_preamble_even_for_native_providers() {
         let request = TurnRequest { mode: Mode::Debug, ..test_request("it crashes") };
         assert!(effective_prompt(&request, true).starts_with("You are in DEBUG MODE."));
+    }
+
+    #[test]
+    fn ask_mode_keeps_its_preamble_on_native_providers() {
+        // Ask is mapped onto plan mode's read-only enforcement, so the
+        // native mapping would happily swallow it — and then the agent
+        // would answer a question with an implementation plan. The
+        // preamble IS the difference between the two modes.
+        let request = TurnRequest { mode: Mode::Ask, ..test_request("how does auth work?") };
+        let prompt = effective_prompt(&request, true);
+        assert!(prompt.starts_with("You are in ASK MODE."));
+        assert!(prompt.ends_with("how does auth work?"));
+    }
+
+    #[test]
+    fn ask_mode_tells_the_agent_not_to_plan() {
+        let request = TurnRequest { mode: Mode::Ask, ..test_request("what is this?") };
+        let prompt = effective_prompt(&request, true);
+        assert!(prompt.contains("not a request for an implementation plan"));
+    }
+
+    #[test]
+    fn ask_deserializes_from_the_frontends_lowercase_mode() {
+        // The mode crosses the boundary as the string the picker stores.
+        assert_eq!(serde_json::from_str::<Mode>("\"ask\"").unwrap(), Mode::Ask);
     }
 
     #[test]

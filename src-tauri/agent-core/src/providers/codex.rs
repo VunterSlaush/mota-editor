@@ -9,7 +9,8 @@ use crate::turn::{effective_prompt, Mode, Permission, TurnRequest};
 ///
 /// Mode mapping: plan is the preamble PLUS a mechanically enforced
 /// `--sandbox read-only` (and wins over bypass — a plan never writes);
-/// debug is a preamble. Permission bypass maps to
+/// ask takes the same sandbox with its own preamble; debug is a
+/// preamble. Permission bypass maps to
 /// `--dangerously-bypass-approvals-and-sandbox`, auto to `--full-auto`
 /// (workspace-write sandbox); manual keeps codex's default sandbox.
 ///
@@ -46,7 +47,8 @@ impl Provider for Codex {
             }
         }
         match (request.mode, request.permission) {
-            (Mode::Plan, _) => {
+            // Ask is read-only too — same sandbox, different preamble.
+            (Mode::Plan | Mode::Ask, _) => {
                 args.push("--sandbox".to_owned());
                 args.push("read-only".to_owned());
             }
@@ -193,6 +195,20 @@ mod tests {
             resumed.args,
             vec!["exec", "resume", "t1", "--json", "--skip-git-repo-check", "more"]
         );
+    }
+
+    #[test]
+    fn ask_mode_takes_the_read_only_sandbox_over_bypass() {
+        let request = TurnRequest {
+            mode: Mode::Ask,
+            permission: Permission::Bypass,
+            ..test_request("what does the runner do?")
+        };
+        let args = Codex.build_command(&request).args;
+        assert!(args.contains(&"--sandbox".to_owned()));
+        assert!(args.contains(&"read-only".to_owned()));
+        assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_owned()));
+        assert!(args.last().unwrap().starts_with("You are in ASK MODE."));
     }
 
     #[test]

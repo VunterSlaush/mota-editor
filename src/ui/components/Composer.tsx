@@ -7,6 +7,7 @@ import {
   Paperclip,
   PencilSimple,
   Plus,
+  Question,
   Robot,
   ShieldCheck,
   Stop,
@@ -61,6 +62,7 @@ const maxInputHeight = () => Math.round(window.innerHeight * 0.5);
 const MODE_ICONS: Record<AgentMode, ReactNode> = {
   agent: <Robot />,
   plan: <ClipboardText />,
+  ask: <Question />,
   debug: <Bug />,
 };
 

@@ -14,6 +14,7 @@ import {
   DemoShell,
   DemoShellHistory,
   DemoTranscriptStore,
+  DemoWindow,
   DemoWorkspaceStore,
   DemoWorktreeProvisioning,
   DemoZoom,
@@ -34,6 +35,7 @@ import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriShell } from "../adapters/tauri/tauriShell";
 import { TauriShellHistory } from "../adapters/tauri/tauriShellHistory";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
+import { TauriWindow } from "../adapters/tauri/tauriWindow";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
 import { TauriZoom } from "../adapters/tauri/tauriZoom";
@@ -62,6 +64,7 @@ import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { LoadInsights } from "../core/usecases/loadInsights";
 import { ManageExtensions } from "../core/usecases/manageExtensions";
 import { OpenProject } from "../core/usecases/openProject";
+import { QuitApp } from "../core/usecases/quitApp";
 import { ReorderTabs } from "../core/usecases/reorderTabs";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
@@ -94,6 +97,8 @@ export interface AppContext {
   readonly restoreWorkspace: RestoreWorkspace;
   readonly openProject: OpenProject;
   readonly closeProject: CloseProject;
+  /** Guards the window's close button while a tab is still working. */
+  readonly quitApp: QuitApp;
   readonly switchTab: SwitchTab;
   readonly reorderTabs: ReorderTabs;
   readonly renameTab: RenameTab;
@@ -175,6 +180,7 @@ export function createAppContext(): AppContext {
     ? new TauriWorktreeProvisioning()
     : new DemoWorktreeProvisioning();
   const extensionHost = inTauri ? new TauriExtensionHost() : new DemoExtensionHost();
+  const windowPort = inTauri ? new TauriWindow() : new DemoWindow();
   const newId = () => crypto.randomUUID();
 
   // Session-level events (warm-up stages, agent mode switches) arrive
@@ -231,7 +237,12 @@ export function createAppContext(): AppContext {
 
   return {
     store,
-    restoreWorkspace: new RestoreWorkspace(store, workspaceStore, agentGateway),
+    restoreWorkspace: new RestoreWorkspace(
+      store,
+      workspaceStore,
+      agentGateway,
+      transcriptStore,
+    ),
     openProject: new OpenProject(
       store,
       folderPicker,
@@ -241,6 +252,7 @@ export function createAppContext(): AppContext {
       gitPort,
     ),
     closeProject,
+    quitApp: new QuitApp(store, windowPort),
     switchTab: new SwitchTab(store, workspaceStore),
     reorderTabs: new ReorderTabs(store, workspaceStore),
     selectProvider: new SelectProvider(store, workspaceStore, agentGateway),
