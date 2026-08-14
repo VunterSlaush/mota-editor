@@ -1,4 +1,4 @@
-import { ArrowsClockwise, Warning } from "@phosphor-icons/react";
+import { ArrowsClockwise, FolderOpen, Warning } from "@phosphor-icons/react";
 import { useState } from "react";
 import {
   type ExtensionDescriptor,
@@ -6,6 +6,7 @@ import {
   isDangerousPermission,
   permissionLabel,
 } from "../../core/entities/extension";
+import { openExtensionsFolder } from "../openExtensionsFolder";
 
 interface Props {
   extensions: readonly ExtensionDescriptor[];
@@ -40,6 +41,7 @@ export function SettingsExtensions({
   readLog,
 }: Props) {
   const [logs, setLogs] = useState<Record<string, string>>({});
+  const [folderError, setFolderError] = useState<string | null>(null);
 
   const toggleLog = async (id: string) => {
     if (logs[id] !== undefined) {
@@ -69,9 +71,19 @@ export function SettingsExtensions({
         and describe what you want — the agent scaffolds the folder for you.
       </p>
 
-      <button type="button" className="tool-add" onClick={onReload}>
-        <ArrowsClockwise size={14} /> Reload list
-      </button>
+      <div className="settings-section__actions">
+        <button
+          type="button"
+          className="tool-add"
+          onClick={() => void openExtensionsFolder().then(setFolderError)}
+        >
+          <FolderOpen size={14} /> Open extensions folder
+        </button>
+        <button type="button" className="tool-add" onClick={onReload}>
+          <ArrowsClockwise size={14} /> Reload list
+        </button>
+      </div>
+      {folderError && <p className="settings-section__hint">{folderError}</p>}
 
       {extensions.length === 0 && (
         <p className="settings-section__hint">No extensions installed.</p>

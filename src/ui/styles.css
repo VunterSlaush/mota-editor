@@ -2307,6 +2307,12 @@ body {
 }
 
 /* ---- Settings → Extensions ---- */
+.settings-section__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .extension-row {
   display: flex;
   flex-wrap: wrap;

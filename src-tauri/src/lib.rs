@@ -76,6 +76,7 @@ pub fn run() {
             commands::list_custom_commands,
             app_badge::set_app_badge,
             commands::open_external,
+            commands::open_extensions_dir,
             commands::open_path,
             commands::save_pasted_image,
             provider_probe::probe_provider,
