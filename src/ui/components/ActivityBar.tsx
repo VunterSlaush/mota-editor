@@ -5,6 +5,7 @@ import {
   ClockCounterClockwise,
   Gear,
   GitBranch,
+  GitFork,
   Kanban,
   ListChecks,
   PuzzlePiece,
@@ -12,7 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 
-export type SidebarView = "changes" | "history" | `ext:${string}`;
+export type SidebarView = "changes" | "history" | "worktrees" | `ext:${string}`;
 
 /** The sidebar-view id an extension panel occupies. */
 export function panelSidebarView(panel: ExtensionPanelRef): SidebarView {
@@ -21,6 +22,8 @@ export function panelSidebarView(panel: ExtensionPanelRef): SidebarView {
 
 interface Props {
   active: SidebarView | null;
+  /** The builtin views this tab offers — not every tab has every one. */
+  available: readonly SidebarView[];
   /** Panels contributed by active extensions — one icon each. */
   panels: readonly ExtensionPanelRef[];
   onSelect: (view: SidebarView | null) => void;
@@ -30,7 +33,11 @@ interface Props {
 const ITEMS: readonly { view: SidebarView; Icon: Icon; title: string }[] = [
   { view: "changes", Icon: GitBranch, title: "Source control" },
   { view: "history", Icon: ClockCounterClockwise, title: "Session history" },
+  { view: "worktrees", Icon: GitFork, title: "Worktrees" },
 ];
+
+/** Every builtin view, for the tabs that offer all of them. */
+export const ALL_SIDEBAR_VIEWS: readonly SidebarView[] = ITEMS.map((item) => item.view);
 
 /** Manifests name an icon from this closed set — extensions cannot draw
  *  arbitrary pixels in the activity bar (ADR-0013). */
@@ -44,10 +51,17 @@ const PANEL_ICONS: Readonly<Record<string, Icon>> = {
 
 /**
  * UI — VS-style activity bar: icons that switch (or collapse) the
- * sidebar — the builtin views, then one per extension panel — and the
- * gear, which opens settings as a modal rather than a sidebar view.
+ * sidebar — the builtin views this tab offers, then one per extension
+ * panel — and the gear, which opens settings as a modal rather than a
+ * sidebar view.
  */
-export function ActivityBar({ active, panels, onSelect, onOpenSettings }: Props) {
+export function ActivityBar({
+  active,
+  available,
+  panels,
+  onSelect,
+  onOpenSettings,
+}: Props) {
   const viewButton = (view: SidebarView, ItemIcon: Icon, title: string) => (
     <button
       type="button"
@@ -65,7 +79,9 @@ export function ActivityBar({ active, panels, onSelect, onOpenSettings }: Props)
 
   return (
     <nav className="activity-bar" aria-label="Sidebar views">
-      {ITEMS.map((item) => viewButton(item.view, item.Icon, item.title))}
+      {ITEMS.filter((item) => available.includes(item.view)).map((item) =>
+        viewButton(item.view, item.Icon, item.title),
+      )}
       {panels.map((panel) =>
         viewButton(
           panelSidebarView(panel),

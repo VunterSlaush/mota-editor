@@ -109,6 +109,9 @@ class FakeTranscriptStore implements TranscriptStore {
   async list(): Promise<TranscriptMeta[]> {
     return [];
   }
+  async keywords() {
+    return [];
+  }
   async listExternal() {
     return [];
   }
@@ -1028,6 +1031,28 @@ describe("SendPrompt", () => {
     // Opening the tab acknowledges the attention flag.
     store.dispatch({ type: "tab/activated", tabId: "t1" });
     expect(store.getState().tabs[0].attention).toBe(false);
+  });
+
+  it("names the tab the way the user did when telling them a turn finished", async () => {
+    const { store, notifications, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
+    store.dispatch({
+      type: "tab/labelChanged",
+      tabId: "t1",
+      label: "auth rewrite",
+    });
+    store.dispatch({
+      type: "tab/opened",
+      project: newProject("t2", "/work/beta", DEFAULTS),
+    });
+    // t2 is now active; run the turn in t1 (background).
+
+    await useCase.execute("t1", "long refactor");
+
+    expect(notifications.calls).toEqual([
+      { projectName: "auth rewrite", providerName: "Claude", tabActive: false },
+    ]);
   });
 
   it("does not flag the active tab, and reports it as watched", async () => {

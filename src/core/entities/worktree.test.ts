@@ -209,6 +209,17 @@ describe("removalCheck", () => {
     expect(check.blockers).toHaveLength(3);
     expect(check.blockers[0]).toContain("main checkout");
   });
+
+  it("calls the main checkout and a locked worktree blocked outright", () => {
+    expect(removalCheck(0, { main: true, locked: false }, true).blocked).toBe(true);
+    expect(removalCheck(0, { main: false, locked: true }, true).blocked).toBe(true);
+  });
+
+  it("does not call uncommitted work blocked — force is the answer to it", () => {
+    const check = removalCheck(3, linked, false);
+    expect(check.blocked).toBe(false);
+    expect(check.needsForce).toBe(true);
+  });
 });
 
 describe("shareRisk", () => {

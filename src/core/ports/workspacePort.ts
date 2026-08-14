@@ -22,6 +22,14 @@ export interface PersistedProject {
   readonly permission?: PermissionPolicy;
   readonly model?: string;
   readonly effort?: string;
+  /** The name the user gave this tab, if any. */
+  readonly label?: string;
+  /**
+   * Grouping colour id. A plain string, not `TabColorId`: this comes out
+   * of a file, so whether it still names a colour is decided by the guard
+   * at restore rather than asserted by the type.
+   */
+  readonly color?: string;
   readonly verbose?: boolean;
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
   /**

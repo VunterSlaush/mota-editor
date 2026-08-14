@@ -69,10 +69,27 @@ export interface ExternalSessionMeta {
   readonly updatedAtMs: number;
 }
 
+/** What one stored conversation was about, in a few words. */
+export interface SessionKeywords {
+  readonly id: string;
+  /** Most frequent first; empty for a session with nothing to say. */
+  readonly keywords: readonly string[];
+}
+
 export interface TranscriptStore {
   save(projectPath: string, transcript: PersistedTranscript): Promise<void>;
   /** Newest first. */
   list(projectPath: string): Promise<TranscriptMeta[]>;
+  /**
+   * The themes of every session in this project — what History searches
+   * beyond the title, which is only ever the opening prompt's first 80
+   * characters.
+   *
+   * Read on demand rather than kept up to date: it costs the same walk
+   * as `list`, and paying it once when a search is first run beats
+   * paying it on every panel open for a feature most openings never use.
+   */
+  keywords(projectPath: string): Promise<SessionKeywords[]>;
   /**
    * Per-session stat rows across ALL projects' session dirs (not just
    * one project) for the Insights view. `knownProjects` lets the store

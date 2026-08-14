@@ -115,6 +115,7 @@ pub fn run() {
             commands::save_workspace,
             history_file::save_session,
             history_file::list_sessions,
+            history_file::session_keywords,
             history_file::load_session,
             history_file::delete_session,
             history_file::list_session_stats,

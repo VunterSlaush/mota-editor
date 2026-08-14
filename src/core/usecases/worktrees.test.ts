@@ -37,7 +37,13 @@ class FakeGit implements GitPort {
   worktreeList: GitWorktree[] = [];
   notARepo = false;
   failWorktreeAddWith: string | null = null;
-  added: Array<{ path: string; branch: string; mode: string; remote: string }> = [];
+  added: Array<{
+    path: string;
+    branch: string;
+    mode: string;
+    remote: string;
+    base: string;
+  }> = [];
 
   async worktrees(): Promise<GitWorktree[]> {
     if (this.notARepo) throw new Error("not a repo");
@@ -49,9 +55,10 @@ class FakeGit implements GitPort {
     branch: string,
     mode: string,
     remote: string,
+    base: string,
   ) {
     if (this.failWorktreeAddWith) throw new Error(this.failWorktreeAddWith);
-    this.added.push({ path, branch, mode, remote });
+    this.added.push({ path, branch, mode, remote, base });
     return "Preparing worktree";
   }
 
@@ -294,6 +301,7 @@ describe("Worktrees.create", () => {
         branch: "feature/login",
         mode: "existing",
         remote: "origin",
+        base: "",
       },
     ]);
     const tabs = store.getState().tabs;
@@ -324,6 +332,20 @@ describe("Worktrees.create", () => {
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
     expect(git.added[0].path).toBe("/volumes/fast/trees/dev");
+  });
+
+  it("starts a new branch at the base the picker chose", async () => {
+    const { git, worktrees } = setup();
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "xxxx", "new", "main");
+    expect(git.added[0]).toMatchObject({ branch: "xxxx", mode: "new", base: "main" });
+  });
+
+  it("leaves the start point to git when no base was chosen", async () => {
+    const { git, worktrees } = setup();
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "xxxx", "new");
+    expect(git.added[0].base).toBe("");
   });
 
   it("tracks remote-only branches from the configured remote", async () => {
@@ -362,6 +384,47 @@ describe("Worktrees.create", () => {
     await worktrees.create("t1", "dev", "new");
 
     expect(store.getState().tabs[1].project.mode).toBe(DEFAULTS.mode);
+  });
+
+  it("carries the source tab's colour into the worktree's tab", async () => {
+    const { store, git, worktrees } = setup();
+    store.dispatch({ type: "tab/colorChanged", tabId: "t1", color: "violet" });
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "dev", "new");
+
+    expect(store.getState().tabs[1].project.color).toBe("violet");
+  });
+
+  it("carries the colour even when inheriting agent settings is turned off", async () => {
+    // The toggle governs provider/model/permission — what the AGENT runs.
+    // A grouping colour is not one of those, and a worktree forked from a
+    // task's tab is that task.
+    const { store, git, worktrees } = setup();
+    store.dispatch({ type: "tab/colorChanged", tabId: "t1", color: "violet" });
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        worktrees: { ...defaultSettings.worktrees, inheritFromSourceTab: false },
+      },
+    });
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "dev", "new");
+
+    expect(store.getState().tabs[1].project.color).toBe("violet");
+  });
+
+  it("never carries the source tab's name", async () => {
+    // Two tabs called the same thing is worse than one called nothing.
+    const { store, git, worktrees } = setup();
+    store.dispatch({
+      type: "tab/labelChanged",
+      tabId: "t1",
+      label: "auth rewrite",
+    });
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    await worktrees.create("t1", "dev", "new");
+
+    expect(store.getState().tabs[1].project.label).toBeUndefined();
   });
 
   it("returns git's error as a message and opens nothing", async () => {

@@ -221,11 +221,14 @@ export function App({ context }: { context: AppContext }) {
         onClose={(tabId) => void context.closeProject.execute(tabId)}
         onReorder={(tabId, toIndex) => void context.reorderTabs.execute(tabId, toIndex)}
         onOpenProject={() => void context.openProject.execute()}
+        onRename={(tabId, label) => void context.renameTab.execute(tabId, label)}
+        onRecolor={(tabId, color) => void context.recolorTab.execute(tabId, color)}
       />
       {tab ? (
         <ChatPanel
           key={tab.project.id}
           tab={tab}
+          tabs={state.tabs}
           autoCompactThreshold={state.settings.autoCompactThreshold}
           defaultModel={state.settings.defaultModel[tab.project.provider] ?? ""}
           defaultEffort={state.settings.defaultEffort[tab.project.provider] ?? ""}
@@ -244,10 +247,12 @@ export function App({ context }: { context: AppContext }) {
           loadHistory={(onRefresh) =>
             context.sessionHistory.list(tab.project.id, onRefresh)
           }
-          onOpenSession={(item) => context.sessionHistory.open(tab.project.id, item)}
-          onDeleteSession={(sessionId) =>
-            context.sessionHistory.remove(tab.project.id, sessionId)
+          loadWorktreeSessions={() =>
+            context.sessionHistory.listWorktreeSessions(tab.project.id)
           }
+          loadSessionKeywords={() => context.sessionHistory.keywords(tab.project.id)}
+          onOpenSession={(item) => context.sessionHistory.open(tab.project.id, item)}
+          onDeleteSession={(item) => context.sessionHistory.remove(tab.project.id, item)}
           onNewChat={() => context.sessionHistory.startNew(tab.project.id)}
           onSend={(prompt, attachments) =>
             void context.sendPrompt.execute(tab.project.id, prompt, attachments)
@@ -298,8 +303,8 @@ export function App({ context }: { context: AppContext }) {
           onOpenWorktree={(path, mainPath) =>
             void context.worktrees.open(path, mainPath, tab.project.id)
           }
-          onCreateWorktree={(branch, mode) =>
-            context.worktrees.create(tab.project.id, branch, mode)
+          onCreateWorktree={(branch, mode, base) =>
+            context.worktrees.create(tab.project.id, branch, mode, base)
           }
           onRetryPreparing={() =>
             void context.worktrees.provision(

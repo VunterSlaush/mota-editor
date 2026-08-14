@@ -94,14 +94,24 @@ export class Worktrees {
         : projectDefaults(state.settings);
 
     const worktreeOf = samePath(worktreePath, mainPath) ? undefined : mainPath;
-    // The provisioning list travels regardless of inheritFromSourceTab:
-    // that toggle is a preference, this is correctness — removal must
-    // take back exactly the list this worktree was stocked with, even
-    // after a restart, so the worktree's own project carries it.
     const project = newProject(
       this.newId(),
       worktreePath,
-      { ...defaults, provisioningOverride: source?.project.provisioningOverride },
+      {
+        ...defaults,
+        // Travels regardless of inheritFromSourceTab: that toggle is a
+        // preference, this is correctness — removal must take back
+        // exactly the list this worktree was stocked with, even after a
+        // restart, so the worktree's own project carries it.
+        provisioningOverride: source?.project.provisioningOverride,
+        // Also travels regardless of the toggle, but for its own reason:
+        // inheritFromSourceTab governs what the AGENT runs (provider,
+        // model, permission), and a grouping colour is not that. A
+        // worktree forked from a task's tab is that task. The label
+        // deliberately stays behind — two tabs with one name are worse
+        // than one with none.
+        color: source?.project.color,
+      },
       worktreeOf,
     );
     this.store.dispatch({ type: "tab/opened", project });
@@ -113,11 +123,15 @@ export class Worktrees {
   /**
    * Create a worktree for `branch` at the derived sibling location and
    * open it. Failures come back as messages for the picker to show.
+   *
+   * `base` is where a brand-new branch starts, and only "new" mode reads
+   * it: empty leaves the start point to git, which is this tab's HEAD.
    */
   async create(
     tabId: string,
     branch: string,
     mode: WorktreeAddMode,
+    base = "",
   ): Promise<GitActionResult> {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
@@ -138,6 +152,7 @@ export class Worktrees {
         branch,
         mode,
         remote,
+        base,
       );
       await this.open(target, mainPath, tabId);
       // Stocking the worktree is not part of creating it: the tab is
@@ -223,7 +238,12 @@ export class RemoveWorktree {
   async check(tabId: string, worktreePath: string): Promise<RemovalCheck> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab)
-      return { needsForce: false, blockers: ["Unknown tab."], reclaimable: false };
+      return {
+        needsForce: false,
+        blockers: ["Unknown tab."],
+        blocked: true,
+        reclaimable: false,
+      };
 
     const worktrees = await this.git.worktrees(tab.project.path).catch(() => []);
     const target = worktrees.find((w) => samePath(w.path, worktreePath));
@@ -231,6 +251,7 @@ export class RemoveWorktree {
       return {
         needsForce: false,
         blockers: ["Not a worktree of this repository."],
+        blocked: true,
         reclaimable: false,
       };
     }

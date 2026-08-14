@@ -15,7 +15,12 @@ import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { useDragWidth } from "../useDragWidth";
-import { ActivityBar, panelSidebarView, type SidebarView } from "./ActivityBar";
+import {
+  ActivityBar,
+  ALL_SIDEBAR_VIEWS,
+  panelSidebarView,
+  type SidebarView,
+} from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
 import { Composer } from "./Composer";
@@ -29,6 +34,7 @@ import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
 import { TerminalPanel } from "./TerminalPanel";
 import { WorktreePicker } from "./WorktreePicker";
+import { WorktreesPanel } from "./WorktreesPanel";
 
 /**
  * Which panel occupies the right-hand column. One at a time: two
@@ -72,8 +78,15 @@ type DiffTarget =
       readonly newText: string;
     };
 
+/** The views a linked worktree's tab offers — every one but its own. */
+const WORKTREE_TAB_SIDEBAR_VIEWS: readonly SidebarView[] = ALL_SIDEBAR_VIEWS.filter(
+  (view) => view !== "worktrees",
+);
+
 interface Props {
   tab: TabState;
+  /** Every open tab — the worktree panel reads its rows' status here. */
+  tabs: readonly TabState[];
   /** Fraction of the context window at which auto-compact kicks in. */
   autoCompactThreshold: number;
   /** The app's default model/effort for this tab's provider, so the
@@ -96,11 +109,17 @@ interface Props {
   onSelectRightPanel: (panel: RightPanel) => void;
   shells: ShellsView;
   onOpenSettings: () => void;
-  /** Resolves with the instant local listing; `onRefresh` delivers the
-   *  merged native listing later, when a live agent could be asked. */
-  loadHistory: (onRefresh: (listing: HistoryListing) => void) => Promise<HistoryListing>;
+  /** Resolves with the instant local listing; `onRefresh`, when given,
+   *  delivers the merged native listing later. Omit it to read the local
+   *  store alone — the only half that is safe to ask mid-turn. */
+  loadHistory: (onRefresh?: (listing: HistoryListing) => void) => Promise<HistoryListing>;
+  /** Just the sessions had in this repo's other checkouts, for the
+   *  worktrees panel's short list. */
+  loadWorktreeSessions: () => Promise<readonly HistoryItem[]>;
+  /** What each session was about, for History's search. Read on demand. */
+  loadSessionKeywords: () => Promise<Map<string, readonly string[]>>;
   onOpenSession: (item: HistoryItem) => Promise<void>;
-  onDeleteSession: (sessionId: string) => Promise<void>;
+  onDeleteSession: (item: HistoryItem) => Promise<void>;
   onNewChat: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
   onDraftChange: (draft: string, attachments: readonly string[]) => void;
@@ -140,7 +159,11 @@ interface Props {
   /** The repo's checkouts, for the worktree picker. */
   loadWorktrees: () => Promise<WorktreeItem[]>;
   onOpenWorktree: (path: string, mainPath: string) => void;
-  onCreateWorktree: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
+  onCreateWorktree: (
+    branch: string,
+    mode: WorktreeAddMode,
+    base: string,
+  ) => Promise<GitActionResult>;
   /** Try the heavy-folder copy again after it failed. */
   onRetryPreparing: () => void;
   onCheckWorktreeRemoval: (path: string) => Promise<RemovalCheck>;
@@ -160,6 +183,7 @@ interface Props {
 /** UI — the chat for one project: header, transcript, plan, composer. */
 export function ChatPanel({
   tab,
+  tabs,
   autoCompactThreshold,
   defaultModel,
   defaultEffort,
@@ -173,6 +197,8 @@ export function ChatPanel({
   onSelectSidebarView,
   onOpenSettings,
   loadHistory,
+  loadWorktreeSessions,
+  loadSessionKeywords,
   onOpenSession,
   onDeleteSession,
   onNewChat,
@@ -257,6 +283,21 @@ export function ChatPanel({
   const hasPlan = tab.plan.length > 0 || tab.planMarkdown !== undefined;
   const shownRightPanel = rightPanel === "plan" && !hasPlan ? null : rightPanel;
 
+  // Worktrees are the main checkout's business: a linked worktree has no
+  // siblings of its own to list, and "what is running where?" is a
+  // question you ask from the root folder. The sidebar choice is
+  // app-wide (same reason as above), so a view left open on the folder
+  // tab falls back to Changes here rather than to an empty column — and
+  // comes back on its own when you return to the tab that has it.
+  const isWorktreeTab = tab.project.worktreeOf !== undefined;
+  const sidebarViews = isWorktreeTab ? WORKTREE_TAB_SIDEBAR_VIEWS : ALL_SIDEBAR_VIEWS;
+  // Extension views are never in the builtin list — they pass through,
+  // and a disabled extension's view shows an empty column instead.
+  const shownSidebarView =
+    sidebarView && !sidebarView.startsWith("ext:") && !sidebarViews.includes(sidebarView)
+      ? "changes"
+      : sidebarView;
+
   // Reaches memoized transcript rows — must not be a fresh arrow per render.
   const showPlan = useCallback(() => onSelectRightPanel("plan"), [onSelectRightPanel]);
   const closeRightPanel = useCallback(
@@ -335,22 +376,30 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
 
-  // Refresh the session list when the history view is open and the tab
-  // is idle (a finished turn may have added or updated a session), or
-  // whenever the user asks for it with the refresh button. The
-  // local listing paints first; the agent's native listing, when a live
-  // session can be asked, lands as a second update.
+  // Refresh the session list whenever the history view is open: on the
+  // tab going idle (a finished turn may have added or updated a
+  // session), and whenever the user asks with the refresh button.
+  //
+  // The local listing paints first and needs no agent, so it runs even
+  // mid-turn — gating the whole read on `busy` left the panel showing
+  // "no saved sessions" for as long as a session took to start, which is
+  // exactly when you go looking for one. Only the agent's native listing
+  // waits: asking it means talking to a process already mid-prompt, and
+  // it lands as a second update once the tab is idle.
   useEffect(() => {
-    if (sidebarView !== "history" || tab.busy) return;
+    if (shownSidebarView !== "history") return;
     let cancelled = false;
     let refreshed = false;
     setHistoryLoading(true);
-    loadHistory((merged) => {
-      if (cancelled) return;
-      refreshed = true;
-      setHistory(merged);
-      setHistoryLoading(false);
-    }).then((loaded) => {
+    const askAgent = tab.busy
+      ? undefined
+      : (merged: HistoryListing) => {
+          if (cancelled) return;
+          refreshed = true;
+          setHistory(merged);
+          setHistoryLoading(false);
+        };
+    loadHistory(askAgent).then((loaded) => {
       // The merged listing may already have landed — a stale local
       // paint must not overwrite it.
       if (cancelled || refreshed) return;
@@ -361,7 +410,7 @@ export function ChatPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarView, tab.busy, tab.project.id, historyRefreshKey]);
+  }, [shownSidebarView, tab.busy, tab.project.id, historyRefreshKey]);
 
   // Ctrl+` — the binding every editor uses for this. Registered here
   // rather than in a global map because the app has no shortcut registry
@@ -412,7 +461,11 @@ export function ChatPanel({
           </button>
         )}
         <div className="chat-panel__controls">
-          {currentBranch && (
+          {/* Only where the sidebar has no worktrees section to hold it.
+              A folder tab reaches them from there instead, which keeps a
+              header that shows nothing out of a crowded row — unlike the
+              branch chip beside it, this button names no state. */}
+          {currentBranch && isWorktreeTab && (
             <button
               type="button"
               className="branch-chip"
@@ -473,15 +526,16 @@ export function ChatPanel({
       </div>
       <div className="chat-panel__body">
         <ActivityBar
-          active={sidebarView}
+          active={shownSidebarView}
+          available={sidebarViews}
           panels={extensionPanels.panels}
           onSelect={onSelectSidebarView}
           onOpenSettings={onOpenSettings}
         />
-        {sidebarView && (
+        {shownSidebarView && (
           <>
             <div style={{ width: sidebar.width }} className="changes-container">
-              {sidebarView === "changes" && (
+              {shownSidebarView === "changes" && (
                 <ChangesPanel
                   changes={changes}
                   busy={tab.busy}
@@ -506,20 +560,35 @@ export function ChatPanel({
                   }
                 />
               )}
-              {sidebarView === "history" && (
+              {shownSidebarView === "worktrees" && (
+                <WorktreesPanel
+                  loadWorktrees={loadWorktrees}
+                  loadWorktreeSessions={loadWorktreeSessions}
+                  tabs={tabs}
+                  currentPath={tab.project.path}
+                  onOpen={onOpenWorktree}
+                  onNewWorktree={() => setWorktreePickerOpen(true)}
+                  onCheckRemoval={onCheckWorktreeRemoval}
+                  onRemove={onRemoveWorktree}
+                  onOpenSession={(item) => void onOpenSession(item)}
+                  onShowAllSessions={() => onSelectSidebarView("history")}
+                />
+              )}
+              {shownSidebarView === "history" && (
                 <HistoryPanel
                   sessions={history.sessions}
+                  loadKeywords={loadSessionKeywords}
                   native={history.native}
                   loading={historyLoading}
                   error={history.error}
                   activeSessionId={tab.historySessionId}
                   busy={tab.busy}
                   onOpen={(item) => void onOpenSession(item)}
-                  onDelete={(id) =>
-                    void onDeleteSession(id).then(() =>
+                  onDelete={(item) =>
+                    void onDeleteSession(item).then(() =>
                       setHistory({
                         ...history,
-                        sessions: history.sessions.filter((s) => s.id !== id),
+                        sessions: history.sessions.filter((s) => s.id !== item.id),
                       }),
                     )
                   }

@@ -11,6 +11,7 @@ import type {
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { branchListHint } from "./branchListHint";
+import { RemovalConfirm } from "./WorktreeRemoval";
 
 interface Props {
   /** The repo's checkouts, decorated with what's already open. */
@@ -20,7 +21,12 @@ interface Props {
   /** This tab's checked-out branch; "" on a detached HEAD. */
   currentBranch: string;
   onOpen: (path: string, mainPath: string) => void;
-  onCreate: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
+  /** `base` is where a brand-new branch starts; "" leaves it to git. */
+  onCreate: (
+    branch: string,
+    mode: WorktreeAddMode,
+    base: string,
+  ) => Promise<GitActionResult>;
   /** What removing this worktree would cost, asked when Remove is armed. */
   onCheckRemoval: (path: string) => Promise<RemovalCheck>;
   onRemove: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
@@ -40,7 +46,10 @@ type Row =
   // The branch this tab is on can't be checked out twice, so its row
   // forks a fresh branch off it instead — the parallel-work gesture.
   | { readonly kind: "fromCurrent"; readonly base: string; readonly name: string }
-  | { readonly kind: "newBranch"; readonly name: string };
+  | { readonly kind: "newBranch"; readonly name: string }
+  // The second step of "＋ Create branch … from …": which branch the new
+  // one starts at.
+  | { readonly kind: "base"; readonly branch: GitBranch };
 
 /** The rows to draw, plus what the branch section left out of them. */
 interface PickerRows {
@@ -73,6 +82,9 @@ export function WorktreePicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [armed, setArmed] = useState<Armed | null>(null);
+  // The new branch's name once "from…" has been asked, while the list
+  // below is showing branches to start it at. Null the rest of the time.
+  const [forking, setForking] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -91,8 +103,11 @@ export function WorktreePicker({
   }, []);
 
   const { rows, branchMatches } = useMemo(
-    () => buildRows(worktrees ?? [], branches, currentBranch, query),
-    [worktrees, branches, currentBranch, query],
+    () =>
+      forking === null
+        ? buildRows(worktrees ?? [], branches, currentBranch, query)
+        : buildBaseRows(branches, query),
+    [worktrees, branches, currentBranch, query, forking],
   );
   const hint = branchListHint(branchMatches);
   const mainPath = worktrees?.find((w) => w.main)?.path ?? worktrees?.[0]?.path ?? "";
@@ -124,19 +139,10 @@ export function WorktreePicker({
     setWorktrees(await loadWorktrees());
   };
 
-  const act = async (row: Row) => {
-    if (busy) return;
-    if (row.kind === "worktree") {
-      if (!row.worktree.current) onOpen(row.worktree.path, mainPath);
-      onClose();
-      return;
-    }
-    const branch = row.kind === "branch" ? row.branch.name : row.name;
-    const mode: WorktreeAddMode =
-      row.kind === "branch" ? (row.branch.remote ? "remote" : "existing") : "new";
+  const create = async (branch: string, mode: WorktreeAddMode, base: string) => {
     setBusy(true);
     setError(null);
-    const result = await onCreate(branch, mode);
+    const result = await onCreate(branch, mode, base);
     setBusy(false);
     if (result.ok) {
       onClose();
@@ -146,17 +152,60 @@ export function WorktreePicker({
     }
   };
 
+  /** Ask which branch `name` should start at, keeping it for the way back. */
+  const askForBase = (name: string) => {
+    setForking(name);
+    setQuery("");
+    setSelectedIndex(0);
+    setError(null);
+    // Clicking "from…" took the focus; the next thing typed is a branch
+    // search, so it has to land back in the box.
+    inputRef.current?.focus();
+  };
+
+  const cancelBase = () => {
+    setQuery(forking ?? "");
+    setForking(null);
+    setSelectedIndex(0);
+  };
+
+  const act = async (row: Row) => {
+    if (busy) return;
+    if (row.kind === "worktree") {
+      if (!row.worktree.current) onOpen(row.worktree.path, mainPath);
+      onClose();
+      return;
+    }
+    if (row.kind === "base") {
+      await create(forking ?? "", "new", row.branch.name);
+      return;
+    }
+    const branch = row.kind === "branch" ? row.branch.name : row.name;
+    const mode: WorktreeAddMode =
+      row.kind === "branch" ? (row.branch.remote ? "remote" : "existing") : "new";
+    // No base: git starts the branch at this tab's HEAD, which is what
+    // "＋ Create branch …" has always meant and what its row still says.
+    await create(branch, mode, "");
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
-      onClose();
+      // Escape backs out one step at a time: a mistyped base must not
+      // cost the name that was typed to get here.
+      if (forking !== null) cancelBase();
+      else onClose();
     } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const delta = e.key === "ArrowDown" ? 1 : -1;
       setSelectedIndex((selectedIndex + delta + rows.length) % Math.max(rows.length, 1));
     } else if (e.key === "Enter" && rows.length > 0) {
       e.preventDefault();
-      void act(rows[Math.min(selectedIndex, rows.length - 1)]);
+      const row = rows[Math.min(selectedIndex, rows.length - 1)];
+      // Shift+Enter, not an arrow key: the caret lives in this input, so
+      // Left and Right belong to the name being typed.
+      if (e.shiftKey && row.kind === "newBranch") askForBase(row.name);
+      else void act(row);
     }
   };
 
@@ -173,7 +222,11 @@ export function WorktreePicker({
         <input
           ref={inputRef}
           className="branch-picker__search"
-          placeholder="Search worktrees and branches…"
+          placeholder={
+            forking === null
+              ? "Search worktrees and branches…"
+              : `Start '${forking}' at… (Esc to go back)`
+          }
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -204,8 +257,23 @@ export function WorktreePicker({
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => void act(row)}
                 >
-                  <RowLabel row={row} />
+                  <RowLabel row={row} currentBranch={currentBranch} />
                   <RowBadges row={row} />
+                  {row.kind === "newBranch" && (
+                    <button
+                      type="button"
+                      className="worktree-picker__base"
+                      title={`Start '${row.name}' at a branch other than ${
+                        currentBranch || "HEAD"
+                      } (Shift+Enter)`}
+                      onClick={(e) => {
+                        e.stopPropagation(); // the row itself creates it
+                        askForBase(row.name);
+                      }}
+                    >
+                      from…
+                    </button>
+                  )}
                   {row.kind === "worktree" &&
                     !row.worktree.main &&
                     !row.worktree.current && (
@@ -297,6 +365,19 @@ function buildRows(
   return { rows, branchMatches };
 }
 
+/**
+ * The second step's rows: every branch the new one could start at, and
+ * nothing else. Bounded by the same `filterBranches` as the first step —
+ * a base list is the same thousands of refs.
+ */
+function buildBaseRows(branches: readonly GitBranch[], query: string): PickerRows {
+  const branchMatches = filterBranches(branches, query);
+  return {
+    rows: branchMatches.shown.map((branch) => ({ kind: "base", branch }) as Row),
+    branchMatches,
+  };
+}
+
 /** Enough validation for a picker; git has the final word. */
 function validBranchName(name: string): boolean {
   return name.length > 0 && !name.startsWith("-") && !/\s/.test(name);
@@ -304,6 +385,7 @@ function validBranchName(name: string): boolean {
 
 function sectionTitle(kind: Row["kind"], previous: Row["kind"] | null): string | null {
   if (kind === "worktree") return "Worktrees";
+  if (kind === "base") return "Start the branch at";
   if (previous === "worktree" || previous === null) return "New worktree";
   return null; // newBranch continues the "New worktree" section
 }
@@ -312,10 +394,11 @@ function rowKey(row: Row): string {
   if (row.kind === "worktree") return `w:${row.worktree.path}`;
   if (row.kind === "branch") return `b:${row.branch.name}`;
   if (row.kind === "fromCurrent") return `c:${row.name}`;
+  if (row.kind === "base") return `s:${row.branch.name}`;
   return "new";
 }
 
-function RowLabel({ row }: { row: Row }) {
+function RowLabel({ row, currentBranch }: { row: Row; currentBranch: string }) {
   if (row.kind === "worktree") {
     const { worktree } = row;
     const name = worktree.branch || `detached @ ${worktree.head.slice(0, 7)}`;
@@ -346,52 +429,21 @@ function RowLabel({ row }: { row: Row }) {
       </span>
     );
   }
+  if (row.kind === "base") {
+    return <span className="branch-picker__name">{row.branch.name}</span>;
+  }
+  // Where the branch will start, said out loud: it is this tab's HEAD
+  // unless "from…" is used, and a start point nobody named is the one
+  // that surprises people.
   return (
-    <span className="branch-picker__name">＋ Create branch "{row.name}" + worktree</span>
-  );
-}
-
-/**
- * The second half of the two-step: what removal would cost, and the
- * button that does it. A worktree with uncommitted work says so in the
- * button itself — "Delete 3 files" is harder to click by reflex than a
- * bare "Remove", which is the point.
- */
-function RemovalConfirm({
-  check,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  check: RemovalCheck;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const blocked = check.blockers.some(
-    (b) => b.includes("main checkout") || b.startsWith("Locked") || b.includes("Not a"),
-  );
-  return (
-    <div className="worktree-picker__confirm">
-      <span className="worktree-picker__confirm-text">
-        {check.blockers.length > 0
-          ? check.blockers.join(" ")
-          : "Deletes the folder. The branch and its commits stay."}
+    <span className="worktree-picker__label">
+      <span className="branch-picker__name">
+        ＋ Create branch "{row.name}" + worktree
       </span>
-      <button type="button" className="worktree-picker__confirm-no" onClick={onCancel}>
-        Cancel
-      </button>
-      {!blocked && (
-        <button
-          type="button"
-          className="worktree-picker__confirm-yes"
-          disabled={busy}
-          onClick={onConfirm}
-        >
-          {check.needsForce ? "Delete anyway" : "Remove"}
-        </button>
+      {currentBranch && (
+        <span className="worktree-picker__path">from {currentBranch}</span>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -412,6 +464,14 @@ function RowBadges({ row }: { row: Row }) {
   }
   if (row.kind === "branch" && row.branch.remote) {
     return <span className="branch-picker__remote">remote</span>;
+  }
+  if (row.kind === "base") {
+    return (
+      <span className="worktree-picker__badges">
+        {row.branch.current && <span className="branch-picker__current">current</span>}
+        {row.branch.remote && <span className="branch-picker__remote">remote</span>}
+      </span>
+    );
   }
   return null;
 }

@@ -39,6 +39,7 @@ import type {
 } from "../../core/ports/shellPort";
 import type {
   PersistedTranscript,
+  SessionKeywords,
   TranscriptMeta,
   TranscriptStore,
 } from "../../core/ports/transcriptStore";
@@ -446,6 +447,7 @@ export class DemoGit implements GitPort {
     branch: string,
     _mode: WorktreeAddMode,
     _remote: string,
+    _base: string,
   ): Promise<string> {
     this.worktreeList.push({
       path: worktreePath,
@@ -543,11 +545,18 @@ export class DemoWorktreeProvisioning implements WorktreeProvisioning {
 
 export class DemoTranscriptStore implements TranscriptStore {
   private transcripts = new Map<string, PersistedTranscript>();
-  async save(_p: string, transcript: PersistedTranscript) {
+  /** Which folder each transcript belongs to. The real store keeps them
+   *  in a per-project directory; history asks it about one checkout at a
+   *  time, so a store that answered with all of them would make every
+   *  session look like it happened everywhere. */
+  private folders = new Map<string, string>();
+  async save(projectPath: string, transcript: PersistedTranscript) {
     this.transcripts.set(transcript.id, transcript);
+    this.folders.set(transcript.id, projectPath);
   }
-  async list(): Promise<TranscriptMeta[]> {
+  async list(projectPath: string): Promise<TranscriptMeta[]> {
     return [...this.transcripts.values()]
+      .filter((t) => this.folders.get(t.id) === projectPath)
       .map((t) => ({
         id: t.id,
         title: t.title,
@@ -560,11 +569,34 @@ export class DemoTranscriptStore implements TranscriptStore {
   async listExternal() {
     return []; // no vendor store exists in a browser
   }
+  /**
+   * A deliberately naive stand-in for the real extraction, which is
+   * Rust's (`agent_core::session_keywords`) and reads files this build
+   * has none of: the longest handful of distinct words. Enough for the
+   * browser demo to show keyword search working, and not worth a second
+   * copy of the ranking rules to do better.
+   */
+  async keywords(projectPath: string): Promise<SessionKeywords[]> {
+    return [...this.transcripts.values()]
+      .filter((t) => this.folders.get(t.id) === projectPath)
+      .map((t) => ({
+        id: t.id,
+        keywords: [
+          ...new Set(
+            `${t.title} ${t.messages.map((m) => m.text).join(" ")}`
+              .toLowerCase()
+              .split(/[^\p{L}\p{N}]+/u)
+              .filter((word) => word.length > 3),
+          ),
+        ].slice(0, 40),
+      }));
+  }
   async load(_p: string, id: string) {
     return this.transcripts.get(id) ?? null;
   }
   async remove(_p: string, id: string) {
     this.transcripts.delete(id);
+    this.folders.delete(id);
   }
   async readPlanFile(_projectPath: string, _path: string): Promise<string | null> {
     return "# Demo plan\n\n1. Step one\n2. Step two";

@@ -87,6 +87,7 @@ export class TauriGitStatus implements GitPort {
     branch: string,
     mode: WorktreeAddMode,
     remote: string,
+    base: string,
   ): Promise<string> {
     return invoke<string>("git_worktree_add", {
       projectPath,
@@ -94,6 +95,7 @@ export class TauriGitStatus implements GitPort {
       branch,
       mode,
       remote,
+      base,
     });
   }
 

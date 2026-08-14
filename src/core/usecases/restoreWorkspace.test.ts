@@ -234,3 +234,101 @@ describe("RestoreWorkspace projects", () => {
     );
   });
 });
+
+describe("RestoreWorkspace tab names and colours", () => {
+  it("brings a tab's name and colour back, still naming the folder from the path", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          label: "auth rewrite",
+          color: "teal",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.label).toBe("auth rewrite");
+    expect(state.tabs[0].project.color).toBe("teal");
+    // The whole reason `label` is its own field: `name` is recomputed
+    // from the path on every restore and would have eaten it.
+    expect(state.tabs[0].project.name).toBe("alpha");
+  });
+
+  it("leaves a tab uncoloured when the file names a colour this build lost", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          color: "chartreuse",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.color).toBeUndefined();
+  });
+
+  it("falls back to the folder name when the file has an empty label", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          label: "",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.label).toBeUndefined();
+    expect(state.tabs[0].project.name).toBe("alpha");
+  });
+
+  it("loads a workspace written before tabs could be named", async () => {
+    const state = await restore({
+      projects: [
+        { id: "t1", path: "/work/alpha", provider: "claude", providerSessions: {} },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.label).toBeUndefined();
+    expect(state.tabs[0].project.color).toBeUndefined();
+    expect(state.tabs[0].project.name).toBe("alpha");
+  });
+
+  it("carries a name and colour through a save and back", async () => {
+    // The round trip, not the intermediate shape: this fails if either
+    // toPersisted or restoreWorkspace forgets a field.
+    const store = new Store();
+    store.dispatch({
+      type: "tab/opened",
+      project: {
+        id: "t1",
+        path: "/work/alpha",
+        name: "alpha",
+        provider: "claude",
+        mode: "agent",
+        permission: "manual",
+        verbose: true,
+        providerSessions: {},
+        label: "auth rewrite",
+        color: "violet",
+      },
+    });
+
+    const state = await restore(toPersisted(store.getState()));
+
+    expect(state.tabs[0].project.label).toBe("auth rewrite");
+    expect(state.tabs[0].project.color).toBe("violet");
+  });
+});

@@ -89,6 +89,61 @@ pub async fn list_sessions(
     .await
 }
 
+/// One session's themes, for the history panel's search.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionKeywords {
+    pub id: String,
+    pub keywords: Vec<String>,
+}
+
+/// What every session in this project was about, in a few words each.
+///
+/// Built on demand — the first time a search runs — and cached by the
+/// caller for the rest of the session. It costs the same walk
+/// `list_sessions` already does; the difference is that this one keeps
+/// the message text long enough to count it, then throws away everything
+/// but the terms.
+///
+/// Only the terms cross the IPC boundary, never the conversation: see
+/// ADR-0012 for why that line is drawn where it is.
+#[tauri::command]
+pub async fn session_keywords(
+    app: AppHandle,
+    project_path: String,
+) -> Result<Vec<SessionKeywords>, String> {
+    crate::commands::run_blocking(move || {
+        let dir = sessions_dir(&app, &project_path).map_err(|e| e.to_string())?;
+        let Ok(entries) = fs::read_dir(dir) else {
+            return Ok(Vec::new()); // no sessions yet is not a failure
+        };
+        Ok(entries.flatten().filter_map(|e| read_keywords(&e.path())).collect())
+    })
+    .await
+}
+
+/// The themes of one transcript, or `None` when the file is not one.
+/// Defensive like `read_meta`: the schema is owned by the frontend core,
+/// so anything unexpected is skipped rather than raised.
+fn read_keywords(path: &std::path::Path) -> Option<SessionKeywords> {
+    if path.extension()?.to_str()? != "json" {
+        return None;
+    }
+    let value: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    let id = value.get("id")?.as_str()?.to_owned();
+    let messages = value.get("messages")?.as_array()?;
+    // The title is worth counting too, and worth counting FIRST: it is
+    // the opening prompt, which is where a conversation says what it is
+    // for in the user's own words.
+    let title = value.get("title").and_then(Value::as_str).unwrap_or_default();
+    let texts = std::iter::once(title)
+        .chain(messages.iter().filter_map(|m| m.get("text").and_then(Value::as_str)));
+    Some(SessionKeywords {
+        id,
+        keywords: agent_core::session_keywords::keywords(texts),
+    })
+}
+
 #[tauri::command]
 pub async fn load_session(
     app: AppHandle,
