@@ -278,6 +278,130 @@ describe("closing a terminal", () => {
   });
 });
 
+describe("running a line typed at the prompt", () => {
+  const open = (shells: Shells, tabId: string) =>
+    shells.open(tabId, {
+      size: SIZE,
+      onOutput: () => undefined,
+      onSuggest: () => undefined,
+    });
+
+  it("types it into the terminal the user is looking at", async () => {
+    const { port, shells, tabId } = setUp();
+    await open(shells, tabId);
+
+    shells.runLine(tabId, "git status");
+
+    expect(port.written).toEqual([{ sessionId: "shell-1", data: "git status\r" }]);
+  });
+
+  it("brings that terminal forward, since the output is the point", async () => {
+    const { store, shells, tabId } = setUp();
+    await open(shells, tabId);
+    await open(shells, tabId);
+    shells.select(tabId, "shell-1");
+
+    shells.runLine(tabId, "git status");
+
+    expect(activeShellOf(store, tabId)).toBe("shell-1");
+  });
+
+  it("holds it back until there is a terminal to run it in", async () => {
+    const { store, port, shells, tabId } = setUp();
+
+    shells.runLine(tabId, "npm test");
+
+    expect(port.written).toEqual([]);
+    expect(tabById(store.getState(), tabId)?.pendingShellLine).toBe("npm test");
+  });
+
+  it("runs the held line in the next terminal that opens", async () => {
+    const { store, port, shells, tabId } = setUp();
+    shells.runLine(tabId, "npm test");
+
+    await open(shells, tabId);
+
+    expect(port.written).toEqual([{ sessionId: "shell-1", data: "npm test\r" }]);
+    expect(tabById(store.getState(), tabId)?.pendingShellLine).toBeUndefined();
+  });
+
+  it("keeps it out of a terminal that is busy — a server would eat it", async () => {
+    const { store, port, shells, tabId } = setUp();
+    await open(shells, tabId);
+    shells.write("shell-1", "npm run dev\r"); // that terminal is taken now
+
+    shells.runLine(tabId, "git status");
+
+    expect(port.written.map((w) => w.data)).toEqual(["npm run dev\r"]);
+    expect(tabById(store.getState(), tabId)?.pendingShellLine).toBe("git status");
+  });
+
+  it("prefers a free terminal over the busy one in front", async () => {
+    const { store, port, shells, tabId } = setUp();
+    await open(shells, tabId);
+    await open(shells, tabId);
+    shells.select(tabId, "shell-2");
+    shells.write("shell-2", "npm run dev\r");
+
+    shells.runLine(tabId, "git status");
+
+    expect(port.written.at(-1)).toEqual({ sessionId: "shell-1", data: "git status\r" });
+    expect(activeShellOf(store, tabId)).toBe("shell-1");
+  });
+
+  it("will not type into a shell that has exited", async () => {
+    const { store, port, shells, tabId } = setUp();
+    await open(shells, tabId);
+    port.emitExit("shell-1", 0);
+
+    shells.runLine(tabId, "git status");
+
+    expect(port.written).toEqual([]);
+    expect(tabById(store.getState(), tabId)?.pendingShellLine).toBe("git status");
+  });
+
+  it("learns the command, like any other the terminal has run", async () => {
+    const { shells, tabId } = setUp();
+    const spy = suggestionSpy();
+    await shells.open(
+      tabId,
+      spy.request((s) => spy.seen.push(s)),
+    );
+
+    shells.runLine(tabId, "cargo clippy");
+    shells.write("shell-1", "car");
+
+    expect(spy.latest()).toBe("go clippy");
+  });
+
+  it("keeps it waiting when the terminal that opened was dead on arrival", async () => {
+    const { store, port, shells, tabId } = setUp();
+    shells.runLine(tabId, "npm test");
+    port.exitDuringOpen = 127; // a shell path that does not exist
+
+    await open(shells, tabId);
+
+    expect(port.written).toEqual([]);
+    expect(tabById(store.getState(), tabId)?.pendingShellLine).toBe("npm test");
+  });
+
+  it("has nothing to run for a bare bang", async () => {
+    const { store, port, shells, tabId } = setUp();
+    await open(shells, tabId);
+
+    shells.runLine(tabId, "");
+
+    expect(port.written).toEqual([]);
+    expect(tabById(store.getState(), tabId)?.pendingShellLine).toBeUndefined();
+  });
+
+  it("ignores a tab that is not open", () => {
+    const { store, shells } = setUp();
+    shells.runLine("gone", "git status");
+    expect(store.getState().tabs).toHaveLength(1);
+  });
+});
+
 describe("suggesting the next command", () => {
   const past = ["git status", "npm run build", "npm test", "npm test", "npm test"];
 

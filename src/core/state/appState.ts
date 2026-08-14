@@ -137,6 +137,14 @@ export interface TabState {
    */
   readonly shells: readonly ShellSession[];
   readonly activeShellId?: string;
+  /**
+   * A "!" line from the composer that had no free terminal to run in —
+   * either this project has none open, or a build is holding every one
+   * of them. Kept so the next terminal to open runs it, and so the
+   * panel knows to open one: the alternative is a command that
+   * disappears because a dev server happened to own the only shell.
+   */
+  readonly pendingShellLine?: string;
 }
 
 /**
@@ -353,7 +361,11 @@ export type Action =
   /** The shell died on its own — a `exit` typed, or a crash. */
   | { type: "shell/exited"; tabId: string; sessionId: string; code: number | null }
   /** The user dismissed the terminal; the pty is killed either way. */
-  | { type: "shell/closed"; tabId: string; sessionId: string };
+  | { type: "shell/closed"; tabId: string; sessionId: string }
+  /** A "!" line is waiting for a terminal with a free prompt. */
+  | { type: "shell/lineParked"; tabId: string; line: string }
+  /** It found one and was typed into it. */
+  | { type: "shell/lineRan"; tabId: string };
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -835,6 +847,15 @@ export function reduce(state: AppState, action: Action): AppState {
           ...(selected === undefined ? {} : { activeShellId: selected }),
         };
       });
+
+    case "shell/lineParked":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        pendingShellLine: action.line,
+      }));
+
+    case "shell/lineRan":
+      return mapTab(state, action.tabId, ({ pendingShellLine: _, ...tab }) => tab);
   }
 }
 

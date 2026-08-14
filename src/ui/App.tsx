@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
 import type { ProviderId } from "../core/entities/provider";
+import { isShellLine, shellCommand } from "../core/entities/shellLine";
 import { themeById } from "../core/entities/theme";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import type { ShellSize } from "../core/ports/shellPort";
@@ -218,9 +219,17 @@ export function App({ context }: { context: AppContext }) {
           onOpenSession={(item) => context.sessionHistory.open(tab.project.id, item)}
           onDeleteSession={(item) => context.sessionHistory.remove(tab.project.id, item)}
           onNewChat={() => context.sessionHistory.startNew(tab.project.id)}
-          onSend={(prompt, attachments) =>
-            void context.sendPrompt.execute(tab.project.id, prompt, attachments)
-          }
+          onSend={(prompt, attachments) => {
+            // A "!" line was never meant for the agent: it runs in this
+            // project's own terminal, which is also where its output
+            // belongs — so show the panel on the way.
+            if (isShellLine(prompt)) {
+              setRightPanel("terminal");
+              context.shells.runLine(tab.project.id, shellCommand(prompt));
+              return;
+            }
+            void context.sendPrompt.execute(tab.project.id, prompt, attachments);
+          }}
           onDraftChange={(draft, attachments) =>
             context.editDraft.execute(tab.project.id, draft, attachments)
           }

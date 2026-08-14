@@ -628,7 +628,7 @@ export function ChatPanel({
             onDraftChange={onDraftChange}
             queued={tab.queued}
             onRemoveQueued={onRemoveQueued}
-            placeholder={`Ask ${providerName} about ${tab.project.name}… (/ for commands, @ for files)`}
+            placeholder={`Ask ${providerName} about ${tab.project.name}… (/ commands, @ files, ! terminal)`}
             commands={commands}
             provider={tab.project.provider}
             mode={tab.project.mode}
@@ -677,6 +677,7 @@ export function ChatPanel({
           <TerminalPanel
             sessions={tab.shells}
             activeShellId={tab.activeShellId}
+            awaitingLine={tab.pendingShellLine !== undefined}
             width={terminalPanel.width}
             fontSize={shells.fontSize}
             theme={shells.theme}

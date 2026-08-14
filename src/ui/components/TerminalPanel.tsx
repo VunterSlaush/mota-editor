@@ -14,6 +14,8 @@ import { createXtermSession } from "../terminals/xtermSession";
 interface Props {
   sessions: readonly ShellSession[];
   activeShellId?: string;
+  /** A "!" line from the composer is waiting for a free prompt. */
+  awaitingLine: boolean;
   /** Set by the drag handle on the panel's left edge. */
   width: number;
   fontSize: number;
@@ -42,6 +44,7 @@ const UNMEASURED = { cols: 80, rows: 24 };
 export function TerminalPanel({
   sessions,
   activeShellId,
+  awaitingLine,
   width,
   fontSize,
   theme,
@@ -109,6 +112,23 @@ export function TerminalPanel({
     // Only on mount: later emptiness means the user closed the last one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A "!" line is parked because every terminal here is busy or dead.
+  // Open one for it — the use case runs it as the shell comes up. Racing
+  // the mount effect above is harmless: `openTerminal` refuses to start
+  // a second shell while the first is still opening. Once per parked
+  // line, though: a shell that cannot spawn leaves the line waiting, and
+  // that must not become one spawn attempt per re-render.
+  const askedForOne = useRef(false);
+  useEffect(() => {
+    if (!awaitingLine) {
+      askedForOne.current = false;
+      return;
+    }
+    if (askedForOne.current) return;
+    askedForOne.current = true;
+    void openTerminal();
+  }, [awaitingLine, openTerminal]);
 
   // Show whichever terminal is selected, wherever it was last rendered.
   useEffect(() => {

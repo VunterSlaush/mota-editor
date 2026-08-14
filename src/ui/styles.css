@@ -4071,6 +4071,12 @@ body {
   font-weight: 600;
 }
 
+/* A "!" line is bound for the shell, not the agent — said in the colour
+   tool output already uses. Colour only, for the reason below. */
+.composer-card__highlight--shell {
+  color: var(--tool);
+}
+
 /* In the composer the token must NOT change text metrics: the caret is
    drawn by the transparent textarea over this very text in regular
    weight, and a bolder glyph is a wider glyph — every character after a

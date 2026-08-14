@@ -28,6 +28,7 @@ import {
 } from "../../core/entities/fileMention";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
+import { isShellLine } from "../../core/entities/shellLine";
 import type { TabState } from "../../core/state/appState";
 import { fileName } from "../fileName";
 import { CommandPalette } from "./CommandPalette";
@@ -198,6 +199,11 @@ export function Composer({
     !menuDismissed && commandToken !== null
       ? filterCommands(commands, commandToken ?? "")
       : [];
+
+  // A "!" line goes to the user's shell, not to the agent. Said in the
+  // colour tool output is written in, so which of the two is about to
+  // read this is visible before Enter rather than after it.
+  const shellMode = isShellLine(draft);
 
   // The "@..." word being typed, if any — the file menu's trigger.
   const mention = useMemo(() => mentionToken(draft), [draft]);
@@ -440,7 +446,13 @@ export function Composer({
               is drawn again underneath and the textarea made
               transparent. The two layers share every metric that affects
               wrapping (see styles.css) and scroll together. */}
-          <div className="composer-card__highlight" ref={highlightRef} aria-hidden="true">
+          <div
+            className={`composer-card__highlight ${
+              shellMode ? "composer-card__highlight--shell" : ""
+            }`}
+            ref={highlightRef}
+            aria-hidden="true"
+          >
             <CommandText text={draft} commands={commandNameSet} />
             {"\n"}
           </div>
@@ -526,8 +538,8 @@ export function Composer({
               <button
                 type="button"
                 className="send-button"
-                title="Send"
-                aria-label="Send"
+                title={shellMode ? "Run in terminal" : "Send"}
+                aria-label={shellMode ? "Run in terminal" : "Send"}
                 disabled={draft.trim() === "" && attachments.length === 0}
                 onClick={send}
               >
