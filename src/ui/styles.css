@@ -4195,6 +4195,13 @@ body {
   flex: 1;
   min-width: 0;
   resize: none;
+  /* Never sideways. The text soft-wraps, so there is nothing out to the
+     right to reach, and the highlight layer underneath only follows
+     scrollTop — a horizontal scroll would slide the two apart. Left to
+     the UA's `overflow-x: auto` it does not stay theoretical: interface
+     zoom measures the inner text block wider than the box it sits in,
+     and a scrollbar appears across an empty composer. */
+  overflow-x: hidden;
   background: transparent;
   border: none;
   /* The text is drawn by the highlight layer underneath; only the caret
