@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
 import { extensionPanels as panelsOfExtensions } from "../core/entities/extension";
+import { tabLabel } from "../core/entities/project";
 import type { ProviderId } from "../core/entities/provider";
+import { isShellLine, shellCommand } from "../core/entities/shellLine";
 import { themeById } from "../core/entities/theme";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import type { ShellSize } from "../core/ports/shellPort";
+import type { TabState } from "../core/state/appState";
 import { activeTab } from "../core/state/appState";
 import type { GitChanges } from "../core/usecases/loadGitChanges";
 import type { OpenShellRequest } from "../core/usecases/shells";
@@ -12,6 +15,7 @@ import type { AppContext } from "../wiring/context";
 import type { SidebarView } from "./components/ActivityBar";
 import type { RightPanel, ShellsView } from "./components/ChatPanel";
 import { ChatPanel } from "./components/ChatPanel";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { EmptyState } from "./components/EmptyState";
 import type { ExtensionPanelsView } from "./components/ExtensionPanel";
 import { SettingsModal } from "./components/SettingsModal";
@@ -32,6 +36,10 @@ export function App({ context }: { context: AppContext }) {
   // be showing when you come back from another project.
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The tab a close is waiting on an answer about, and the tabs a quit
+  // is. Null in both cases means nothing was asked.
+  const [closingTabId, setClosingTabId] = useState<string | null>(null);
+  const [quitBlockedBy, setQuitBlockedBy] = useState<readonly TabState[] | null>(null);
   const [supportsCow, setSupportsCow] = useState<boolean | null>(null);
   // Last-known git changes per project. ChatPanel remounts on every tab
   // switch (it is keyed by project id), so its own state starts empty;
@@ -40,6 +48,11 @@ export function App({ context }: { context: AppContext }) {
   // state: a cache write must not re-render the app.
   const gitChangesCache = useRef(new Map<string, GitChanges>());
   const projectPath = tab?.project.path ?? "";
+  // Undefined once the tab is gone, so a tab that closes another way
+  // takes its own question with it.
+  const closingTab = closingTabId
+    ? state.tabs.find((t) => t.project.id === closingTabId)
+    : undefined;
 
   // Asked once per project, and only lazily: the probe writes a file to
   // find out, so it is not something to do on every settings render.
@@ -102,6 +115,13 @@ export function App({ context }: { context: AppContext }) {
     void context.appBadge.show(badge);
   }, [context, badge]);
 
+  // The window's close button, from now on, comes here first. Whether it
+  // is allowed through is the use case's call — this only paints the
+  // question when the answer is "ask".
+  useEffect(() => {
+    context.quitApp.guard(setQuitBlockedBy);
+  }, [context]);
+
   // Ctrl+= / Ctrl+- / Ctrl+0, wherever the caret is: zoom belongs to the
   // window, so a composer with focus must not swallow it.
   useEffect(() => {
@@ -162,6 +182,15 @@ export function App({ context }: { context: AppContext }) {
     [context, activeProjectId],
   );
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const requestCloseTab = useCallback(
+    (tabId: string) => {
+      if (context.closeProject.needsConfirmation(tabId)) setClosingTabId(tabId);
+      else void context.closeProject.execute(tabId);
+    },
+    [context],
+  );
+  const cancelCloseTab = useCallback(() => setClosingTabId(null), []);
+  const cancelQuit = useCallback(() => setQuitBlockedBy(null), []);
 
   // Stable identity: these reach a component that creates and holds live
   // xterm instances in effects, and a fresh object every render would
@@ -178,6 +207,7 @@ export function App({ context }: { context: AppContext }) {
         context.shells.resize(sessionId, size),
       select: (sessionId: string) => context.shells.select(activeProjectId, sessionId),
       close: (sessionId: string) => void context.shells.close(activeProjectId, sessionId),
+      suggestLine: (prefix: string) => context.shells.suggestFor(prefix),
     }),
     [context, activeProjectId, terminalFontSize, theme],
   );
@@ -218,7 +248,7 @@ export function App({ context }: { context: AppContext }) {
         tabs={state.tabs}
         activeTabId={state.activeTabId}
         onSelect={(tabId) => void context.switchTab.execute(tabId)}
-        onClose={(tabId) => void context.closeProject.execute(tabId)}
+        onClose={requestCloseTab}
         onReorder={(tabId, toIndex) => void context.reorderTabs.execute(tabId, toIndex)}
         onOpenProject={() => void context.openProject.execute()}
         onRename={(tabId, label) => void context.renameTab.execute(tabId, label)}
@@ -254,9 +284,17 @@ export function App({ context }: { context: AppContext }) {
           onOpenSession={(item) => context.sessionHistory.open(tab.project.id, item)}
           onDeleteSession={(item) => context.sessionHistory.remove(tab.project.id, item)}
           onNewChat={() => context.sessionHistory.startNew(tab.project.id)}
-          onSend={(prompt, attachments) =>
-            void context.sendPrompt.execute(tab.project.id, prompt, attachments)
-          }
+          onSend={(prompt, attachments) => {
+            // A "!" line was never meant for the agent: it runs in this
+            // project's own terminal, which is also where its output
+            // belongs — so show the panel on the way.
+            if (isShellLine(prompt)) {
+              setRightPanel("terminal");
+              context.shells.runLine(tab.project.id, shellCommand(prompt));
+              return;
+            }
+            void context.sendPrompt.execute(tab.project.id, prompt, attachments);
+          }}
           onDraftChange={(draft, attachments) =>
             context.editDraft.execute(tab.project.id, draft, attachments)
           }
@@ -370,6 +408,38 @@ export function App({ context }: { context: AppContext }) {
           supportsCow={supportsCow}
           loadFolders={projectPath ? loadFolders : undefined}
           onClose={closeSettings}
+        />
+      )}
+      {closingTab && (
+        <ConfirmDialog
+          title={`${tabLabel(closingTab.project)} is still working`}
+          message="Closing this tab stops the turn the agent is running. It can't be resumed afterwards — the conversation stays in History, but the work in flight is lost."
+          confirmLabel="Close anyway"
+          onCancel={cancelCloseTab}
+          onConfirm={() => {
+            setClosingTabId(null);
+            void context.closeProject.execute(closingTab.project.id);
+          }}
+        />
+      )}
+      {quitBlockedBy && quitBlockedBy.length > 0 && (
+        <ConfirmDialog
+          title={
+            quitBlockedBy.length === 1
+              ? "A tab is still working"
+              : `${quitBlockedBy.length} tabs are still working`
+          }
+          message="Quitting stops every turn the agents are running. They can't be resumed afterwards — the conversations stay in History, but the work in flight is lost."
+          detail={quitBlockedBy.map((t) => ({
+            id: t.project.id,
+            label: tabLabel(t.project),
+          }))}
+          confirmLabel="Quit anyway"
+          onCancel={cancelQuit}
+          onConfirm={() => {
+            setQuitBlockedBy(null);
+            void context.quitApp.execute();
+          }}
         />
       )}
       {/* Last, so it draws over everything it can describe. */}

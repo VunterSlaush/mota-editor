@@ -53,7 +53,7 @@ export class SessionStatus {
       });
     }
     if (event.kind === "modeChanged") {
-      const mapped = modeFromAgentModeId(event.modeId);
+      const mapped = modeFromAgentModeId(event.modeId, tab.project.mode);
       if (mapped && mapped !== tab.project.mode) {
         this.store.dispatch({ type: "tab/modeChanged", tabId, mode: mapped });
       }

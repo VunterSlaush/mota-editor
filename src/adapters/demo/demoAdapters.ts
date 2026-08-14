@@ -43,6 +43,7 @@ import type {
   TranscriptMeta,
   TranscriptStore,
 } from "../../core/ports/transcriptStore";
+import type { WindowPort } from "../../core/ports/windowPort";
 import type {
   FilePicker,
   FolderPicker,
@@ -119,7 +120,11 @@ export class DemoAgentGateway implements AgentGateway {
     }
 
     const wantsPlan = /\bplan\b/i.test(request.prompt) || request.mode === "plan";
-    const wantsPermission = /\b(run|delete|install|deploy)\b/i.test(request.prompt);
+    // Ask reads and answers. A demo agent that offered to run the tests
+    // would be showing behaviour the real one is sandboxed out of.
+    const readOnly = request.mode === "ask";
+    const wantsPermission =
+      !readOnly && /\b(run|delete|install|deploy)\b/i.test(request.prompt);
     const wantsQuestion = /\b(ask|choose|which|prefer)\b/i.test(request.prompt);
 
     for (const text of ["Let me look at ", "the project first."]) {
@@ -229,11 +234,15 @@ export class DemoAgentGateway implements AgentGateway {
       });
     }
 
-    const reply =
-      "Here's what I found:\n\n" +
-      "| File | Status |\n|---|---|\n| `src/main.ts` | ok |\n\n" +
-      "- The setup looks **good**\n- I adjusted one detail\n\n" +
-      '```ts\nconsole.log("done");\n```';
+    const reply = readOnly
+      ? "Here's what I found:\n\n" +
+        "| File | Role |\n|---|---|\n| `src/main.ts` | reads the config, then boots |\n\n" +
+        "- Nothing was changed — this is **Ask** mode\n\n" +
+        '```ts\nconsole.log("done");\n```'
+      : "Here's what I found:\n\n" +
+        "| File | Status |\n|---|---|\n| `src/main.ts` | ok |\n\n" +
+        "- The setup looks **good**\n- I adjusted one detail\n\n" +
+        '```ts\nconsole.log("done");\n```';
     for (const chunk of reply.match(/.{1,14}/gs) ?? []) {
       await delay(35);
       emit({ kind: "assistantDelta", text: chunk });
@@ -1101,6 +1110,17 @@ export class DemoZoom implements ZoomPort {
   async apply(factor: number): Promise<void> {
     document.documentElement.style.zoom = String(factor);
   }
+}
+
+/**
+ * A browser tab's close is the browser's to grant, not ours: the page
+ * gets `beforeunload` and a generic dialog it cannot word, and nothing
+ * else. So the preview simply lets the tab go — there is no real agent
+ * turn behind it to lose.
+ */
+export class DemoWindow implements WindowPort {
+  onCloseRequested(): void {}
+  async close(): Promise<void> {}
 }
 
 /**

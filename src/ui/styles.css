@@ -2801,6 +2801,65 @@ body {
   padding-top: 0;
 }
 
+/* The app's one "are you sure?" — see ConfirmDialog.tsx. */
+.confirm-dialog {
+  width: 420px;
+  max-width: 90vw;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  padding: 18px 20px 14px;
+}
+
+.confirm-dialog__title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.confirm-dialog__message {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.confirm-dialog__detail {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.confirm-dialog__cancel,
+.confirm-dialog__confirm {
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+.confirm-dialog__confirm {
+  border-color: var(--error);
+  color: var(--error);
+}
+
 .branch-picker {
   width: 420px;
   max-width: 90vw;
@@ -4233,6 +4292,19 @@ body {
 .cmd-token {
   color: var(--accent);
   font-weight: 600;
+}
+
+/* A "!" line is bound for the shell, not the agent — said in the colour
+   tool output already uses. Colour only, for the reason below. */
+.composer-card__highlight--shell {
+  color: var(--tool);
+}
+
+/* The guessed rest of a "!" line. Dimmer than the line itself, and past
+   the caret rather than under it — so unlike the text before it, this is
+   the one part of the layer the textarea is not drawing over. */
+.composer-card__ghost {
+  color: var(--text-dim);
 }
 
 /* In the composer the token must NOT change text metrics: the caret is

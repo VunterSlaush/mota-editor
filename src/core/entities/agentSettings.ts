@@ -3,7 +3,7 @@ import type { ProviderId } from "./provider";
 /**
  * Entities layer — per-tab agent behavior settings.
  */
-export type AgentMode = "agent" | "plan" | "debug";
+export type AgentMode = "agent" | "plan" | "ask" | "debug";
 export type PermissionPolicy = "manual" | "auto" | "bypass";
 
 export interface OptionDescriptor<T extends string> {
@@ -22,6 +22,11 @@ export const MODES: readonly OptionDescriptor<AgentMode>[] = [
     id: "plan",
     label: "Plan",
     description: "Analyze only — produce a step-by-step plan, change nothing.",
+  },
+  {
+    id: "ask",
+    label: "Ask",
+    description: "Answer questions about the project — read anything, change nothing.",
   },
   {
     id: "debug",
@@ -177,25 +182,54 @@ export function matchingCostPreset(
 }
 
 /**
- * Map an agent's native session-mode id (ACP `current_mode_update`) to
- * the app's mode vocabulary. The agent's ids are its own (Claude:
- * auto/default/acceptEdits/plan/dontAsk/bypassPermissions; Codex:
- * read-only/agent); anything unrecognized returns null and the picker
- * stays as it is — better than guessing a mode the user never chose.
+ * What a mode has the agent's own tooling enforce: whether it may write
+ * at all. Several of our modes share one answer — Plan and Ask are both
+ * read-only, Agent and Debug are both writable — because the difference
+ * between them is in the instructions, not in what the CLI permits.
  */
-export function modeFromAgentModeId(modeId: string): AgentMode | null {
+const MODE_ENFORCES: Readonly<Record<AgentMode, "readOnly" | "writable">> = {
+  agent: "writable",
+  debug: "writable",
+  plan: "readOnly",
+  ask: "readOnly",
+};
+
+/** Same question of an agent's own mode id, or null if we don't know it. */
+function enforcedByAgentModeId(modeId: string): "readOnly" | "writable" | null {
   switch (modeId) {
     case "plan":
     case "read-only":
-      return "plan";
+      return "readOnly";
     case "default":
     case "auto":
     case "acceptEdits":
     case "dontAsk":
     case "bypassPermissions":
     case "agent":
-      return "agent";
+      return "writable";
     default:
       return null;
   }
+}
+
+/**
+ * Map an agent's native session-mode id (ACP `current_mode_update`) to
+ * the app's mode vocabulary. The agent's ids are its own (Claude:
+ * auto/default/acceptEdits/plan/dontAsk/bypassPermissions; Codex:
+ * read-only/agent); anything unrecognized returns null and the picker
+ * stays as it is — better than guessing a mode the user never chose.
+ *
+ * `current` is what the tab is set to, and it wins whenever the agent's
+ * id says the same thing: one native id covers two of our modes, so
+ * without it the agent confirming a read-only session would drag an Ask
+ * tab into Plan, and a writable one would drag Debug into Agent.
+ */
+export function modeFromAgentModeId(
+  modeId: string,
+  current: AgentMode,
+): AgentMode | null {
+  const enforced = enforcedByAgentModeId(modeId);
+  if (!enforced) return null;
+  if (MODE_ENFORCES[current] === enforced) return current;
+  return enforced === "readOnly" ? "plan" : "agent";
 }

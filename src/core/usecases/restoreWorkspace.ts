@@ -9,21 +9,23 @@ import { isTabColorId } from "../entities/tabColor";
 import type { WorktreeSettings } from "../entities/worktree";
 import { clampZoomLevel } from "../entities/zoom";
 import type { AgentGateway } from "../ports/agentGateway";
+import type { TranscriptStore } from "../ports/transcriptStore";
 import type { PersistedSettings, WorkspaceStore } from "../ports/workspacePort";
 import type { AppSettings, TabState } from "../state/appState";
 import { defaultSettings } from "../state/appState";
 import type { Store } from "../state/store";
-import { warmAllTabs } from "./warmSessions";
+import { restoreSessions } from "./restoreSessions";
 
 /**
  * Use case — on startup, rebuild the tab set from the persisted
- * workspace and warm every tab's agent session in the background.
+ * workspace and put each tab back into the conversation it was in.
  */
 export class RestoreWorkspace {
   constructor(
     private readonly store: Store,
     private readonly workspaceStore: WorkspaceStore,
     private readonly agentGateway: AgentGateway,
+    private readonly transcriptStore: TranscriptStore,
   ) {}
 
   async execute(): Promise<void> {
@@ -75,7 +77,9 @@ export class RestoreWorkspace {
       activeTabId,
       settings: restoredSettings(persisted.settings),
     });
-    warmAllTabs(this.store, this.agentGateway);
+    // Not awaited: the tab bar is already painted, and rejoining the
+    // agents runs behind it.
+    void restoreSessions(this.store, this.transcriptStore, this.agentGateway);
   }
 }
 

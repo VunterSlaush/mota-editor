@@ -58,6 +58,10 @@ export interface ShellsView {
   readonly resize: (sessionId: string, size: ShellSize) => void;
   readonly select: (sessionId: string) => void;
   readonly close: (sessionId: string) => void;
+  /** The greyed-in rest of a "!" line in the composer — the terminals'
+   *  own history, asked rather than pushed (there is no session to push
+   *  to before one is open). */
+  readonly suggestLine: (prefix: string) => string;
 }
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
@@ -690,7 +694,7 @@ export function ChatPanel({
             onDraftChange={onDraftChange}
             queued={tab.queued}
             onRemoveQueued={onRemoveQueued}
-            placeholder={`Ask ${providerName} about ${tab.project.name}… (/ for commands, @ for files)`}
+            placeholder={`Ask ${providerName} about ${tab.project.name}… (/ commands, @ files, ! terminal)`}
             commands={commands}
             provider={tab.project.provider}
             mode={tab.project.mode}
@@ -706,6 +710,7 @@ export function ChatPanel({
             onPickFiles={onPickFiles}
             onPasteImage={onPasteImage}
             loadProjectFiles={loadProjectFiles}
+            suggestShellLine={shells.suggestLine}
             onSelectMode={onSelectMode}
             onSelectPermission={onSelectPermission}
             onSelectModel={onSelectModel}
@@ -739,6 +744,7 @@ export function ChatPanel({
           <TerminalPanel
             sessions={tab.shells}
             activeShellId={tab.activeShellId}
+            awaitingLine={tab.pendingShellLine !== undefined}
             width={terminalPanel.width}
             fontSize={shells.fontSize}
             theme={shells.theme}

@@ -80,6 +80,25 @@ export function shellRunningAfter(
 }
 
 /**
+ * Which terminal a command typed somewhere else should run in: the one
+ * the user is looking at when its prompt is free, otherwise the first
+ * free one there is.
+ *
+ * Undefined when every terminal is busy or dead, and that answer is the
+ * point of this function. Keystrokes sent to a shell that is running
+ * something reach the running program's stdin, not a prompt — a dev
+ * server holding the only terminal would swallow the command whole.
+ */
+export function idleShell(
+  sessions: readonly ShellSession[],
+  activeId: string | undefined,
+): ShellSession | undefined {
+  const free = (session: ShellSession) => !session.exit && session.running !== true;
+  const active = sessions.find((session) => session.id === activeId);
+  return active && free(active) ? active : sessions.find(free);
+}
+
+/**
  * Which session to look at after `closedId` goes. The neighbour to the
  * left, because that is the one the user was most likely working in
  * before; the right-hand one when there is nothing to the left.

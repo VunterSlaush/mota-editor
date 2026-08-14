@@ -26,10 +26,3 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
     )
     .catch(() => undefined);
 }
-
-/** Warm every open tab (app start). */
-export function warmAllTabs(store: Store, agentGateway: AgentGateway): void {
-  for (const tab of store.getState().tabs) {
-    warmTab(store, agentGateway, tab.project.id);
-  }
-}

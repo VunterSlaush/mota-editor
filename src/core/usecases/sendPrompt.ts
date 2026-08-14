@@ -493,7 +493,7 @@ export class SendPrompt {
       case "modeChanged": {
         // Keep the composer's picker honest when the agent switches its
         // own mode (e.g. leaving plan mode after an approved plan).
-        const mapped = modeFromAgentModeId(event.modeId);
+        const mapped = modeFromAgentModeId(event.modeId, tab.project.mode);
         if (mapped && mapped !== tab.project.mode) {
           this.store.dispatch({ type: "tab/modeChanged", tabId, mode: mapped });
         }
