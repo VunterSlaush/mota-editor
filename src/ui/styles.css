@@ -4644,6 +4644,8 @@ body {
 /* ---- Extension panel (sidebar, ADR-0013) ---- */
 
 .ext-panel {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -4706,17 +4708,57 @@ body {
   cursor: pointer;
 }
 
+.ext-panel__item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ext-panel__check {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.ext-panel__remove {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.ext-panel__item:hover .ext-panel__remove,
+.ext-panel__remove:focus-visible {
+  opacity: 1;
+}
+
+.ext-panel__remove:hover {
+  color: var(--error);
+}
+
 .ext-panel__item-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
 }
 
 .ext-panel__item-title {
   flex: 1;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+
+.ext-panel__item-title--checked {
+  text-decoration: line-through;
+  color: var(--text-dim);
 }
 
 .ext-panel__badge {
@@ -4809,4 +4851,23 @@ body {
   flex-direction: column;
   gap: 6px;
   padding: 4px 10px 8px;
+}
+
+.ext-panel__input {
+  padding: 4px 10px;
+}
+
+.ext-panel__input-field {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ext-panel__input-field:focus {
+  outline: none;
+  border-color: var(--accent);
 }

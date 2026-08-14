@@ -26,8 +26,10 @@ Ask (unless already clear from their request):
      notify, fill the composer, or start an agent turn.
    - **Agent tools (MCP)** — new tools the AI agents can call.
    - **A sidebar panel** — the extension's data as a grouped list in the
-     app's left sidebar (items can carry a status dropdown and open a
-     detail modal). Declarative: the script answers `panel/load` /
+     app's left sidebar (items can carry a checkbox, a status dropdown,
+     or a delete button and open a detail modal; the panel can declare a
+     text input for typing entries directly in it). Declarative: the
+     script answers `panel/load` /
      `panel/action` with a view model, the host renders it. Needs
      `"ui:panel"` and an `entry`. Manifest:
      `"panels": [{ "id": "tasks", "title": "My Tasks", "icon": "checklist" }]`

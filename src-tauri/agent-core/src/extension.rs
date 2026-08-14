@@ -539,7 +539,11 @@ pub fn panel_load_request(id: i64, panel_id: &str, tab_id: &str, project_path: &
 /// One user interaction inside a panel, routed to the extension. The
 /// action vocabulary is host-owned and tiny (ADR-0013): `"open"` — an
 /// item was clicked, answer with a `detail`; `"select"` — an item's
-/// select control changed to `value`, answer with the updated `view`.
+/// select control changed to `value`, answer with the updated `view`;
+/// `"button"` — a panel-level button (`item_id` is the button id);
+/// `"submit"` — the panel input (`item_id` is its id, `value` the text);
+/// `"toggle"` — the item's checkbox (`value` is `"true"` or `"false"`);
+/// `"remove"` — the item's delete button.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PanelAction {
     pub action: String,

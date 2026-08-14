@@ -707,6 +707,9 @@ export class DemoExtensionHost implements ExtensionHostPort {
     ["task-2", "todo"],
     ["task-3", "todo"],
   ]);
+  private demoTasks: { id: string; key: string; title: string; badge?: string }[] = [
+    ...DEMO_TASKS,
+  ];
   private extensions: ExtensionDescriptor[] = [
     {
       id: "demo-tracker",
@@ -826,10 +829,21 @@ export class DemoExtensionHost implements ExtensionHostPort {
       this.demoTaskStatus.set(request.itemId, request.value);
       return { view: this.demoTaskView() };
     }
+    if (request.action === "submit" && request.value) {
+      const id = `task-${this.demoTasks.length + 1}`;
+      this.demoTasks.push({
+        id,
+        key: `DEM-${42 + this.demoTasks.length}`,
+        title: request.value,
+      });
+      this.demoTaskStatus.set(id, "todo");
+      return { view: this.demoTaskView() };
+    }
     if (request.action === "open") {
       return {
         detail: {
-          title: DEMO_TASKS.find((t) => t.id === request.itemId)?.title ?? request.itemId,
+          title:
+            this.demoTasks.find((t) => t.id === request.itemId)?.title ?? request.itemId,
           subtitle: "DEM-42 · Demo project",
           fields: [
             { label: "Priority", value: "High" },
@@ -850,16 +864,17 @@ export class DemoExtensionHost implements ExtensionHostPort {
       { id: "done", label: "Done" },
     ];
     const byStatus = (status: string) =>
-      DEMO_TASKS.filter((task) => this.demoTaskStatus.get(task.id) === status).map(
-        (task) => ({
+      this.demoTasks
+        .filter((task) => this.demoTaskStatus.get(task.id) === status)
+        .map((task) => ({
           id: task.id,
           title: task.title,
           subtitle: task.key,
           badge: task.badge,
           select: { options, selectedId: status },
-        }),
-      );
+        }));
     return {
+      input: { id: "new-task", placeholder: "Add a task…" },
       groups: [
         { title: "In Progress", items: byStatus("started") },
         { title: "Todo", items: byStatus("todo") },

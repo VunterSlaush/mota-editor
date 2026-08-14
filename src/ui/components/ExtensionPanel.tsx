@@ -1,4 +1,4 @@
-import { ArrowSquareOut, ArrowsClockwise } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsClockwise, Trash } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 import type {
@@ -44,6 +44,7 @@ export function ExtensionPanel({ panel, panels }: Props) {
   const [detail, setDetail] = useState<PanelDetail | null>(null);
   const [pendingItemId, setPendingItemId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [draft, setDraft] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -95,11 +96,32 @@ export function ExtensionPanel({ panel, panels }: Props) {
       if (result.view) setView(result.view);
     });
 
+  const toggleItem = (itemId: string, checked: boolean) =>
+    run({ action: "toggle", itemId, value: checked ? "true" : "false" }, (result) => {
+      if (result.view) setView(result.view);
+    });
+
+  const removeItem = (itemId: string) =>
+    run({ action: "remove", itemId }, (result) => {
+      if (result.view) setView(result.view);
+    });
+
   const pressButton = (buttonId: string) =>
     run({ action: "button", itemId: buttonId }, (result) => {
       if (result.view) setView(result.view);
       if (result.detail) setDetail(result.detail);
     });
+
+  const submitInput = (inputId: string) => {
+    const value = draft.trim();
+    if (!value) return;
+    run({ action: "submit", itemId: inputId, value }, (result) => {
+      setDraft("");
+      if (result.view) setView(result.view);
+    });
+  };
+
+  const input = view?.input;
 
   return (
     <aside className="ext-panel">
@@ -118,6 +140,24 @@ export function ExtensionPanel({ panel, panels }: Props) {
       </div>
       {error && <p className="changes__notice changes__notice--error">{error}</p>}
       {loading && !view && <p className="changes__empty">Loading…</p>}
+      {!loading && input && (
+        <form
+          className="ext-panel__input"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitInput(input.id);
+          }}
+        >
+          <input
+            className="ext-panel__input-field"
+            value={draft}
+            placeholder={input.placeholder}
+            aria-label={input.placeholder ?? "Panel input"}
+            disabled={pendingItemId === input.id}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        </form>
+      )}
       {!loading && view && view.groups.length === 0 && (
         <p className="changes__empty">{view.emptyText ?? "Nothing to show."}</p>
       )}
@@ -145,20 +185,53 @@ export function ExtensionPanel({ panel, panels }: Props) {
           <ul className="ext-panel__list">
             {group.items.map((item) => (
               <li key={item.id} className="ext-panel__item">
-                <button
-                  type="button"
-                  className="ext-panel__item-open"
-                  disabled={pendingItemId === item.id}
-                  onClick={() => openItem(item.id)}
-                >
-                  <span className="ext-panel__item-main">
-                    <span className="ext-panel__item-title">{item.title}</span>
-                    {item.badge && <span className="ext-panel__badge">{item.badge}</span>}
-                  </span>
-                  {item.subtitle && (
-                    <span className="ext-panel__item-subtitle">{item.subtitle}</span>
+                <div className="ext-panel__item-row">
+                  {item.checked !== undefined && (
+                    <input
+                      type="checkbox"
+                      className="ext-panel__check"
+                      checked={item.checked}
+                      disabled={pendingItemId === item.id}
+                      aria-label={`Toggle ${item.title}`}
+                      onChange={(e) => toggleItem(item.id, e.target.checked)}
+                    />
                   )}
-                </button>
+                  <button
+                    type="button"
+                    className="ext-panel__item-open"
+                    disabled={pendingItemId === item.id}
+                    title={item.title}
+                    onClick={() => openItem(item.id)}
+                  >
+                    <span className="ext-panel__item-main">
+                      <span
+                        className={`ext-panel__item-title ${
+                          item.checked ? "ext-panel__item-title--checked" : ""
+                        }`}
+                      >
+                        {item.title}
+                      </span>
+                      {item.badge && (
+                        <span className="ext-panel__badge">{item.badge}</span>
+                      )}
+                    </span>
+                    {item.subtitle && (
+                      <span className="ext-panel__item-subtitle">{item.subtitle}</span>
+                    )}
+                  </button>
+                  {item.removable && (
+                    <button
+                      type="button"
+                      className="ext-panel__remove"
+                      disabled={pendingItemId === item.id}
+                      aria-label={`Delete ${item.title}`}
+                      title="Delete"
+                      onClick={() => removeItem(item.id)}
+                    >
+                      <Trash />
+                    </button>
+                  )}
+                </div>
                 {item.select && (
                   <select
                     className="ext-panel__select"

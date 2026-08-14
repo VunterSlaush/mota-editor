@@ -84,6 +84,55 @@ describe("parsePanelView", () => {
     expect(view.buttons).toHaveLength(5);
   });
 
+  it("keeps checked only when it is a boolean", () => {
+    const view = parsePanelView({
+      groups: [
+        {
+          title: "G",
+          items: [
+            { id: "a", title: "Done", checked: true },
+            { id: "b", title: "Open", checked: false },
+            { id: "c", title: "No box", checked: "yes" },
+          ],
+        },
+      ],
+    });
+    const items = view.groups[0]?.items;
+    expect(items?.[0]?.checked).toBe(true);
+    expect(items?.[1]?.checked).toBe(false);
+    expect(items?.[2]?.checked).toBeUndefined();
+  });
+
+  it("keeps removable only when it is exactly true", () => {
+    const view = parsePanelView({
+      groups: [
+        {
+          title: "G",
+          items: [
+            { id: "a", title: "Deletable", removable: true },
+            { id: "b", title: "Not", removable: "yes" },
+            { id: "c", title: "Also not" },
+          ],
+        },
+      ],
+    });
+    const items = view.groups[0]?.items;
+    expect(items?.[0]?.removable).toBe(true);
+    expect(items?.[1]?.removable).toBeUndefined();
+    expect(items?.[2]?.removable).toBeUndefined();
+  });
+
+  it("parses a panel-level input, dropping one without an id", () => {
+    const view = parsePanelView({
+      input: { id: "new-todo", placeholder: "Add a todo…" },
+    });
+    expect(view.input).toEqual({ id: "new-todo", placeholder: "Add a todo…" });
+
+    expect(parsePanelView({ input: { placeholder: "no id" } }).input).toBeUndefined();
+    expect(parsePanelView({ input: "junk" }).input).toBeUndefined();
+    expect(parsePanelView({}).input).toBeUndefined();
+  });
+
   it("drops a select without usable options", () => {
     const view = parsePanelView({
       groups: [

@@ -140,10 +140,11 @@ themed like everything else:
 { "view": {
   "emptyText": "Shown when there are no groups — say what to do about it.",
   "buttons": [ { "id": "login", "label": "Log in" } ],
+  "input": { "id": "new-todo", "placeholder": "Add a todo…" },
   "groups": [
     { "title": "In Progress", "items": [
       { "id": "iss-1", "title": "Fix login", "subtitle": "ENG-123",
-        "badge": "Urgent",
+        "badge": "Urgent", "checked": false,
         "select": { "selectedId": "started", "options": [
           { "id": "todo", "label": "Todo" },
           { "id": "started", "label": "In Progress" } ] } }
@@ -151,13 +152,23 @@ themed like everything else:
   ] } }
 ```
 
+A boolean `checked` on an item renders a checkbox (checked items are
+struck through); omit it for items that are not checkable. A
+`"removable": true` renders a delete button on the item (shown on
+hover) — what removal means is yours.
+
 Interactions come back as `panel/action` with a host-owned vocabulary of
-three: `"open"` (the item was clicked — answer `{detail}` and the host
+six: `"open"` (the item was clicked — answer `{detail}` and the host
 shows a modal), `"select"` (the item's dropdown changed to `value` —
-answer `{view}` with the updated model), and `"button"` (a panel-level
+answer `{view}` with the updated model), `"button"` (a panel-level
 button was pressed; `itemId` is the button id — for anything slow, like
 a browser sign-in, answer immediately with an interim `{view}` and send
-`panels/refresh` when you are done). A detail is
+`panels/refresh` when you are done), `"submit"` (the panel's text
+field, declared as `input`, was submitted with Enter; `itemId` is the
+input's id, `value` the typed text — answer `{view}` with the updated
+model), `"toggle"` (the item's checkbox changed; `value` is
+`"true"` or `"false"` — answer `{view}`), and `"remove"` (the item's
+delete button — answer `{view}` without it). A detail is
 `{title, subtitle?, fields: [{label, value}], body?, url?}`; `body` is
 markdown, `url` gets an open-in-browser button (http/https only).
 

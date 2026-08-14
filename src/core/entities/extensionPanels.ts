@@ -25,6 +25,12 @@ export interface PanelItem {
   readonly subtitle?: string;
   readonly badge?: string;
   readonly select?: PanelSelect;
+  /** Present → the item carries a checkbox; checked items render
+   *  struck through. Toggling comes back as a `toggle` action. */
+  readonly checked?: boolean;
+  /** True → the item carries a delete button, coming back as a
+   *  `remove` action. The extension owns what removal means. */
+  readonly removable?: boolean;
 }
 
 export interface PanelGroup {
@@ -39,9 +45,17 @@ export interface PanelButton {
   readonly label: string;
 }
 
+/** A panel-level text field ("Add a todo…") — the user's Enter comes
+ *  back as a `submit` action carrying the id and the typed text. */
+export interface PanelInput {
+  readonly id: string;
+  readonly placeholder?: string;
+}
+
 export interface PanelView {
   readonly groups: readonly PanelGroup[];
   readonly buttons: readonly PanelButton[];
+  readonly input?: PanelInput;
   /** Shown instead of the list when there are no groups — the
    *  extension's own words ("Add your API key to …"). */
   readonly emptyText?: string;
@@ -93,8 +107,16 @@ export function parsePanelView(payload: unknown): PanelView {
   return {
     groups,
     buttons,
+    input: parseInput(view.input),
     emptyText: optionalText(view.emptyText, MAX_SUBTITLE),
   };
+}
+
+function parseInput(payload: unknown): PanelInput | undefined {
+  const input = asObject(payload);
+  const id = optionalText(input?.id, MAX_TEXT);
+  if (!input || !id) return undefined;
+  return { id, placeholder: optionalText(input.placeholder, MAX_TEXT) };
 }
 
 export function parsePanelActionResult(payload: unknown): PanelActionResult {
@@ -128,6 +150,8 @@ function parseItem(payload: unknown): PanelItem | null {
     subtitle: optionalText(item.subtitle, MAX_SUBTITLE),
     badge: optionalText(item.badge, MAX_TEXT),
     select: parseSelect(item.select),
+    checked: typeof item.checked === "boolean" ? item.checked : undefined,
+    removable: item.removable === true ? true : undefined,
   };
 }
 
