@@ -1,4 +1,3 @@
-import { serversForProvider } from "../entities/mcpServer";
 import {
   type ChatMessage,
   errorMessage,
@@ -15,6 +14,7 @@ import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
 import type { TabState } from "../state/appState";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { agentServers } from "./agentServers";
 import { startNewChat } from "./startNewChat";
 import type { WorktreeItem } from "./worktrees";
 
@@ -312,7 +312,7 @@ export class SessionHistory {
         path,
         model,
         effort,
-        serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
+        agentServers(state, provider, mcpOverrides),
       );
     } catch (e) {
       listError = e instanceof Error ? e.message : String(e);
@@ -495,11 +495,7 @@ export class SessionHistory {
     const state = this.store.getState();
     const tab = tabById(state, tabId)!;
     const { provider, path, model, effort, mcpOverrides } = tab.project;
-    const mcpServers = serversForProvider(
-      state.settings.mcpServers,
-      provider,
-      mcpOverrides,
-    );
+    const mcpServers = agentServers(state, provider, mcpOverrides);
 
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: Date.now() });

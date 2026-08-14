@@ -15,12 +15,18 @@ import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { useDragWidth } from "../useDragWidth";
-import { ActivityBar, ALL_SIDEBAR_VIEWS, type SidebarView } from "./ActivityBar";
+import {
+  ActivityBar,
+  ALL_SIDEBAR_VIEWS,
+  panelSidebarView,
+  type SidebarView,
+} from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
 import { Composer } from "./Composer";
 import { ContextFullBar } from "./ContextFullBar";
 import { DiffModal } from "./DiffModal";
+import { ExtensionPanel, type ExtensionPanelsView } from "./ExtensionPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
@@ -95,6 +101,8 @@ interface Props {
   onChangesLoaded: (projectId: string, changes: GitChanges | null) => void;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
+  /** Extension sidebar panels, bundled like `shells` (ADR-0013). */
+  extensionPanels: ExtensionPanelsView;
   /** Which right-hand panel is showing. Lifted for the same reason
    *  `sidebarView` is: this component remounts on every project switch. */
   rightPanel: RightPanel;
@@ -138,6 +146,8 @@ interface Props {
   loadGitChanges: () => Promise<GitChanges | null>;
   onGitStage: (path: string) => Promise<GitActionResult>;
   onGitUnstage: (path: string) => Promise<GitActionResult>;
+  onGitStageAll: () => Promise<GitActionResult>;
+  onGitUnstageAll: () => Promise<GitActionResult>;
   onGitCommitPush: (message: string) => Promise<GitActionResult>;
   onGitCheckout: (branch: string) => Promise<GitActionResult>;
   onGitPush: () => Promise<GitActionResult>;
@@ -185,6 +195,7 @@ export function ChatPanel({
   onSelectRightPanel,
   rightPanel,
   shells,
+  extensionPanels,
   onSelectSidebarView,
   onOpenSettings,
   loadHistory,
@@ -215,6 +226,8 @@ export function ChatPanel({
   loadGitChanges,
   onGitStage,
   onGitUnstage,
+  onGitStageAll,
+  onGitUnstageAll,
   onGitCommitPush,
   onGitCheckout,
   onGitPush,
@@ -256,6 +269,12 @@ export function ChatPanel({
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
 
+  // A disabled extension takes its sidebar view with it — the column
+  // simply shows nothing until another view is picked.
+  const activeExtensionPanel = sidebarView?.startsWith("ext:")
+    ? extensionPanels.panels.find((panel) => panelSidebarView(panel) === sidebarView)
+    : undefined;
+
   // Which right-hand panel this project actually shows. The choice is
   // app-wide on purpose (a running terminal must survive a tab switch),
   // but a plan is not: most projects have none, and an empty plan panel
@@ -276,8 +295,12 @@ export function ChatPanel({
   // comes back on its own when you return to the tab that has it.
   const isWorktreeTab = tab.project.worktreeOf !== undefined;
   const sidebarViews = isWorktreeTab ? WORKTREE_TAB_SIDEBAR_VIEWS : ALL_SIDEBAR_VIEWS;
+  // Extension views are never in the builtin list — they pass through,
+  // and a disabled extension's view shows an empty column instead.
   const shownSidebarView =
-    sidebarView && !sidebarViews.includes(sidebarView) ? "changes" : sidebarView;
+    sidebarView && !sidebarView.startsWith("ext:") && !sidebarViews.includes(sidebarView)
+      ? "changes"
+      : sidebarView;
 
   // Reaches memoized transcript rows — must not be a fresh arrow per render.
   const showPlan = useCallback(() => onSelectRightPanel("plan"), [onSelectRightPanel]);
@@ -339,7 +362,8 @@ export function ChatPanel({
   }, [tab.project.provider, tab.project.id]);
 
   // Reload git whenever the working tree may have moved: a turn starting
-  // or ending, the running agent touching files, or the user asking.
+  // or ending, the running agent touching files, a git verb of our own
+  // starting or finishing, or the user asking.
   // Reading git is safe mid-turn, so this stays live while the agent
   // works. Debounced, so a burst of edits costs one `git status`.
   // Loaded even with the panel closed, so the header branch stays live.
@@ -355,7 +379,7 @@ export function ChatPanel({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
+  }, [tab.busy, tab.project.id, tab.gitVerb, changesRefreshKey, fileChangingTools]);
 
   // Refresh the session list whenever the history view is open: on the
   // tab going idle (a finished turn may have added or updated a
@@ -509,6 +533,7 @@ export function ChatPanel({
         <ActivityBar
           active={shownSidebarView}
           available={sidebarViews}
+          panels={extensionPanels.panels}
           onSelect={onSelectSidebarView}
           onOpenSettings={onOpenSettings}
         />
@@ -519,10 +544,14 @@ export function ChatPanel({
                 <ChangesPanel
                   changes={changes}
                   busy={tab.busy}
+                  working={tab.gitVerb ?? null}
+                  notice={tab.gitNotice ?? null}
                   agentEdits={agentEdits}
                   onShowAgentDiff={showAgentDiff}
                   onStage={onGitStage}
                   onUnstage={onGitUnstage}
+                  onStageAll={onGitStageAll}
+                  onUnstageAll={onGitUnstageAll}
                   onCommitPush={onGitCommitPush}
                   onOpenBranchPicker={() => setBranchPickerOpen(true)}
                   onPush={onGitPush}
@@ -574,6 +603,13 @@ export function ChatPanel({
                   }
                   onNewChat={onNewChat}
                   onRefresh={() => setHistoryRefreshKey((k) => k + 1)}
+                />
+              )}
+              {activeExtensionPanel && (
+                <ExtensionPanel
+                  key={panelSidebarView(activeExtensionPanel)}
+                  panel={activeExtensionPanel}
+                  panels={extensionPanels}
                 />
               )}
             </div>

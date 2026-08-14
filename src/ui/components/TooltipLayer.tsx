@@ -37,11 +37,20 @@ export function TooltipLayer() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const release = () => {
+    // Hiding and letting the host go are different moments: a click or a
+    // scroll must drop the tip, but the pointer is usually still ON the
+    // host — restoring the title there hands the platform its own native
+    // tooltip a second later, drawn on top of ours. The title goes back
+    // only once the pointer is somewhere else.
+    const hide = () => {
       clearTimeout(timer);
+      setTip(null);
+    };
+
+    const releaseHost = () => {
+      hide();
       restoreTitle(hostRef.current);
       hostRef.current = null;
-      setTip(null);
     };
 
     const onPointerMove = (event: MouseEvent) => {
@@ -52,7 +61,7 @@ export function TooltipLayer() {
       if (hostRef.current?.contains(under)) return; // still on the same host
       const host = titledAncestor(under);
       if (host === hostRef.current) return;
-      release();
+      releaseHost();
       if (!host) return;
       hostRef.current = host;
       timer = setTimeout(() => {
@@ -62,19 +71,21 @@ export function TooltipLayer() {
     };
 
     document.addEventListener("mousemove", onPointerMove);
-    // A click, a scroll or the pointer leaving the window all mean the
-    // thing the tooltip described may no longer be under it.
-    document.addEventListener("mousedown", release);
-    document.addEventListener("mouseleave", release);
-    window.addEventListener("scroll", release, true);
-    window.addEventListener("blur", release);
+    // A click or a scroll means the tip may describe the wrong thing —
+    // hide it, but keep the title stashed while the pointer stays put.
+    document.addEventListener("mousedown", hide);
+    window.addEventListener("scroll", hide, true);
+    // The pointer leaving the window (or the window losing focus) is a
+    // real departure: the host gets its title back.
+    document.addEventListener("mouseleave", releaseHost);
+    window.addEventListener("blur", releaseHost);
     return () => {
-      release();
+      releaseHost();
       document.removeEventListener("mousemove", onPointerMove);
-      document.removeEventListener("mousedown", release);
-      document.removeEventListener("mouseleave", release);
-      window.removeEventListener("scroll", release, true);
-      window.removeEventListener("blur", release);
+      document.removeEventListener("mousedown", hide);
+      window.removeEventListener("scroll", hide, true);
+      document.removeEventListener("mouseleave", releaseHost);
+      window.removeEventListener("blur", releaseHost);
     };
   }, []);
 

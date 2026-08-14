@@ -1,6 +1,7 @@
 import type { AppBadge } from "../../core/entities/appBadge";
 import type { BilledRequest } from "../../core/entities/billing";
 import type { CommandInfo } from "../../core/entities/command";
+import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type { ProviderId } from "../../core/entities/provider";
@@ -13,6 +14,10 @@ import type {
 import type { AppBadgePort } from "../../core/ports/appBadgePort";
 import type { BillingStore } from "../../core/ports/billingStore";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
+import type {
+  ExtensionHostEvent,
+  ExtensionHostPort,
+} from "../../core/ports/extensionHost";
 import type {
   GitBranch,
   GitChange,
@@ -385,6 +390,14 @@ export class DemoGit implements GitPort {
     this.staged.delete(path);
     this.unstaged.add(path);
   }
+  async stageAll() {
+    for (const path of this.unstaged) this.staged.add(path);
+    this.unstaged.clear();
+  }
+  async unstageAll() {
+    for (const path of this.staged) this.unstaged.add(path);
+    this.staged.clear();
+  }
   async commit(): Promise<string> {
     this.staged.clear();
     return "1 file changed";
@@ -718,7 +731,212 @@ export class DemoBillingStore implements BillingStore {
 
 export class DemoNotifications implements NotificationPort {
   async turnCompleted(): Promise<void> {}
+  async show(): Promise<void> {}
 }
+
+/**
+ * Browser demo — two canned extensions: one enabled and contributing a
+ * command in both flavors, one awaiting approval with a dangerous
+ * permission, so the settings screen, consent flow and command routing
+ * are all exercisable without the Rust host.
+ */
+export class DemoExtensionHost implements ExtensionHostPort {
+  private listeners: ((extensionId: string, event: ExtensionHostEvent) => void)[] = [];
+  private demoTaskStatus = new Map<string, string>([
+    ["task-1", "started"],
+    ["task-2", "todo"],
+    ["task-3", "todo"],
+  ]);
+  private demoTasks: { id: string; key: string; title: string; badge?: string }[] = [
+    ...DEMO_TASKS,
+  ];
+  private extensions: ExtensionDescriptor[] = [
+    {
+      id: "demo-tracker",
+      displayName: "Tracker (demo)",
+      version: "0.1.0",
+      description: "Your issues in the sidebar, grouped by status.",
+      origin: "user",
+      path: "~/.mota/extensions/demo-tracker",
+      permissions: ["ui:panel"],
+      status: "enabled",
+      commands: [],
+      mcpServers: [],
+      panels: [{ id: "tasks", title: "Tracker", icon: "checklist" }],
+      events: [],
+    },
+    {
+      id: "demo-standup",
+      displayName: "Standup (demo)",
+      version: "0.1.0",
+      description: "Drafts a standup update from your recent sessions.",
+      origin: "user",
+      path: "~/.mota/extensions/demo-standup",
+      permissions: ["commands:register", "notifications"],
+      status: "enabled",
+      commands: [
+        {
+          name: "standup",
+          description: "Draft a standup update",
+          argsHint: "[days]",
+          kind: "prompt",
+          template: "Summarize the last $ARGUMENTS days of work as a standup update.",
+        },
+        {
+          name: "standup-notify",
+          description: "Ping me when the draft is ready",
+          kind: "programmatic",
+        },
+      ],
+      mcpServers: [],
+      panels: [],
+      events: [],
+    },
+    {
+      id: "demo-deployer",
+      displayName: "Deployer (demo)",
+      version: "0.3.0",
+      description: "Runs your deploy script after a turn completes.",
+      origin: "project",
+      projectPath: "/demo/project",
+      path: "/demo/project/.mota/extensions/demo-deployer",
+      permissions: ["events:subscribe", "shell:exec", "notifications"],
+      status: "needs-approval",
+      commands: [],
+      mcpServers: [],
+      panels: [],
+      events: ["turn/completed"],
+    },
+  ];
+
+  subscribe(listener: (extensionId: string, event: ExtensionHostEvent) => void): void {
+    this.listeners.push(listener);
+  }
+
+  private notify(extensionId: string, event: ExtensionHostEvent): void {
+    for (const listener of this.listeners) listener(extensionId, event);
+  }
+
+  async list(): Promise<ExtensionDescriptor[]> {
+    await delay(120);
+    return [...this.extensions];
+  }
+
+  async enable(id: string): Promise<ExtensionDescriptor> {
+    await delay(300); // stands in for the native consent dialog
+    this.extensions = this.extensions.map((e) =>
+      e.id === id ? { ...e, status: "enabled" as const } : e,
+    );
+    const enabled = this.extensions.find((e) => e.id === id);
+    if (!enabled) throw new Error(`Unknown extension: ${id}`);
+    this.notify(id, { kind: "statusChanged", status: "enabled" });
+    return enabled;
+  }
+
+  async disable(id: string): Promise<void> {
+    this.extensions = this.extensions.map((e) =>
+      e.id === id ? { ...e, status: "disabled" as const } : e,
+    );
+    this.notify(id, { kind: "statusChanged", status: "disabled" });
+  }
+
+  async invokeCommand(extensionId: string, command: string): Promise<unknown> {
+    await delay(250);
+    return {
+      actions: [
+        {
+          type: "notify",
+          title: "Standup (demo)",
+          message: `Command /${command} ran in ${extensionId}.`,
+        },
+        { type: "insertPrompt", text: "Here is the standup draft the extension built." },
+      ],
+    };
+  }
+
+  async loadPanel(): Promise<unknown> {
+    await delay(200);
+    return { view: this.demoTaskView() };
+  }
+
+  async panelAction(
+    _extensionId: string,
+    _panelId: string,
+    request: { action: string; itemId: string; value?: string },
+  ): Promise<unknown> {
+    await delay(150);
+    if (request.action === "select" && request.value) {
+      this.demoTaskStatus.set(request.itemId, request.value);
+      return { view: this.demoTaskView() };
+    }
+    if (request.action === "submit" && request.value) {
+      const id = `task-${this.demoTasks.length + 1}`;
+      this.demoTasks.push({
+        id,
+        key: `DEM-${42 + this.demoTasks.length}`,
+        title: request.value,
+      });
+      this.demoTaskStatus.set(id, "todo");
+      return { view: this.demoTaskView() };
+    }
+    if (request.action === "open") {
+      return {
+        detail: {
+          title:
+            this.demoTasks.find((t) => t.id === request.itemId)?.title ?? request.itemId,
+          subtitle: "DEM-42 · Demo project",
+          fields: [
+            { label: "Priority", value: "High" },
+            { label: "Assignee", value: "You" },
+          ],
+          body: "A canned task so the browser demo can exercise the panel modal.\n\nThe real thing comes from an extension process over MXP.",
+          url: "https://example.com/DEM-42",
+        },
+      };
+    }
+    return {};
+  }
+
+  private demoTaskView(): unknown {
+    const options = [
+      { id: "todo", label: "Todo" },
+      { id: "started", label: "In Progress" },
+      { id: "done", label: "Done" },
+    ];
+    const byStatus = (status: string) =>
+      this.demoTasks
+        .filter((task) => this.demoTaskStatus.get(task.id) === status)
+        .map((task) => ({
+          id: task.id,
+          title: task.title,
+          subtitle: task.key,
+          badge: task.badge,
+          select: { options, selectedId: status },
+        }));
+    return {
+      input: { id: "new-task", placeholder: "Add a task…" },
+      groups: [
+        { title: "In Progress", items: byStatus("started") },
+        { title: "Todo", items: byStatus("todo") },
+        { title: "Done", items: byStatus("done") },
+      ].filter((group) => group.items.length > 0),
+    };
+  }
+
+  async publishEvent(): Promise<void> {}
+
+  async respond(): Promise<void> {}
+
+  async readLog(): Promise<string> {
+    return "[log] demo extension started\n[log] nothing else to report";
+  }
+}
+
+const DEMO_TASKS = [
+  { id: "task-1", key: "DEM-42", title: "Wire the demo panel", badge: "High" },
+  { id: "task-2", key: "DEM-43", title: "Group tasks by status" },
+  { id: "task-3", key: "DEM-44", title: "Open a detail modal", badge: "Low" },
+];
 
 /**
  * Browser demo — a history with a clear favourite, so the greyed-out

@@ -22,6 +22,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::oneshot;
 
+use crate::fs_confine::confine_to_project;
 use crate::runner;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120); // first npx run downloads the adapter
@@ -1262,45 +1263,6 @@ pub fn read_terminal_output(
     let handle = session.terminals.get(terminal_id)?;
     let (output, truncated, exit) = handle.output();
     Some((output, truncated, exit.is_some()))
-}
-
-/// Resolve an agent-supplied path and require it inside the project.
-/// Canonicalizes real paths so `..` and symlinks cannot escape; for a
-/// write to a not-yet-existing file the PARENT directory must exist and
-/// be inside instead (the spec says create the file, not directories).
-fn confine_to_project(
-    project_path: &str,
-    requested: &str,
-    must_exist: bool,
-) -> Result<std::path::PathBuf, String> {
-    let project = std::fs::canonicalize(project_path)
-        .map_err(|e| format!("Project folder unavailable: {e}"))?;
-    match std::fs::canonicalize(requested) {
-        Ok(file) => {
-            if file.starts_with(&project) {
-                Ok(file)
-            } else {
-                Err(format!("Path is outside the project: {requested}"))
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !must_exist => {
-            let path = std::path::Path::new(requested);
-            let parent = path
-                .parent()
-                .ok_or_else(|| format!("Path has no parent directory: {requested}"))?;
-            let file_name = path
-                .file_name()
-                .ok_or_else(|| format!("Path names no file: {requested}"))?;
-            let parent = std::fs::canonicalize(parent)
-                .map_err(|e| format!("Parent directory unavailable: {e}"))?;
-            if parent.starts_with(&project) {
-                Ok(parent.join(file_name))
-            } else {
-                Err(format!("Path is outside the project: {requested}"))
-            }
-        }
-        Err(e) => Err(format!("Could not resolve {requested}: {e}")),
-    }
 }
 
 fn spawn_reader(

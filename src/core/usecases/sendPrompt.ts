@@ -1,7 +1,11 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
 import { dedupeCommands } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
-import { serversForProvider } from "../entities/mcpServer";
+import {
+  CREATE_EXTENSION_COMMAND,
+  createExtensionPrompt,
+} from "../entities/createExtensionGuide";
+import { expandPromptCommand, findExtensionCommand } from "../entities/extension";
 import {
   AUTH_REQUIRED_CONTEXT,
   approvalMessage,
@@ -24,9 +28,11 @@ import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptSt
 import type { WorkspaceStore } from "../ports/workspacePort";
 import { type TabState, tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { agentServers } from "./agentServers";
 import type { ApplyCommandConfig } from "./applyCommandConfig";
 import { persistWorkspace } from "./persistWorkspace";
 import { declineParkedPlan } from "./planApproval";
+import type { RunExtensionCommand } from "./runExtensionCommand";
 import { startNewChat } from "./startNewChat";
 
 export type IdGenerator = () => string;
@@ -85,6 +91,7 @@ export class SendPrompt {
     private readonly notifications: NotificationPort,
     private readonly applyCommandConfig: ApplyCommandConfig,
     private readonly newId: IdGenerator,
+    private readonly extensionCommands?: RunExtensionCommand,
   ) {
     agentGateway.subscribeAgentInitiated((tabId, event) =>
       this.onAgentInitiated(tabId, event),
@@ -135,6 +142,39 @@ export class SendPrompt {
     // duration, token delta, stop reason — is patched on at completion.
     const sentAt = Date.now();
     const command = leadingCommand(trimmed);
+
+    // A command an EXTENSION contributed never reaches the agent. The
+    // typed form stays in the transcript either way; a prompt-template
+    // command swaps the OUTGOING text, a programmatic one is routed to
+    // the extension process instead of starting a turn at all.
+    const extensionHit = command
+      ? findExtensionCommand(this.store.getState().extensions, provider, command)
+      : null;
+    if (extensionHit && this.extensionCommands) {
+      const args = trimmed.slice(command?.length ?? 0).trim();
+      if (extensionHit.command.kind === "programmatic") {
+        this.store.dispatch({
+          type: "chat/messageAppended",
+          tabId,
+          message: userMessage(trimmed, attachments, {
+            sentAt,
+            mode,
+            permission,
+            ...(command ? { command } : {}),
+          }),
+        });
+        await this.extensionCommands.execute(tabId, extensionHit, args);
+        return;
+      }
+    }
+    const commandArgs = trimmed.slice(command?.length ?? 0).trim();
+    const outgoing =
+      command === CREATE_EXTENSION_COMMAND
+        ? createExtensionPrompt(commandArgs)
+        : extensionHit?.command.kind === "prompt" && extensionHit.command.template
+          ? expandPromptCommand(extensionHit.command.template, commandArgs)
+          : trimmed;
+
     const message = userMessage(trimmed, attachments, {
       sentAt,
       mode,
@@ -161,15 +201,15 @@ export class SendPrompt {
       tabId,
       provider,
       projectPath: path,
-      prompt: trimmed,
+      prompt: outgoing,
       mode,
       permission,
       model,
       effort,
       attachments,
       resumeSessionId,
-      mcpServers: serversForProvider(
-        this.store.getState().settings.mcpServers,
+      mcpServers: agentServers(
+        this.store.getState(),
         provider,
         configured.project.mcpOverrides,
       ),

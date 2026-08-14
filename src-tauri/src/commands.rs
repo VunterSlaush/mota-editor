@@ -458,6 +458,25 @@ pub fn open_path(project_path: String, path: String) -> Result<(), String> {
     open_with_default_app(shell_path(as_str)).map_err(|e| format!("Could not open {path}: {e}"))
 }
 
+/// Open the user extensions folder (`~/.mota/extensions`) in the system
+/// file manager, creating it first so a fresh install has somewhere to
+/// drop an extension into.
+#[tauri::command]
+pub fn open_extensions_dir(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .home_dir()
+        .map_err(|e| format!("Could not find your home folder: {e}"))?
+        .join(".mota")
+        .join("extensions");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create the extensions folder: {e}"))?;
+    let as_str = dir
+        .to_str()
+        .ok_or("The extensions folder has a name this platform cannot pass on.")?;
+    open_with_default_app(as_str).map_err(|e| format!("Could not open the extensions folder: {e}"))
+}
+
 /// `canonicalize` hands back a `\\?\`-prefixed path on Windows, which the
 /// shell APIs behind the opener do not understand. Elsewhere it is a
 /// no-op.

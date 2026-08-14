@@ -1,4 +1,4 @@
-# ADR-0013 — "!" runs a line in the user's own terminal
+# ADR-0014 — "!" runs a line in the user's own terminal
 
 - Status: accepted
 - Date: 2026-08-14

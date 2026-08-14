@@ -19,7 +19,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { commitUrl } from "../../core/entities/gitRemote";
 import type { AgentEditedFile } from "../../core/entities/tool";
 import type { GitChange } from "../../core/ports/gitPort";
-import type { GitActionResult } from "../../core/usecases/gitActions";
+import type { GitActionResult, GitVerb } from "../../core/usecases/gitActions";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import { openExternalLink } from "../externalLink";
 import { fileName } from "../fileName";
@@ -28,11 +28,18 @@ import type { AgentDiff } from "./ToolCallContentView";
 interface Props {
   changes: GitChanges | null;
   busy: boolean;
+  /** The git verb running against this project, from the tab's state —
+   *  the panel is remounted on every tab switch and cannot hold it. */
+  working: GitVerb | null;
+  /** What the last verb said, from the same place and for the reason. */
+  notice: GitActionResult | null;
   /** Files the agent itself reported editing this session (first-hand,
    *  unlike the git sections below). */
   agentEdits: readonly AgentEditedFile[];
   onStage: (path: string) => Promise<GitActionResult>;
   onUnstage: (path: string) => Promise<GitActionResult>;
+  onStageAll: () => Promise<GitActionResult>;
+  onUnstageAll: () => Promise<GitActionResult>;
   onCommitPush: (message: string) => Promise<GitActionResult>;
   onOpenBranchPicker: () => void;
   onPush: () => Promise<GitActionResult>;
@@ -60,9 +67,13 @@ const ALL_OPEN = { agent: false, staged: true, unstaged: true, commits: true };
 export function ChangesPanel({
   changes,
   busy,
+  working,
+  notice,
   agentEdits,
   onStage,
   onUnstage,
+  onStageAll,
+  onUnstageAll,
   onCommitPush,
   onOpenBranchPicker,
   onPush,
@@ -73,36 +84,28 @@ export function ChangesPanel({
   onShowDiff,
   onShowAgentDiff,
 }: Props) {
-  // Which verb is in flight — its button shows a spinner while the
-  // remote round-trip (fetch/pull/push can take seconds) runs.
-  const [working, setWorking] = useState<
-    "fetch" | "pull" | "push" | "commit" | "file" | null
-  >(null);
-  const [notice, setNotice] = useState<GitActionResult | null>(null);
+  // Opening a file is the panel's own business — no git, no tab state.
+  const [fileProblem, setFileProblem] = useState<GitActionResult | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [open, setOpen] = useState(ALL_OPEN);
 
   const toggle = (section: keyof typeof ALL_OPEN) =>
     setOpen((current) => ({ ...current, [section]: !current[section] }));
 
+  // The verb, its outcome and the reread it earns all hang off the tab's
+  // state now — a verb outliving this panel still finishes properly.
   const run = async (
-    verb: NonNullable<typeof working>,
     action: () => Promise<GitActionResult>,
   ): Promise<GitActionResult> => {
-    setWorking(verb);
-    setNotice(null);
-    const result = await action();
-    setNotice(result.message ? result : null);
-    setWorking(null);
-    onRefresh();
-    return result;
+    setFileProblem(null);
+    return action();
   };
 
   // Opening a file changes nothing in the repo, so it neither disables
   // the panel nor triggers a refresh — but a failure must still be said.
   const openFile = async (path: string) => {
     const error = await onOpenFile(path);
-    setNotice(error ? { ok: false, message: error } : null);
+    setFileProblem(error ? { ok: false, message: error } : null);
   };
 
   // Reading git is safe while the agent works; moving the index under it
@@ -119,13 +122,15 @@ export function ChangesPanel({
     commitMessage.trim() !== "";
 
   const commitPush = async () => {
-    const result = await run("commit", () => onCommitPush(commitMessage));
+    const result = await run(() => onCommitPush(commitMessage));
     if (result.ok) setCommitMessage("");
   };
 
   /** The verb's icon, swapped for a spinner while that verb runs. */
-  const verbIcon = (verb: NonNullable<typeof working>, Idle: Icon) =>
+  const verbIcon = (verb: GitVerb, Idle: Icon) =>
     working === verb ? <CircleNotch className="changes__watching" /> : <Idle />;
+
+  const shown = fileProblem ?? notice;
 
   // Rendered below "Not staged" (or under the no-repo notice: the agent
   // reports its edits even where git can't).
@@ -191,7 +196,7 @@ export function ChangesPanel({
           disabled={working !== null}
           aria-label="Fetch"
           title="Fetch and prune remote-tracking branches"
-          onClick={() => void run("fetch", onFetch)}
+          onClick={() => void run(onFetch)}
         >
           {verbIcon("fetch", ArrowsClockwise)}
         </button>
@@ -201,7 +206,7 @@ export function ChangesPanel({
           disabled={mutationsDisabled}
           aria-label="Pull"
           title={pendingTitle("pull", behind)}
-          onClick={() => void run("pull", onPull)}
+          onClick={() => void run(onPull)}
         >
           {verbIcon("pull", ArrowLineDown)}
           <PendingCount count={behind} />
@@ -212,7 +217,7 @@ export function ChangesPanel({
           disabled={mutationsDisabled}
           aria-label="Push"
           title={pendingTitle("push", ahead)}
-          onClick={() => void run("push", onPush)}
+          onClick={() => void run(onPush)}
         >
           {verbIcon("push", ArrowLineUp)}
           <PendingCount count={ahead} />
@@ -253,9 +258,9 @@ export function ChangesPanel({
         </button>
       </div>
 
-      {notice && (
-        <p className={`changes__notice ${notice.ok ? "" : "changes__notice--error"}`}>
-          {notice.message}
+      {shown && (
+        <p className={`changes__notice ${shown.ok ? "" : "changes__notice--error"}`}>
+          {shown.message}
         </p>
       )}
 
@@ -274,13 +279,21 @@ export function ChangesPanel({
             count={changes.staged.length}
             open={open.staged}
             onToggle={() => toggle("staged")}
+            action={
+              <SectionAction
+                label="Unstage all"
+                Icon={Minus}
+                disabled={mutationsDisabled}
+                onClick={() => void run(onUnstageAll)}
+              />
+            }
           >
             <ChangeList
               files={changes.staged}
               ActionIcon={Minus}
               actionTitle="Unstage"
               disabled={mutationsDisabled}
-              onAction={(path) => void run("file", () => onUnstage(path))}
+              onAction={(path) => void run(() => onUnstage(path))}
               onOpenFile={(path) => void openFile(path)}
               onShowDiff={(file) => onShowDiff(file, true)}
             />
@@ -290,13 +303,21 @@ export function ChangesPanel({
             count={changes.unstaged.length}
             open={open.unstaged}
             onToggle={() => toggle("unstaged")}
+            action={
+              <SectionAction
+                label="Stage all"
+                Icon={Plus}
+                disabled={mutationsDisabled}
+                onClick={() => void run(onStageAll)}
+              />
+            }
           >
             <ChangeList
               files={changes.unstaged}
               ActionIcon={Plus}
               actionTitle="Stage"
               disabled={mutationsDisabled}
-              onAction={(path) => void run("file", () => onStage(path))}
+              onAction={(path) => void run(() => onStage(path))}
               onOpenFile={(path) => void openFile(path)}
               onShowDiff={(file) => onShowDiff(file, false)}
             />
@@ -358,18 +379,21 @@ function pendingTitle(verb: "pull" | "push", count: number): string {
     : `Push ${commits} to the upstream`;
 }
 
-/** A titled, collapsible group with its item count in the header. */
+/** A titled, collapsible group with its item count in the header, and
+ *  optionally one button acting on the whole group. */
 function Section({
   title,
   count,
   open,
   onToggle,
+  action,
   children,
 }: {
   title: string;
   count: number;
   open: boolean;
   onToggle: () => void;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -385,9 +409,37 @@ function Section({
           {title}
           <span className="changes__count">{count}</span>
         </button>
+        {/* An empty group has nothing to act on, open or closed. */}
+        {count > 0 && action}
       </h3>
       {open && count > 0 && children}
     </div>
+  );
+}
+
+/** The whole-group button — stage or unstage everything in one call. */
+function SectionAction({
+  label,
+  Icon,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  Icon: Icon;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="changes__title-action"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon size={14} />
+    </button>
   );
 }
 

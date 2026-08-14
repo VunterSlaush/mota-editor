@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
+import { extensionPanels as panelsOfExtensions } from "../core/entities/extension";
 import type { ProviderId } from "../core/entities/provider";
 import { isShellLine, shellCommand } from "../core/entities/shellLine";
 import { themeById } from "../core/entities/theme";
@@ -13,6 +14,7 @@ import type { SidebarView } from "./components/ActivityBar";
 import type { RightPanel, ShellsView } from "./components/ChatPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { EmptyState } from "./components/EmptyState";
+import type { ExtensionPanelsView } from "./components/ExtensionPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { TabBar } from "./components/TabBar";
 import { TooltipLayer } from "./components/TooltipLayer";
@@ -56,6 +58,16 @@ export function App({ context }: { context: AppContext }) {
     };
   }, [context, settingsOpen, projectPath]);
 
+  // Extensions load once at startup and again when settings open (the
+  // Reload button covers mid-session installs). The list drives the
+  // command palette and MCP merge, so it must exist before settings do.
+  useEffect(() => {
+    void context.manageExtensions.load();
+  }, [context]);
+  useEffect(() => {
+    if (settingsOpen) void context.manageExtensions.load();
+  }, [context, settingsOpen]);
+
   // The theme is a document-level attribute: the CSS palettes hang off
   // `[data-theme]`, so one line here restyles everything at once.
   useEffect(() => {
@@ -74,7 +86,7 @@ export function App({ context }: { context: AppContext }) {
   // of whichever tab you happen to click. Re-read when the set of tabs
   // changes (a project opened, a worktree added), not on every state
   // change: it is one git call per project, and one is enough.
-  const tabIds = state.tabs.map((t) => t.project.id).join("\0");
+  const tabIds = state.tabs.map((t) => t.project.id).join("\u0000");
   useEffect(() => {
     void context.loadBranches.execute();
   }, [context, tabIds]);
@@ -171,6 +183,29 @@ export function App({ context }: { context: AppContext }) {
     [context, activeProjectId, terminalFontSize, theme],
   );
 
+  // Panels re-derive only when the extension list changes; the bundle
+  // re-binds to whichever project is active, like every other intent.
+  const panelRefs = useMemo(
+    () => panelsOfExtensions(state.extensions),
+    [state.extensions],
+  );
+  const extensionPanelsView: ExtensionPanelsView = useMemo(
+    () => ({
+      panels: panelRefs,
+      load: (panel) => context.extensionPanels.load(panel, activeProjectId, projectPath),
+      action: (panel, request) =>
+        context.extensionPanels.action(panel, request, activeProjectId, projectPath),
+      subscribe: (panel, onChanged) =>
+        context.extensionPanels.onPanelChanged((extensionId, panelId) => {
+          const mine =
+            extensionId === panel.extensionId &&
+            (panelId === undefined || panelId === panel.panelId);
+          if (mine) onChanged();
+        }),
+    }),
+    [context, panelRefs, activeProjectId, projectPath],
+  );
+
   return (
     <div className="app">
       {!context.runningInTauri && (
@@ -205,6 +240,7 @@ export function App({ context }: { context: AppContext }) {
           }}
           sidebarView={sidebarView}
           onSelectSidebarView={setSidebarView}
+          extensionPanels={extensionPanelsView}
           rightPanel={rightPanel}
           onSelectRightPanel={setRightPanel}
           shells={shells}
@@ -262,6 +298,8 @@ export function App({ context }: { context: AppContext }) {
           loadGitChanges={() => context.loadGitChanges.execute(tab.project.id)}
           onGitStage={(path) => context.gitActions.stage(tab.project.id, path)}
           onGitUnstage={(path) => context.gitActions.unstage(tab.project.id, path)}
+          onGitStageAll={() => context.gitActions.stageAll(tab.project.id)}
+          onGitUnstageAll={() => context.gitActions.unstageAll(tab.project.id)}
           onGitCommitPush={(message) =>
             context.gitActions.commitAndPush(tab.project.id, message)
           }
@@ -327,6 +365,11 @@ export function App({ context }: { context: AppContext }) {
               void context.scopeWorktreeProvisioning.execute(tab.project.id, entries);
           }}
           newId={context.newId}
+          extensions={state.extensions}
+          onEnableExtension={(id) => void context.manageExtensions.enable(id)}
+          onDisableExtension={(id) => void context.manageExtensions.disable(id)}
+          onReloadExtensions={() => void context.manageExtensions.load()}
+          readExtensionLog={(id) => context.manageExtensions.readLog(id)}
           supportsCow={supportsCow}
           loadFolders={projectPath ? loadFolders : undefined}
           onClose={closeSettings}

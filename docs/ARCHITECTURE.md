@@ -107,6 +107,32 @@ and the Rust `Provider` trait are owned by inner layers, a direct-API
 adapter (Anthropic/OpenAI/Google HTTP APIs) can be added later without
 touching a single use case — the definition of OCP at the boundary.
 
+## The extension boundary (user-installed, out-of-process)
+
+Extensions follow the same shape as agents: a subprocess behind a port,
+speaking newline-delimited JSON-RPC (the Mota Extension Protocol,
+ADR-0012). An extension is a folder in `~/.mota/extensions/` — a manifest
+declaring contributions (slash commands, MCP servers, event
+subscriptions) and permissions, plus optionally a script in any language.
+
+```
+SettingsExtensions / SendPrompt → ExtensionHostPort (port)
+                                        │
+                        TauriExtensionHost (adapter, IPC)
+                                        │
+              extension_host.rs (spawn, route, permission broker)
+                                        │
+                  the extension's own process, MXP over stdio
+```
+
+Pure manifest/protocol logic lives in `agent_core::extension`; the shell
+spawns lazily (a contribution's first use), enforces permissions against
+grants in `extensions.json` (minted only behind a native consent dialog),
+and quarantines repeat crashers. Extension MCP servers ride the existing
+`mcpServer` plumbing as derived rows; extension commands merge into the
+same palette as builtins and file commands. Authoring guide:
+`docs/EXTENSIONS.md`.
+
 ## Screaming architecture
 
 > "So what does the architecture of your application scream?"
