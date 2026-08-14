@@ -16,6 +16,7 @@ pub mod history;
 pub mod mcp;
 pub mod provider;
 pub mod providers;
+pub mod scope;
 pub mod session_keywords;
 pub mod session_meta;
 pub mod shell;
@@ -25,4 +26,5 @@ pub mod worktree;
 
 pub use event::{AgentEvent, PermissionOptionInfo};
 pub use provider::{provider_for, Provider, TurnCommand};
+pub use scope::SubtaskScope;
 pub use turn::{Mode, Permission, TurnRequest};

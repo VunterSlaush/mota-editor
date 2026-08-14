@@ -71,6 +71,7 @@ import { ScopeWorktreeProvisioning } from "../core/usecases/scopeWorktreeProvisi
 import { SendPrompt } from "../core/usecases/sendPrompt";
 import { SessionStatus } from "../core/usecases/sessionStatus";
 import { Shells } from "../core/usecases/shells";
+import { Subtasks } from "../core/usecases/subtasks";
 import {
   SelectEffort,
   SelectMode,
@@ -112,6 +113,8 @@ export interface AppContext {
   readonly loadBranches: LoadBranches;
   readonly gitActions: GitActions;
   readonly worktrees: Worktrees;
+  /** Scoped tabs on a folder already open: create one, re-scope one. */
+  readonly subtasks: Subtasks;
   /** Exposed for the settings panel, which asks what a copy would cost. */
   readonly worktreeProvisioning: WorktreeProvisioning;
   readonly removeWorktree: RemoveWorktree;
@@ -259,6 +262,7 @@ export function createAppContext(): AppContext {
     loadBranches: new LoadBranches(store, gitPort),
     gitActions: new GitActions(store, gitPort),
     worktrees,
+    subtasks: new Subtasks(store, workspaceStore, agentGateway, newId),
     worktreeProvisioning,
     removeWorktree: new RemoveWorktree(
       store,

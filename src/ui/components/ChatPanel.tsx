@@ -4,6 +4,7 @@ import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSetti
 import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
+import type { SubtaskScope } from "../../core/entities/subtask";
 import { agentEditedFiles, countFileChangingTools } from "../../core/entities/tool";
 import type { RemovalCheck } from "../../core/entities/worktree";
 import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
@@ -32,6 +33,8 @@ import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
 import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
+import { SubtaskPicker } from "./SubtaskPicker";
+import { SubtasksPanel } from "./SubtasksPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { WorktreePicker } from "./WorktreePicker";
 import { WorktreesPanel } from "./WorktreesPanel";
@@ -170,6 +173,14 @@ interface Props {
   onRetryPreparing: () => void;
   onCheckWorktreeRemoval: (path: string) => Promise<RemovalCheck>;
   onRemoveWorktree: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
+  /** The project's folders, candidates for a subtask's write boundary. */
+  loadFolderCandidates: () => Promise<string[]>;
+  /** Open a scoped tab on this folder; resolves with a problem, or not. */
+  onNewSubtask: (scope: SubtaskScope) => Promise<string | undefined>;
+  /** Re-scope this tab (a subtask only); the agent session respawns. */
+  onChangeSubtaskScope: (scope: SubtaskScope) => Promise<string | undefined>;
+  /** Go to another open tab (a subtask row was clicked). */
+  onActivateTab: (tabId: string) => void;
   onOpenFile: (path: string) => Promise<string | null>;
   onPickFiles: () => Promise<string[]>;
   /** Save an image pasted into the composer; returns its file path. */
@@ -240,6 +251,10 @@ export function ChatPanel({
   onRetryPreparing,
   onCheckWorktreeRemoval,
   onRemoveWorktree,
+  loadFolderCandidates,
+  onNewSubtask,
+  onChangeSubtaskScope,
+  onActivateTab,
   onOpenFile,
   onPickFiles,
   onPasteImage,
@@ -264,6 +279,8 @@ export function ChatPanel({
   const terminalPanel = useDragWidth(520, 320, 900, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [worktreePickerOpen, setWorktreePickerOpen] = useState(false);
+  // "edit" reopens the picker on this tab's own scope; "new" makes one.
+  const [subtaskPicker, setSubtaskPicker] = useState<"new" | "edit" | null>(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
@@ -583,6 +600,15 @@ export function ChatPanel({
                   onShowAllSessions={() => onSelectSidebarView("history")}
                 />
               )}
+              {shownSidebarView === "subtasks" && (
+                <SubtasksPanel
+                  tabs={tabs}
+                  currentTab={tab}
+                  onActivate={onActivateTab}
+                  onNewSubtask={() => setSubtaskPicker("new")}
+                  onEditScope={() => setSubtaskPicker("edit")}
+                />
+              )}
               {shownSidebarView === "history" && (
                 <HistoryPanel
                   sessions={history.sessions}
@@ -783,6 +809,14 @@ export function ChatPanel({
           onCheckRemoval={onCheckWorktreeRemoval}
           onRemove={onRemoveWorktree}
           onClose={() => setWorktreePickerOpen(false)}
+        />
+      )}
+      {subtaskPicker && (
+        <SubtaskPicker
+          loadFolders={loadFolderCandidates}
+          initialScope={subtaskPicker === "edit" ? tab.project.subtask : undefined}
+          onSubmit={subtaskPicker === "edit" ? onChangeSubtaskScope : onNewSubtask}
+          onClose={() => setSubtaskPicker(null)}
         />
       )}
     </main>

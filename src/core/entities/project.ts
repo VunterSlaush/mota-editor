@@ -1,6 +1,7 @@
 import type { AgentMode, PermissionPolicy } from "./agentSettings";
 import type { ProjectMcpOverrides } from "./mcpServer";
 import type { ProviderId } from "./provider";
+import type { SubtaskScope } from "./subtask";
 import type { TabColorId } from "./tabColor";
 import type { ProvisionEntry } from "./worktree";
 
@@ -52,6 +53,11 @@ export interface Project {
    * checkout it belongs to. Absent for ordinary folders.
    */
   readonly worktreeOf?: string;
+  /**
+   * When this tab is a subtask, the authority its agent gets. Absent
+   * for ordinary tabs; a tab never converts to or from a subtask.
+   */
+  readonly subtask?: SubtaskScope;
 }
 
 export function projectNameFromPath(path: string): string {
@@ -117,6 +123,7 @@ export function newProject(
   path: string,
   defaults: ProjectDefaults,
   worktreeOf?: string,
+  subtask?: SubtaskScope,
 ): Project {
   return {
     id,
@@ -136,5 +143,6 @@ export function newProject(
       : {}),
     ...(defaults.color ? { color: defaults.color } : {}),
     worktreeOf,
+    ...(subtask ? { subtask } : {}),
   };
 }

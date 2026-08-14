@@ -31,9 +31,10 @@ import {
 } from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
+import type { SubtaskScope } from "../entities/subtask";
 import type { TabColorId } from "../entities/tabColor";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
-import { defaultWorktreeSettings } from "../entities/worktree";
+import { defaultWorktreeSettings, samePath } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
 
 /**
@@ -238,6 +239,7 @@ export type Action =
   | { type: "worktree/preparing"; tabId: string }
   /** `problem` is absent when everything landed. */
   | { type: "worktree/prepared"; tabId: string; problem?: string }
+  | { type: "subtask/scopeChanged"; tabId: string; scope: SubtaskScope }
   | { type: "tab/activated"; tabId: string }
   | { type: "tab/moved"; tabId: string; toIndex: number }
   | { type: "tab/attentionRequested"; tabId: string }
@@ -404,7 +406,15 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, settings: { ...state.settings, ...action.patch } };
 
     case "tab/opened": {
-      const existing = state.tabs.find((t) => t.project.path === action.project.path);
+      // Re-activate rather than duplicate — but only among plain tabs.
+      // Subtasks exist to put several agents on one folder, so a subtask
+      // never absorbs another tab and is never absorbed by one.
+      const existing = state.tabs.find(
+        (t) =>
+          t.project.path === action.project.path &&
+          !t.project.subtask &&
+          !action.project.subtask,
+      );
       if (existing) return { ...state, activeTabId: existing.project.id };
       const tab: TabState = {
         project: action.project,
@@ -447,6 +457,16 @@ export function reduce(state: AppState, action: Action): AppState {
         preparing: false,
         preparingProblem: action.problem,
       }));
+
+    // Only a tab that already is a subtask can change scope: converting
+    // a plain tab would silently rescope a conversation the user started
+    // under full authority — closing it is the honest way out.
+    case "subtask/scopeChanged":
+      return mapTab(state, action.tabId, (tab) =>
+        tab.project.subtask
+          ? { ...tab, project: { ...tab.project, subtask: action.scope } }
+          : tab,
+      );
 
     case "tab/moved": {
       // Reordering is purely cosmetic: which tab you are looking at never
@@ -997,4 +1017,9 @@ export function activeTab(state: AppState): TabState | null {
 
 export function tabById(state: AppState, tabId: string): TabState | null {
   return state.tabs.find((t) => t.project.id === tabId) ?? null;
+}
+
+/** The open subtask tabs working this folder, in tab order. */
+export function subtaskTabsOn(state: AppState, path: string): TabState[] {
+  return state.tabs.filter((t) => t.project.subtask && samePath(t.project.path, path));
 }

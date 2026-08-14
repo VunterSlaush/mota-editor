@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use crate::event::AgentEvent;
 use crate::provider::{summarize_tool_input, Provider, TurnCommand};
+use crate::scope::effective_permission;
 use crate::turn::{effective_prompt, external_attachment_dirs, Mode, Permission, TurnRequest};
 
 /// Adapter for Anthropic's Claude Code CLI in headless mode:
@@ -32,7 +33,11 @@ impl Provider for Claude {
             "stream-json".to_owned(),
             "--verbose".to_owned(),
         ];
-        match (request.mode, request.permission) {
+        // The scope caps the permission first (read-only forces manual,
+        // boundary strips bypass), so a scoped tab never reaches the
+        // skip-permissions flag. Deliberately NOT mapped to plan mode:
+        // plan changes what the agent does, not just what it may touch.
+        match (request.mode, effective_permission(request.permission, request.subtask.as_ref())) {
             (Mode::Plan, _) => {
                 args.push("--permission-mode".to_owned());
                 args.push("plan".to_owned());
@@ -191,6 +196,36 @@ mod tests {
         let args = Claude.build_command(&request).args;
         assert!(args.contains(&"plan".to_owned()));
         assert!(!args.contains(&"auto".to_owned()));
+    }
+
+    #[test]
+    fn a_read_only_subtask_suppresses_bypass_and_states_the_scope() {
+        let request = TurnRequest {
+            permission: Permission::Bypass,
+            subtask: Some(crate::scope::SubtaskScope::ReadOnly),
+            ..test_request("look around")
+        };
+        let args = Claude.build_command(&request).args;
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+        // Not plan mode: the scope restricts writes, not the behavior.
+        assert!(!args.contains(&"plan".to_owned()));
+        assert!(args[1].contains("READ-ONLY"));
+        assert!(args[1].ends_with("look around"));
+    }
+
+    #[test]
+    fn a_boundary_subtask_lists_its_folders_and_caps_bypass_to_auto() {
+        let request = TurnRequest {
+            permission: Permission::Bypass,
+            subtask: Some(crate::scope::SubtaskScope::Boundary {
+                boundaries: vec!["apps/web".to_owned()],
+            }),
+            ..test_request("edit the web app")
+        };
+        let args = Claude.build_command(&request).args;
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+        assert!(args.contains(&"auto".to_owned()));
+        assert!(args[1].contains("- apps/web"));
     }
 
     #[test]

@@ -50,6 +50,8 @@ pub struct StartTurnArgs {
     pub effort: Option<String>,
     #[serde(default)]
     pub mcp_servers: Vec<agent_core::acp::McpServer>,
+    #[serde(default)]
+    pub subtask: Option<agent_core::SubtaskScope>,
 }
 
 #[tauri::command]
@@ -92,6 +94,7 @@ pub async fn start_turn(
         attachments: args.attachments,
         model: validate_token(args.model, "model")?,
         effort: validate_token(args.effort, "effort")?,
+        subtask: args.subtask,
     };
 
     // Preferred transport: a persistent ACP session (interactive
@@ -168,6 +171,8 @@ pub struct WarmSessionArgs {
     pub effort: Option<String>,
     #[serde(default)]
     pub mcp_servers: Vec<agent_core::acp::McpServer>,
+    #[serde(default)]
+    pub subtask: Option<agent_core::SubtaskScope>,
 }
 
 impl WarmSessionArgs {
@@ -179,6 +184,7 @@ impl WarmSessionArgs {
             model: validate_token(self.model.clone(), "model")?,
             effort: validate_token(self.effort.clone(), "effort")?,
             mcp_servers: self.mcp_servers.clone(),
+            subtask: self.subtask.clone(),
         })
     }
 }

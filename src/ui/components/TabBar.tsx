@@ -1,6 +1,7 @@
-import { FolderSimple, GitFork } from "@phosphor-icons/react";
+import { FolderSimple, GitFork, TreeStructure } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { tabLabel } from "../../core/entities/project";
+import { describeScope } from "../../core/entities/subtask";
 import type { TabColorId } from "../../core/entities/tabColor";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
@@ -48,9 +49,12 @@ export function TabBar({
         const statusLabel = TAB_STATUS_LABELS[status];
         // The branch comes from the tab's cached git read, never a live call.
         const at = tab.branch ? `${tab.project.path} (${tab.branch})` : tab.project.path;
-        const where = tab.project.worktreeOf
+        const checkout = tab.project.worktreeOf
           ? `${at} — worktree of ${tab.project.worktreeOf}`
           : at;
+        const where = tab.project.subtask
+          ? `${checkout} — subtask, ${describeScope(tab.project.subtask)}`
+          : checkout;
         const name = tabLabel(tab.project);
         // A named tab still has to say where it points: the name took the
         // folder's place in the strip, so the tooltip is where that goes.
@@ -79,9 +83,13 @@ export function TabBar({
               setMenu({ tabId: id, anchor: e.currentTarget.getBoundingClientRect() });
             }}
           >
-            {/* Folder vs worktree at a glance; the tooltip says which repo. */}
+            {/* Folder, worktree or subtask at a glance; the tooltip says
+                which repo and which scope. The subtask icon wins — the
+                restriction matters more than the checkout it sits on. */}
             <span className="tab__icon">
-              {tab.project.worktreeOf ? (
+              {tab.project.subtask ? (
+                <TreeStructure size={13} aria-hidden="true" />
+              ) : tab.project.worktreeOf ? (
                 <GitFork size={13} aria-hidden="true" />
               ) : (
                 <FolderSimple size={13} aria-hidden="true" />

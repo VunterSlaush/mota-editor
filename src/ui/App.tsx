@@ -320,6 +320,12 @@ export function App({ context }: { context: AppContext }) {
           onRemoveWorktree={(path, mode) =>
             context.removeWorktree.execute(tab.project.id, path, mode)
           }
+          loadFolderCandidates={loadFolders}
+          onNewSubtask={(scope) => context.subtasks.open(tab.project.id, scope)}
+          onChangeSubtaskScope={(scope) =>
+            context.subtasks.changeScope(tab.project.id, scope)
+          }
+          onActivateTab={(tabId) => void context.switchTab.execute(tabId)}
           onOpenFile={(path) => openFileExternally(tab.project.path, path)}
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}

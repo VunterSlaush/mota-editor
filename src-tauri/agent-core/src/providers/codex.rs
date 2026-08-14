@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use crate::event::AgentEvent;
 use crate::provider::{truncate, Provider, TurnCommand};
+use crate::scope::{effective_permission, SubtaskScope};
 use crate::turn::{effective_prompt, Mode, Permission, TurnRequest};
 
 /// Adapter for OpenAI's Codex CLI (ChatGPT) in headless mode:
@@ -45,20 +46,25 @@ impl Provider for Codex {
                 args.push(format!("model_reasoning_effort=\"{effort}\""));
             }
         }
-        match (request.mode, request.permission) {
-            (Mode::Plan, _) => {
-                args.push("--sandbox".to_owned());
-                args.push("read-only".to_owned());
+        // A read-only subtask gets plan mode's sandbox without plan
+        // mode's behavior; a boundary subtask has its bypass capped
+        // (`effective_permission`), so the workspace sandbox stays up.
+        let read_only_scope = matches!(request.subtask, Some(SubtaskScope::ReadOnly));
+        if request.mode == Mode::Plan || read_only_scope {
+            args.push("--sandbox".to_owned());
+            args.push("read-only".to_owned());
+        } else {
+            match effective_permission(request.permission, request.subtask.as_ref()) {
+                Permission::Bypass => {
+                    args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+                }
+                Permission::Auto => {
+                    // Codex's accept-edits tier: writes stay inside the
+                    // workspace, the sandbox still guards everything else.
+                    args.push("--full-auto".to_owned());
+                }
+                Permission::Manual => {}
             }
-            (_, Permission::Bypass) => {
-                args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
-            }
-            (_, Permission::Auto) => {
-                // Codex's accept-edits tier: writes stay inside the
-                // workspace, the sandbox still guards everything else.
-                args.push("--full-auto".to_owned());
-            }
-            (_, Permission::Manual) => {}
         }
         args.push(effective_prompt(request, false));
         TurnCommand { program: "codex".to_owned(), args }
@@ -243,6 +249,33 @@ mod tests {
         assert!(args.contains(&"--sandbox".to_owned()));
         assert!(args.contains(&"read-only".to_owned()));
         assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_owned()));
+    }
+
+    #[test]
+    fn a_read_only_subtask_is_sandboxed_read_only_even_over_bypass() {
+        let request = TurnRequest {
+            permission: Permission::Bypass,
+            subtask: Some(SubtaskScope::ReadOnly),
+            ..test_request("look around")
+        };
+        let args = Codex.build_command(&request).args;
+        assert!(args.contains(&"--sandbox".to_owned()));
+        assert!(args.contains(&"read-only".to_owned()));
+        assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_owned()));
+        assert!(!args.contains(&"--full-auto".to_owned()));
+    }
+
+    #[test]
+    fn a_boundary_subtask_caps_bypass_to_the_workspace_sandbox() {
+        let request = TurnRequest {
+            permission: Permission::Bypass,
+            subtask: Some(SubtaskScope::Boundary { boundaries: vec!["apps/web".to_owned()] }),
+            ..test_request("edit the web app")
+        };
+        let args = Codex.build_command(&request).args;
+        assert!(args.contains(&"--full-auto".to_owned()));
+        assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_owned()));
+        assert!(!args.contains(&"read-only".to_owned()));
     }
 
     #[test]

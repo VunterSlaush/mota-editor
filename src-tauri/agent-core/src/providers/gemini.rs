@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use crate::event::AgentEvent;
 use crate::provider::{Provider, TurnCommand};
+use crate::scope::effective_permission;
 use crate::turn::{effective_prompt, external_attachment_dirs, Permission, TurnRequest};
 
 /// Adapter for Google's Gemini CLI in headless mode:
@@ -35,7 +36,10 @@ impl Provider for Gemini {
             args.push("--model".to_owned());
             args.push(model.to_owned());
         }
-        match request.permission {
+        // Scope caps first: a scoped tab never gets `--yolo`. Gemini has
+        // no read-only sandbox, so the scope preamble is the whole story
+        // beyond the flag suppression (ADR-0014).
+        match effective_permission(request.permission, request.subtask.as_ref()) {
             Permission::Bypass => args.push("--yolo".to_owned()),
             Permission::Auto => {
                 args.push("--approval-mode".to_owned());
@@ -123,6 +127,18 @@ mod tests {
         assert!(args.contains(&"--approval-mode".to_owned()));
         assert!(args.contains(&"auto_edit".to_owned()));
         assert!(!args.contains(&"--yolo".to_owned()));
+    }
+
+    #[test]
+    fn a_read_only_subtask_never_gets_yolo_and_states_the_scope() {
+        let request = TurnRequest {
+            permission: Permission::Bypass,
+            subtask: Some(crate::scope::SubtaskScope::ReadOnly),
+            ..test_request("look around")
+        };
+        let args = Gemini.build_command(&request).args;
+        assert!(!args.contains(&"--yolo".to_owned()));
+        assert!(args[1].contains("READ-ONLY"));
     }
 
     #[test]

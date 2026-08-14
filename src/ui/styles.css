@@ -5260,3 +5260,77 @@ body {
   outline: none;
   border-color: var(--accent);
 }
+
+/* ---- Subtask picker ---- */
+
+.subtask-picker {
+  background: var(--panel, #1e1e1e);
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  padding: 16px;
+  width: 420px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.subtask-picker__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.subtask-picker__hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.subtask-picker__option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subtask-picker__option input {
+  margin-top: 2px;
+}
+
+.subtask-picker__folders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.subtask-picker__folder {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subtask-picker__typed {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.subtask-picker__typed .settings-input {
+  flex: 1;
+}
+
+.subtask-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

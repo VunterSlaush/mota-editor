@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { userMessage } from "../entities/message";
 import { newProject } from "../entities/project";
+import type { SubtaskScope } from "../entities/subtask";
 import {
   type AppState,
   activeTab,
@@ -8,6 +9,7 @@ import {
   initialState,
   projectDefaults,
   reduce,
+  subtaskTabsOn,
 } from "./appState";
 
 const DEFAULTS = projectDefaults(defaultSettings);
@@ -573,5 +575,71 @@ describe("tab/provisioningChanged", () => {
     ]);
     state = change(state, undefined);
     expect("provisioningOverride" in state.tabs[0].project).toBe(false);
+  });
+});
+
+describe("subtasks", () => {
+  const openSubtask = (
+    state: AppState,
+    id: string,
+    path: string,
+    scope: SubtaskScope = { access: "read-only" },
+  ) =>
+    reduce(state, {
+      type: "tab/opened",
+      project: newProject(id, path, DEFAULTS, undefined, scope),
+    });
+
+  it("a subtask opens beside the plain tab on the same folder", () => {
+    let state = open(initialState, "t1", "/work/alpha");
+    state = openSubtask(state, "t2", "/work/alpha");
+    expect(state.tabs).toHaveLength(2);
+    expect(state.activeTabId).toBe("t2");
+  });
+
+  it("two subtasks coexist on one folder", () => {
+    let state = open(initialState, "t1", "/work/alpha");
+    state = openSubtask(state, "t2", "/work/alpha");
+    state = openSubtask(state, "t3", "/work/alpha");
+    expect(ids(state)).toEqual(["t1", "t2", "t3"]);
+  });
+
+  it("a plain tab still re-activates past an open subtask", () => {
+    let state = open(initialState, "t1", "/work/alpha");
+    state = openSubtask(state, "t2", "/work/alpha");
+    state = open(state, "t3", "/work/alpha");
+    expect(state.tabs).toHaveLength(2);
+    expect(state.activeTabId).toBe("t1");
+  });
+
+  it("changes the scope of a subtask tab", () => {
+    let state = openSubtask(initialState, "t1", "/work/alpha");
+    state = reduce(state, {
+      type: "subtask/scopeChanged",
+      tabId: "t1",
+      scope: { access: "boundary", boundaries: ["apps/web"] },
+    });
+    expect(state.tabs[0].project.subtask).toEqual({
+      access: "boundary",
+      boundaries: ["apps/web"],
+    });
+  });
+
+  it("never rescopes a plain tab into a subtask", () => {
+    let state = open(initialState, "t1", "/work/alpha");
+    state = reduce(state, {
+      type: "subtask/scopeChanged",
+      tabId: "t1",
+      scope: { access: "read-only" },
+    });
+    expect(state.tabs[0].project.subtask).toBeUndefined();
+  });
+
+  it("lists the subtask tabs working a folder, across path styles", () => {
+    let state = open(initialState, "t1", "C:\\work\\alpha");
+    state = openSubtask(state, "t2", "C:\\work\\alpha");
+    state = openSubtask(state, "t3", "C:\\work\\beta");
+    const on = subtaskTabsOn(state, "c:/work/alpha/");
+    expect(on.map((t) => t.project.id)).toEqual(["t2"]);
   });
 });

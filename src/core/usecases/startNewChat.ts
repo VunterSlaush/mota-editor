@@ -37,7 +37,7 @@ export async function startNewChat(
   const state = store.getState();
   const tab = tabById(state, tabId);
   if (!tab) return;
-  const { path, model, effort, mcpOverrides } = tab.project;
+  const { path, model, effort, mcpOverrides, subtask } = tab.project;
   void agentGateway
     .warmSession(
       tabId,
@@ -46,6 +46,7 @@ export async function startNewChat(
       model,
       effort,
       agentServers(state, provider, mcpOverrides),
+      subtask,
     )
     .catch(() => undefined); // warm-up is best-effort
 }

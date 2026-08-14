@@ -213,6 +213,7 @@ export class SendPrompt {
         provider,
         configured.project.mcpOverrides,
       ),
+      subtask: configured.project.subtask,
     };
 
     let failure = await this.tryStart(tabId, request, turn);

@@ -42,9 +42,39 @@ pub fn confine_to_project(
     }
 }
 
+/// Resolve an agent-supplied WRITE target against the session's subtask
+/// scope. The confinement runs first, so `..` and symlinks are already
+/// defeated by the time the scope judges the project-relative remainder;
+/// the judgment itself is `agent_core::scope::write_allowed`, pure and
+/// unit-tested. No scope behaves exactly like `confine_to_project`.
+pub fn confine_write_to_scope(
+    project_path: &str,
+    requested: &str,
+    scope: Option<&agent_core::SubtaskScope>,
+) -> Result<std::path::PathBuf, String> {
+    if matches!(scope, Some(agent_core::SubtaskScope::ReadOnly)) {
+        return Err("This subtask is read-only.".to_owned());
+    }
+    let file = confine_to_project(project_path, requested, false)?;
+    if scope.is_none() {
+        return Ok(file);
+    }
+    let project = std::fs::canonicalize(project_path)
+        .map_err(|e| format!("Project folder unavailable: {e}"))?;
+    let rel = file
+        .strip_prefix(&project)
+        .map_err(|_| format!("Path is outside the project: {requested}"))?;
+    if agent_core::scope::write_allowed(scope, &rel.to_string_lossy()) {
+        Ok(file)
+    } else {
+        Err(format!("Path is outside this subtask's writable folders: {requested}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::confine_to_project;
+    use super::{confine_to_project, confine_write_to_scope};
+    use agent_core::SubtaskScope;
 
     #[test]
     fn accepts_a_file_inside_the_project() {
@@ -87,5 +117,72 @@ mod tests {
             false,
         );
         assert!(ok.is_ok());
+    }
+
+    /// A project with a writable `apps/web` boundary and a file target,
+    /// ready to be judged.
+    fn scoped_write(
+        target: &[&str],
+    ) -> (tempfile::TempDir, String, SubtaskScope) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("apps").join("web")).unwrap();
+        std::fs::create_dir_all(dir.path().join("apps").join("api")).unwrap();
+        let mut requested = dir.path().to_path_buf();
+        for part in target {
+            requested.push(part);
+        }
+        let scope = SubtaskScope::Boundary { boundaries: vec!["apps/web".to_owned()] };
+        (dir, requested.to_string_lossy().into_owned(), scope)
+    }
+
+    #[test]
+    fn a_read_only_scope_refuses_every_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let requested = dir.path().join("new.md");
+        let err = confine_write_to_scope(
+            dir.path().to_str().unwrap(),
+            requested.to_str().unwrap(),
+            Some(&SubtaskScope::ReadOnly),
+        );
+        assert_eq!(err.unwrap_err(), "This subtask is read-only.");
+    }
+
+    #[test]
+    fn no_scope_writes_exactly_as_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let requested = dir.path().join("new.md");
+        let ok = confine_write_to_scope(
+            dir.path().to_str().unwrap(),
+            requested.to_str().unwrap(),
+            None,
+        );
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn a_boundary_scope_admits_a_write_inside_its_folder() {
+        let (dir, requested, scope) = scoped_write(&["apps", "web", "new.ts"]);
+        let ok = confine_write_to_scope(dir.path().to_str().unwrap(), &requested, Some(&scope));
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn a_boundary_scope_refuses_a_write_outside_its_folder() {
+        let (dir, requested, scope) = scoped_write(&["apps", "api", "new.rs"]);
+        let err = confine_write_to_scope(dir.path().to_str().unwrap(), &requested, Some(&scope));
+        assert!(err.unwrap_err().contains("writable folders"));
+    }
+
+    #[test]
+    fn a_boundary_scope_still_refuses_leaving_the_project() {
+        let (dir, _, scope) = scoped_write(&[]);
+        let outside = tempfile::tempdir().unwrap();
+        let requested = outside.path().join("escape.md");
+        let err = confine_write_to_scope(
+            dir.path().to_str().unwrap(),
+            requested.to_str().unwrap(),
+            Some(&scope),
+        );
+        assert!(err.is_err());
     }
 }
