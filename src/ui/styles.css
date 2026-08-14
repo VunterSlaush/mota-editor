@@ -3648,6 +3648,9 @@ body {
 
 .changes__title {
   margin: 10px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -3655,7 +3658,8 @@ body {
 }
 
 .changes__title-toggle {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -3677,6 +3681,37 @@ body {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
   letter-spacing: normal;
+}
+
+/* Stage/unstage everything. Always there — it is the only way to move
+   the whole group — but dim until the group is hovered, since it acts
+   on every file at once and should not invite an idle click. */
+.changes__title-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.changes__group:hover .changes__title-action:not(:disabled),
+.changes__title-action:focus-visible {
+  opacity: 1;
+}
+
+.changes__title-action:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text);
+}
+
+.changes__title-action:disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 
 .changes__list {

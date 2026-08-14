@@ -146,6 +146,8 @@ interface Props {
   loadGitChanges: () => Promise<GitChanges | null>;
   onGitStage: (path: string) => Promise<GitActionResult>;
   onGitUnstage: (path: string) => Promise<GitActionResult>;
+  onGitStageAll: () => Promise<GitActionResult>;
+  onGitUnstageAll: () => Promise<GitActionResult>;
   onGitCommitPush: (message: string) => Promise<GitActionResult>;
   onGitCheckout: (branch: string) => Promise<GitActionResult>;
   onGitPush: () => Promise<GitActionResult>;
@@ -224,6 +226,8 @@ export function ChatPanel({
   loadGitChanges,
   onGitStage,
   onGitUnstage,
+  onGitStageAll,
+  onGitUnstageAll,
   onGitCommitPush,
   onGitCheckout,
   onGitPush,
@@ -358,7 +362,8 @@ export function ChatPanel({
   }, [tab.project.provider, tab.project.id]);
 
   // Reload git whenever the working tree may have moved: a turn starting
-  // or ending, the running agent touching files, or the user asking.
+  // or ending, the running agent touching files, a git verb of our own
+  // starting or finishing, or the user asking.
   // Reading git is safe mid-turn, so this stays live while the agent
   // works. Debounced, so a burst of edits costs one `git status`.
   // Loaded even with the panel closed, so the header branch stays live.
@@ -374,7 +379,7 @@ export function ChatPanel({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
+  }, [tab.busy, tab.project.id, tab.gitVerb, changesRefreshKey, fileChangingTools]);
 
   // Refresh the session list whenever the history view is open: on the
   // tab going idle (a finished turn may have added or updated a
@@ -539,10 +544,14 @@ export function ChatPanel({
                 <ChangesPanel
                   changes={changes}
                   busy={tab.busy}
+                  working={tab.gitVerb ?? null}
+                  notice={tab.gitNotice ?? null}
                   agentEdits={agentEdits}
                   onShowAgentDiff={showAgentDiff}
                   onStage={onGitStage}
                   onUnstage={onGitUnstage}
+                  onStageAll={onGitStageAll}
+                  onUnstageAll={onGitUnstageAll}
                   onCommitPush={onGitCommitPush}
                   onOpenBranchPicker={() => setBranchPickerOpen(true)}
                   onPush={onGitPush}

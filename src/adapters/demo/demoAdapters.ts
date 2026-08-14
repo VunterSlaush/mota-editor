@@ -390,6 +390,14 @@ export class DemoGit implements GitPort {
     this.staged.delete(path);
     this.unstaged.add(path);
   }
+  async stageAll() {
+    for (const path of this.unstaged) this.staged.add(path);
+    this.unstaged.clear();
+  }
+  async unstageAll() {
+    for (const path of this.staged) this.unstaged.add(path);
+    this.staged.clear();
+  }
   async commit(): Promise<string> {
     this.staged.clear();
     return "1 file changed";

@@ -11,6 +11,7 @@ import {
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { ExtensionDescriptor, ExtensionStatus } from "../entities/extension";
+import type { GitActionResult, GitVerb } from "../entities/gitAction";
 import type { McpServerConfig } from "../entities/mcpServer";
 import type {
   ChatMessage,
@@ -127,6 +128,14 @@ export interface TabState {
   /** The project's current git branch, cached from the last git read —
    *  tooltips read this instead of asking git on every hover. */
   readonly branch?: string;
+  /**
+   * The git verb running against this project, and what the last one
+   * said. Here rather than in the Changes panel because switching tabs
+   * remounts it: a push mid-flight has to still look like one on the way
+   * back, and its outcome has to survive being away for it.
+   */
+  readonly gitVerb?: GitVerb;
+  readonly gitNotice?: GitActionResult;
   /**
    * The terminals open in this project.
    *
@@ -274,6 +283,8 @@ export type Action =
     }
   | { type: "tab/sessionStageChanged"; tabId: string; stage: string | undefined }
   | { type: "tab/branchUpdated"; tabId: string; branch: string | undefined }
+  | { type: "git/started"; tabId: string; verb: GitVerb }
+  | { type: "git/finished"; tabId: string; result: GitActionResult }
   /** The backend agent session was ended on purpose: forget everything
    *  tied to it (resume id, usage, advertised commands). */
   | { type: "chat/sessionReset"; tabId: string; provider: ProviderId }
@@ -624,6 +635,22 @@ export function reduce(state: AppState, action: Action): AppState {
 
     case "tab/branchUpdated":
       return mapTab(state, action.tabId, (tab) => ({ ...tab, branch: action.branch }));
+
+    case "git/started":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        gitVerb: action.verb,
+        gitNotice: undefined,
+      }));
+
+    // A verb that said nothing succeeded quietly — staging a file, most
+    // often — and the panel showing the change is the whole report.
+    case "git/finished":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        gitVerb: undefined,
+        gitNotice: action.result.message ? action.result : undefined,
+      }));
 
     case "chat/messageAppended":
       return mapTab(state, action.tabId, (tab) => ({

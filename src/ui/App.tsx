@@ -289,6 +289,8 @@ export function App({ context }: { context: AppContext }) {
           loadGitChanges={() => context.loadGitChanges.execute(tab.project.id)}
           onGitStage={(path) => context.gitActions.stage(tab.project.id, path)}
           onGitUnstage={(path) => context.gitActions.unstage(tab.project.id, path)}
+          onGitStageAll={() => context.gitActions.stageAll(tab.project.id)}
+          onGitUnstageAll={() => context.gitActions.unstageAll(tab.project.id)}
           onGitCommitPush={(message) =>
             context.gitActions.commitAndPush(tab.project.id, message)
           }

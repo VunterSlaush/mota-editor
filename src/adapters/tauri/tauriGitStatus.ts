@@ -65,6 +65,14 @@ export class TauriGitStatus implements GitPort {
     await invoke("git_unstage", { projectPath, path });
   }
 
+  async stageAll(projectPath: string): Promise<void> {
+    await invoke("git_stage_all", { projectPath });
+  }
+
+  async unstageAll(projectPath: string): Promise<void> {
+    await invoke("git_unstage_all", { projectPath });
+  }
+
   async push(projectPath: string): Promise<string> {
     return invoke<string>("git_push", { projectPath });
   }
