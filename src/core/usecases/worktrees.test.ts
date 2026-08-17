@@ -49,6 +49,17 @@ class FakeGit implements GitPort {
     if (this.notARepo) throw new Error("not a repo");
     return this.worktreeList;
   }
+  private addGate: Promise<void> | null = null;
+  private openAddGate: (() => void) | null = null;
+
+  /** Make the next checkout hang until the returned function is called. */
+  holdAdd(): () => void {
+    this.addGate = new Promise<void>((resolve) => {
+      this.openAddGate = resolve;
+    });
+    return () => this.openAddGate?.();
+  }
+
   async worktreeAdd(
     _p: string,
     path: string,
@@ -57,6 +68,7 @@ class FakeGit implements GitPort {
     remote: string,
     base: string,
   ) {
+    if (this.addGate) await this.addGate;
     if (this.failWorktreeAddWith) throw new Error(this.failWorktreeAddWith);
     this.added.push({ path, branch, mode, remote, base });
     return "Preparing worktree";
@@ -228,7 +240,7 @@ function setup() {
   return { store, git, workspace, gateway, provisioning, worktrees };
 }
 
-/** `create` fires provisioning without awaiting it; let it settle. */
+/** `create` fires the checkout and the copy without awaiting either. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("Worktrees.list", () => {
@@ -295,6 +307,7 @@ describe("Worktrees.create", () => {
       worktree({ path: "C:/repos/app-worktrees/dev", branch: "dev" }),
     ];
     const result = await worktrees.create("t1", "feature/login", "existing");
+    await settle();
 
     expect(result.ok).toBe(true);
     expect(git.added).toEqual([
@@ -319,6 +332,7 @@ describe("Worktrees.create", () => {
       worktree({ path: "C:/repos/app-worktrees/dev", branch: "dev" }),
     ];
     await worktrees.create("t1", "dev", "new");
+    await settle();
     expect(git.added[0].path).toBe("C:/repos/app-worktrees/dev-2");
     expect(git.added[0].mode).toBe("new");
   });
@@ -333,6 +347,7 @@ describe("Worktrees.create", () => {
     });
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
+    await settle();
     expect(git.added[0].path).toBe("/volumes/fast/trees/dev");
   });
 
@@ -340,6 +355,7 @@ describe("Worktrees.create", () => {
     const { git, worktrees } = setup();
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "xxxx", "new", "main");
+    await settle();
     expect(git.added[0]).toMatchObject({ branch: "xxxx", mode: "new", base: "main" });
   });
 
@@ -347,6 +363,7 @@ describe("Worktrees.create", () => {
     const { git, worktrees } = setup();
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "xxxx", "new");
+    await settle();
     expect(git.added[0].base).toBe("");
   });
 
@@ -358,6 +375,7 @@ describe("Worktrees.create", () => {
     });
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "remote");
+    await settle();
     expect(git.added[0].remote).toBe("upstream");
   });
 
@@ -367,6 +385,7 @@ describe("Worktrees.create", () => {
     store.dispatch({ type: "tab/modeChanged", tabId: "t1", mode: "plan" });
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
+    await settle();
 
     const opened = store.getState().tabs[1].project;
     expect(opened.provider).toBe("gemini");
@@ -384,6 +403,7 @@ describe("Worktrees.create", () => {
     });
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
+    await settle();
 
     expect(store.getState().tabs[1].project.mode).toBe(DEFAULTS.mode);
   });
@@ -393,6 +413,7 @@ describe("Worktrees.create", () => {
     store.dispatch({ type: "tab/colorChanged", tabId: "t1", color: "violet" });
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
+    await settle();
 
     expect(store.getState().tabs[1].project.color).toBe("violet");
   });
@@ -411,6 +432,7 @@ describe("Worktrees.create", () => {
     });
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
+    await settle();
 
     expect(store.getState().tabs[1].project.color).toBe("violet");
   });
@@ -425,19 +447,78 @@ describe("Worktrees.create", () => {
     });
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     await worktrees.create("t1", "dev", "new");
+    await settle();
 
     expect(store.getState().tabs[1].project.label).toBeUndefined();
   });
 
-  it("returns git's error as a message and opens nothing", async () => {
+  it("reports git's error on the asking tab and opens nothing", async () => {
     const { store, git, worktrees } = setup();
     git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
     git.failWorktreeAddWith = "fatal: 'dev' is already checked out";
-    const result = await worktrees.create("t1", "dev", "existing");
+    await worktrees.create("t1", "dev", "existing");
+    await settle();
+
+    const tab = store.getState().tabs[0];
+    expect(tab.worktreeProblem).toContain("already checked out");
+    expect(tab.creatingWorktrees).toEqual([]);
+    expect(store.getState().tabs).toHaveLength(1);
+  });
+
+  it("still answers the picker about what it can decide before the wait", async () => {
+    const { git, worktrees } = setup();
+    git.notARepo = true;
+    const result = await worktrees.create("t1", "dev", "new");
 
     expect(result.ok).toBe(false);
-    expect(result.message).toContain("already checked out");
-    expect(store.getState().tabs).toHaveLength(1);
+    expect(result.message).toContain("not a repo");
+  });
+
+  // The reason this use case exists in this shape: a checkout of a large
+  // repository is minutes of file writes, and awaiting it froze the app.
+  it("returns before the checkout does, marking the tab while it runs", async () => {
+    const { store, git, worktrees } = setup();
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    const finish = git.holdAdd();
+
+    const result = await worktrees.create("t1", "dev", "new");
+    await settle();
+
+    expect(result.ok).toBe(true);
+    expect(store.getState().tabs).toHaveLength(1); // nothing to open yet
+    expect(store.getState().tabs[0].creatingWorktrees).toEqual(["dev"]);
+
+    finish();
+    await settle();
+    expect(store.getState().tabs).toHaveLength(2);
+    expect(store.getState().tabs[0].creatingWorktrees).toEqual([]);
+    expect(store.getState().tabs[0].worktreeProblem).toBeUndefined();
+  });
+
+  it("keeps marking the tab while a second creation is still running", async () => {
+    const { store, git, worktrees } = setup();
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    const finish = git.holdAdd();
+
+    await worktrees.create("t1", "one", "new");
+    await worktrees.create("t1", "two", "new");
+    await settle();
+    expect(store.getState().tabs[0].creatingWorktrees).toEqual(["one", "two"]);
+
+    finish();
+    await settle();
+    expect(store.getState().tabs[0].creatingWorktrees).toEqual([]);
+  });
+
+  it("forgets a failure once the user has read it", async () => {
+    const { store, git, worktrees } = setup();
+    git.worktreeList = [worktree({ path: "C:/repos/app", main: true })];
+    git.failWorktreeAddWith = "fatal: 'dev' is already checked out";
+    await worktrees.create("t1", "dev", "existing");
+    await settle();
+
+    worktrees.dismissProblem("t1");
+    expect(store.getState().tabs[0].worktreeProblem).toBeUndefined();
   });
 });
 

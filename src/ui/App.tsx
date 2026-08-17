@@ -4,6 +4,7 @@ import { extensionPanels as panelsOfExtensions } from "../core/entities/extensio
 import { tabLabel } from "../core/entities/project";
 import type { ProviderId } from "../core/entities/provider";
 import { isShellLine, shellCommand } from "../core/entities/shellLine";
+import { tabShortcutIndex } from "../core/entities/tabShortcut";
 import { themeById } from "../core/entities/theme";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import type { ShellSize } from "../core/ports/shellPort";
@@ -120,6 +121,24 @@ export function App({ context }: { context: AppContext }) {
   // question when the answer is "ask".
   useEffect(() => {
     context.quitApp.guard(setQuitBlockedBy);
+  }, [context]);
+
+  // Ctrl+1…Ctrl+8 jump to a tab by position. Capture phase on the
+  // window, and the event stops there: a focused terminal reads several
+  // of these as control characters, and Ctrl+3 must switch tabs rather
+  // than also sending ESC to the shell. The listener never re-registers
+  // — which tab a digit means is the use case's to answer, read fresh
+  // from the store on each press.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const index = tabShortcutIndex(e);
+      if (index === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void context.switchTab.byIndex(index);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [context]);
 
   // Ctrl+= / Ctrl+- / Ctrl+0, wherever the caret is: zoom belongs to the
@@ -351,6 +370,9 @@ export function App({ context }: { context: AppContext }) {
               tab.project.path,
               tab.project.worktreeOf ?? tab.project.path,
             )
+          }
+          onDismissWorktreeProblem={() =>
+            context.worktrees.dismissProblem(tab.project.id)
           }
           onCheckWorktreeRemoval={(path) =>
             context.removeWorktree.check(tab.project.id, path)

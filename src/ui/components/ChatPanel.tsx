@@ -172,6 +172,8 @@ interface Props {
   ) => Promise<GitActionResult>;
   /** Try the heavy-folder copy again after it failed. */
   onRetryPreparing: () => void;
+  /** Acknowledge a worktree that git refused to create. */
+  onDismissWorktreeProblem: () => void;
   onCheckWorktreeRemoval: (path: string) => Promise<RemovalCheck>;
   onRemoveWorktree: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
   onOpenFile: (path: string) => Promise<string | null>;
@@ -242,6 +244,7 @@ export function ChatPanel({
   onOpenWorktree,
   onCreateWorktree,
   onRetryPreparing,
+  onDismissWorktreeProblem,
   onCheckWorktreeRemoval,
   onRemoveWorktree,
   onOpenFile,
@@ -467,6 +470,28 @@ export function ChatPanel({
             onClick={onRetryPreparing}
           >
             Not prepared
+          </button>
+        )}
+        {/* The new worktree has no tab to say this on yet: git is still
+            checking it out, and its folder is half-written until then. */}
+        {tab.creatingWorktrees && tab.creatingWorktrees.length > 0 && (
+          <span
+            className="worktree-preparing"
+            title={`Git is checking out a worktree for ${tab.creatingWorktrees.join(
+              ", ",
+            )}. Its tab opens when the checkout finishes.`}
+          >
+            Creating…
+          </span>
+        )}
+        {tab.worktreeProblem && (
+          <button
+            type="button"
+            className="worktree-preparing worktree-preparing--failed"
+            title={`${tab.worktreeProblem} — click to dismiss.`}
+            onClick={onDismissWorktreeProblem}
+          >
+            Worktree failed
           </button>
         )}
         <div className="chat-panel__controls">

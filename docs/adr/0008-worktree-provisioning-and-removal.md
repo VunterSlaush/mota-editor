@@ -4,6 +4,7 @@
 - Date: 2026-08-09
 - Amends: ADR-0007 (git worktrees as tabs)
 - Amended: 2026-08-11 (the list resolves per project; see below)
+- Amended: 2026-08-17 (creation does not gate the app either; see below)
 
 ## Context
 
@@ -89,6 +90,40 @@ whole operation is idempotent, so retry is the same call.
 
 Progress rides its own Tauri channel, not `AgentEvent`: that enum is the
 agent's vocabulary and has no business learning about disks.
+
+**Amended 2026-08-17 — creation does not gate the app either.** The
+sentence above starts at "`git worktree add` succeeds", and that is the
+part that turned out to be slow: a worktree is a whole working tree
+written out file by file. Measured on an 18,200-file repository, the
+checkout alone took ~20s warm, and awaiting it held the picker's modal —
+so making a worktree looked like a hang.
+
+Two changes, in the two places the cost lives:
+
+- **Git checks out in parallel.** `git_worktree_add` passes
+  `-c checkout.workers=0` (one worker per core; git's default is one in
+  total). Measured on the same repository: 20s → 8s. Git applies it only
+  past its own `checkout.thresholdForParallelism` of 100 files, so small
+  repositories pay nothing, and a git too old to know the setting ignores
+  it like any other unknown config.
+- **`Worktrees.create` returns once git has been *asked*.** Only what
+  the picker could still act on is decided before the wait — an unknown
+  tab, a folder that is no repository, the derived path. The checkout,
+  the tab, and provisioning then run on their own, and the wait shows as
+  a "Creating…" chip on the tab the picker was opened from, because the
+  worktree has no tab of its own until git has written it. A refusal
+  comes back as a dismissible chip in the same place rather than in a
+  picker that has already closed.
+
+So the whole sequence is now background from the first git call:
+
+```
+picker closes → git checks out → the tab opens → stocking begins
+```
+
+`TabState.creatingWorktrees` is a list, not a flag: nothing stops a
+second creation being started while the first is still writing, which is
+the point of not blocking on the first.
 
 ### Removal closes the tab first, and unlinks before it deletes
 
