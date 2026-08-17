@@ -144,7 +144,7 @@ themed like everything else:
   "groups": [
     { "title": "In Progress", "items": [
       { "id": "iss-1", "title": "Fix login", "subtitle": "ENG-123",
-        "badge": "Urgent", "checked": false,
+        "badge": "Urgent", "badgeTone": "danger", "checked": false,
         "select": { "selectedId": "started", "options": [
           { "id": "todo", "label": "Todo" },
           { "id": "started", "label": "In Progress" } ] } }
@@ -157,8 +157,15 @@ struck through); omit it for items that are not checkable. A
 `"removable": true` renders a delete button on the item (shown on
 hover) — what removal means is yours.
 
+`badgeTone` colours the badge: one of `success`, `warning`, `danger`,
+`info`, `neutral`. Name the *meaning*, not a colour — the palette is the
+host's, mixed from the active theme so a badge stays legible in every
+one. An unknown tone drops to the plain badge, so tones can be added
+without breaking you; don't put coloured emoji in `badge` text to fake
+it. Tones only make sense next to a `badge`.
+
 Interactions come back as `panel/action` with a host-owned vocabulary of
-six: `"open"` (the item was clicked — answer `{detail}` and the host
+seven: `"open"` (the item was clicked — answer `{detail}` and the host
 shows a modal), `"select"` (the item's dropdown changed to `value` —
 answer `{view}` with the updated model), `"button"` (a panel-level
 button was pressed; `itemId` is the button id — for anything slow, like
@@ -167,8 +174,24 @@ a browser sign-in, answer immediately with an interim `{view}` and send
 field, declared as `input`, was submitted with Enter; `itemId` is the
 input's id, `value` the typed text — answer `{view}` with the updated
 model), `"toggle"` (the item's checkbox changed; `value` is
-`"true"` or `"false"` — answer `{view}`), and `"remove"` (the item's
-delete button — answer `{view}` without it). A detail is
+`"true"` or `"false"` — answer `{view}`), `"remove"` (the item's
+delete button — answer `{view}` without it), and `"menu"` (an entry of
+the item's right-click menu was chosen; `itemId` is the item, `value` the
+entry's id — answer `{view}`, `{detail}`, or nothing).
+
+An item's menu is declared on the item, and the host draws it on
+right-click:
+
+```json
+{ "id": "pr-1", "title": "Fix login",
+  "menu": [ { "id": "hide-repo", "label": "Hide acme/web" } ] }
+```
+
+Up to ten entries; without a `menu` the item's right-click does nothing
+(the browser's own menu is suppressed on panel items either way). A
+labelled entry is the only right-click affordance there is, so put the
+words the user needs in the label — the host adds none of its own.
+A detail is
 `{title, subtitle?, fields: [{label, value}], body?, url?}`; `body` is
 markdown, `url` gets an open-in-browser button (http/https only).
 

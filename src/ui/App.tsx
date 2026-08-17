@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
+import type { ExtensionPanelRef } from "../core/entities/extension";
 import { extensionPanels as panelsOfExtensions } from "../core/entities/extension";
+import type { PanelView } from "../core/entities/extensionPanels";
 import { tabLabel } from "../core/entities/project";
 import type { ProviderId } from "../core/entities/provider";
 import { isShellLine, shellCommand } from "../core/entities/shellLine";
@@ -48,6 +50,11 @@ export function App({ context }: { context: AppContext }) {
   // first frame instead of blinking while git is asked again. A ref, not
   // state: a cache write must not re-render the app.
   const gitChangesCache = useRef(new Map<string, GitChanges>());
+  // The same trick for extension panels, keyed by panel AND project (a
+  // panel is handed the tab's context, so its answer may be per-project).
+  // Without this, every tab switch asks the extension again — a visible
+  // reload, and for a panel that talks to the network, a wasted call.
+  const panelViewCache = useRef(new Map<string, PanelView>());
   const projectPath = tab?.project.path ?? "";
   // Undefined once the tab is gone, so a tab that closes another way
   // takes its own question with it.
@@ -240,6 +247,10 @@ export function App({ context }: { context: AppContext }) {
   const extensionPanelsView: ExtensionPanelsView = useMemo(
     () => ({
       panels: panelRefs,
+      cached: (panel) =>
+        panelViewCache.current.get(panelCacheKey(panel, activeProjectId)) ?? null,
+      remember: (panel, view) =>
+        panelViewCache.current.set(panelCacheKey(panel, activeProjectId), view),
       load: (panel) => context.extensionPanels.load(panel, activeProjectId, projectPath),
       action: (panel, request) =>
         context.extensionPanels.action(panel, request, activeProjectId, projectPath),
@@ -462,4 +473,8 @@ export function App({ context }: { context: AppContext }) {
       <TooltipLayer />
     </div>
   );
+}
+
+function panelCacheKey(panel: ExtensionPanelRef, projectId: string): string {
+  return `${panel.extensionId}:${panel.panelId}:${projectId}`;
 }

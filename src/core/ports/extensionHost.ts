@@ -32,9 +32,11 @@ export type ExtensionHostEvent =
  *  `button` — a panel-level button (itemId is the button id);
  *  `submit` — the panel input (itemId is its id, value the text);
  *  `toggle` — the item's checkbox (value is "true" or "false");
- *  `remove` — the item's delete button. */
+ *  `remove` — the item's delete button;
+ *  `menu` — an entry of the item's right-click menu was chosen (itemId is
+ *  the item, value the entry's id). */
 export interface PanelActionRequest {
-  readonly action: "open" | "select" | "button" | "submit" | "toggle" | "remove";
+  readonly action: "open" | "select" | "button" | "submit" | "toggle" | "remove" | "menu";
   readonly itemId: string;
   readonly value?: string;
 }
