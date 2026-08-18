@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 import { countChanges } from "../../core/entities/diff";
 import type { ToolCallState } from "../../core/entities/message";
 import { diffTexts } from "../../core/entities/textDiff";
+import type { AgentEdit } from "../../core/entities/tool";
 import { fileName } from "../fileName";
 
+/** What the diff modal shows for a file the agent changed: one edit
+ *  from a tool row, or every edit of the session from the Changes panel. */
 export interface AgentDiff {
   readonly path: string;
-  readonly oldText?: string;
-  readonly newText: string;
+  readonly edits: readonly AgentEdit[];
 }
 
 /** Reads a client-owned terminal's captured output (null = gone). */
@@ -120,8 +122,7 @@ export function ToolCallContentView({
               onClick={() =>
                 onShowDiff({
                   path: item.path,
-                  oldText: item.oldText,
-                  newText: item.newText,
+                  edits: [{ oldText: item.oldText, newText: item.newText }],
                 })
               }
             >

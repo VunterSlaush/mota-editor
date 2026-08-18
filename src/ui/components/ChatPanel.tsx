@@ -4,7 +4,11 @@ import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSetti
 import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
-import { agentEditedFiles, countFileChangingTools } from "../../core/entities/tool";
+import {
+  type AgentEdit,
+  agentEditedFiles,
+  countFileChangingTools,
+} from "../../core/entities/tool";
 import type { RemovalCheck } from "../../core/entities/worktree";
 import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
 import type { ShellSize } from "../../core/ports/shellPort";
@@ -33,6 +37,7 @@ import { PendingSpecBar } from "./PendingSpecBar";
 import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
 import { TerminalPanel } from "./TerminalPanel";
+import type { AgentDiff } from "./ToolCallContentView";
 import { WorktreePicker } from "./WorktreePicker";
 import { WorktreesPanel } from "./WorktreesPanel";
 
@@ -78,8 +83,8 @@ type DiffTarget =
   | {
       readonly kind: "agent";
       readonly path: string;
-      readonly oldText?: string;
-      readonly newText: string;
+      /** Every edit the agent reported for it, oldest first. */
+      readonly edits: readonly AgentEdit[];
     };
 
 /** The views a linked worktree's tab offers — every one but its own. */
@@ -320,8 +325,7 @@ export function ChatPanel({
     [onSelectRightPanel, rightPanel],
   );
   const showAgentDiff = useCallback(
-    (diff: { path: string; oldText?: string; newText: string }) =>
-      setDiffTarget({ kind: "agent", ...diff }),
+    (diff: AgentDiff) => setDiffTarget({ kind: "agent", ...diff }),
     [],
   );
   const openTouchedFile = useCallback(
@@ -780,11 +784,7 @@ export function ChatPanel({
                   load: () =>
                     onGitDiff(diffTarget.path, diffTarget.staged, diffTarget.untracked),
                 }
-              : {
-                  kind: "agent",
-                  oldText: diffTarget.oldText,
-                  newText: diffTarget.newText,
-                }
+              : { kind: "agent", edits: diffTarget.edits }
           }
           onClose={() => setDiffTarget(null)}
         />
