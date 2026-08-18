@@ -72,4 +72,18 @@ describe("terminalClipboardIntent", () => {
       terminalClipboardIntent(press("v", { ctrl: true, meta: true }), mac),
     ).toBeNull();
   });
+
+  it("leaves the suggestion-accept keys alone", () => {
+    // Tab and ArrowRight accept the greyed-out completion in the
+    // terminal. This runs before that check, so anything it claims here
+    // is a suggestion the user can no longer accept.
+    for (const key of ["Tab", "ArrowRight"]) {
+      expect(terminalClipboardIntent(press(key), pc)).toBeNull();
+      expect(
+        terminalClipboardIntent(press(key), { ...pc, hasSelection: true }),
+      ).toBeNull();
+      expect(terminalClipboardIntent(press(key, { ctrl: true }), pc)).toBeNull();
+      expect(terminalClipboardIntent(press(key, { meta: true }), mac)).toBeNull();
+    }
+  });
 });
