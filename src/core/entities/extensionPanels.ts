@@ -19,11 +19,37 @@ export interface PanelSelect {
   readonly selectedId: string;
 }
 
+/** The meaning a badge carries, so the host can color it from the theme
+ *  instead of extensions smuggling emoji into the text. Semantic, not a
+ *  color name — the palette stays the host's to pick per theme. */
+export type PanelBadgeTone = "success" | "warning" | "danger" | "info" | "neutral";
+
+const BADGE_TONES: readonly PanelBadgeTone[] = [
+  "success",
+  "warning",
+  "danger",
+  "info",
+  "neutral",
+];
+
+/** One entry of an item's right-click menu. */
+export interface PanelMenuItem {
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface PanelItem {
   readonly id: string;
   readonly title: string;
   readonly subtitle?: string;
   readonly badge?: string;
+  /** Only meaningful alongside `badge`; an unknown tone degrades to the
+   *  plain badge rather than to no badge. */
+  readonly badgeTone?: PanelBadgeTone;
+  /** Entries offered when the item is right-clicked. Absent or empty →
+   *  right-click does nothing (the browser menu is suppressed either
+   *  way); the panel never invents entries of its own. */
+  readonly menu?: readonly PanelMenuItem[];
   readonly select?: PanelSelect;
   /** Present → the item carries a checkbox; checked items render
    *  struck through. Toggling comes back as a `toggle` action. */
@@ -87,6 +113,7 @@ const MAX_ITEMS = 100;
 const MAX_OPTIONS = 50;
 const MAX_FIELDS = 20;
 const MAX_BUTTONS = 5;
+const MAX_MENU_ITEMS = 10;
 const MAX_TEXT = 200;
 const MAX_SUBTITLE = 400;
 const MAX_BODY = 20_000;
@@ -149,10 +176,30 @@ function parseItem(payload: unknown): PanelItem | null {
     title,
     subtitle: optionalText(item.subtitle, MAX_SUBTITLE),
     badge: optionalText(item.badge, MAX_TEXT),
+    badgeTone: parseBadgeTone(item.badgeTone),
+    menu: parseMenu(item.menu),
     select: parseSelect(item.select),
     checked: typeof item.checked === "boolean" ? item.checked : undefined,
     removable: item.removable === true ? true : undefined,
   };
+}
+
+/** Undefined rather than an empty array when nothing usable survives —
+ *  "has a menu" stays a single truthiness check upstream. */
+function parseMenu(payload: unknown): readonly PanelMenuItem[] | undefined {
+  const entries = asArray(payload)
+    .slice(0, MAX_MENU_ITEMS)
+    .flatMap((entry) => {
+      const item = asObject(entry);
+      const id = optionalText(item?.id, MAX_TEXT);
+      const label = optionalText(item?.label, MAX_TEXT);
+      return id && label ? [{ id, label }] : [];
+    });
+  return entries.length > 0 ? entries : undefined;
+}
+
+function parseBadgeTone(value: unknown): PanelBadgeTone | undefined {
+  return BADGE_TONES.find((tone) => tone === value);
 }
 
 function parseSelect(payload: unknown): PanelSelect | undefined {

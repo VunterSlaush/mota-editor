@@ -133,6 +133,62 @@ describe("parsePanelView", () => {
     expect(parsePanelView({}).input).toBeUndefined();
   });
 
+  it("keeps a known badge tone and drops an invented one", () => {
+    const view = parsePanelView({
+      groups: [
+        {
+          title: "G",
+          items: [
+            { id: "a", title: "Red", badge: "✗ 2", badgeTone: "danger" },
+            { id: "b", title: "Green", badge: "✓ 14", badgeTone: "success" },
+            { id: "c", title: "Made up", badge: "?", badgeTone: "chartreuse" },
+            { id: "d", title: "Not a string", badge: "?", badgeTone: 7 },
+          ],
+        },
+      ],
+    });
+    const items = view.groups[0]?.items;
+    expect(items?.[0]?.badgeTone).toBe("danger");
+    expect(items?.[1]?.badgeTone).toBe("success");
+    // An unknown tone loses the colour, never the badge itself.
+    expect(items?.[2]?.badgeTone).toBeUndefined();
+    expect(items?.[2]?.badge).toBe("?");
+    expect(items?.[3]?.badgeTone).toBeUndefined();
+  });
+
+  it("parses an item menu, dropping malformed entries and capping the rest", () => {
+    const view = parsePanelView({
+      groups: [
+        {
+          title: "G",
+          items: [
+            {
+              id: "a",
+              title: "Has a menu",
+              menu: [{ id: "hide", label: "Hide acme/web" }, { id: "no-label" }, "junk"],
+            },
+            { id: "b", title: "No menu" },
+            { id: "c", title: "Nothing usable", menu: [{ id: "" }] },
+            {
+              id: "d",
+              title: "Too many",
+              menu: Array.from({ length: 30 }, (_, i) => ({
+                id: `m${i}`,
+                label: `M${i}`,
+              })),
+            },
+          ],
+        },
+      ],
+    });
+    const items = view.groups[0]?.items;
+    expect(items?.[0]?.menu).toEqual([{ id: "hide", label: "Hide acme/web" }]);
+    expect(items?.[1]?.menu).toBeUndefined();
+    // Empty is undefined, so "has a menu" stays one truthiness check.
+    expect(items?.[2]?.menu).toBeUndefined();
+    expect(items?.[3]?.menu).toHaveLength(10);
+  });
+
   it("drops a select without usable options", () => {
     const view = parsePanelView({
       groups: [

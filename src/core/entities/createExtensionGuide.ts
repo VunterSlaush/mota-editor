@@ -75,11 +75,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     // carry a boolean "checked" (a checkbox; checked renders struck
     // through), "removable": true (a delete button), or a select (a
     // dropdown); "input" declares a text field the user types into
-    // directly (omit it when the panel is read-only).
+    // directly (omit it when the panel is read-only). "badgeTone" colours
+    // the badge from the theme — success | warning | danger | info |
+    // neutral (name the meaning, not a colour; no emoji in the text).
     reply(msg.id, { view: { groups: [
       { title: "Todo", items: [
         { id: "a", title: "First item", subtitle: "small print", badge: "High",
-          checked: false, removable: true }
+          badgeTone: "danger", checked: false, removable: true,
+          menu: [{ id: "hide", label: "Hide this" }] }
       ] }
     ], input: { id: "new-item", placeholder: "Add an item…" },
        emptyText: "Shown when there are no groups." } });
@@ -92,6 +95,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     //   fields: [{label, value}], body: "markdown", url: "https://…" } } for the modal.
     // action "submit": the panel input (itemId is its id, value the typed
     //   text) — answer { view: <updated> }.
+    // action "menu": an entry of the item's right-click menu was chosen
+    //   (itemId the item, value the entry id) — answer { view } or { detail }.
     reply(msg.id, {});
   } else if (msg.method === "shutdown") {
     process.exit(0);

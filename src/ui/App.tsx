@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
+import type { ExtensionPanelRef } from "../core/entities/extension";
 import { extensionPanels as panelsOfExtensions } from "../core/entities/extension";
+import type { PanelView } from "../core/entities/extensionPanels";
 import { tabLabel } from "../core/entities/project";
 import type { ProviderId } from "../core/entities/provider";
 import { isShellLine, shellCommand } from "../core/entities/shellLine";
+import { tabShortcutIndex } from "../core/entities/tabShortcut";
 import { themeById } from "../core/entities/theme";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import type { ShellSize } from "../core/ports/shellPort";
@@ -47,6 +50,11 @@ export function App({ context }: { context: AppContext }) {
   // first frame instead of blinking while git is asked again. A ref, not
   // state: a cache write must not re-render the app.
   const gitChangesCache = useRef(new Map<string, GitChanges>());
+  // The same trick for extension panels, keyed by panel AND project (a
+  // panel is handed the tab's context, so its answer may be per-project).
+  // Without this, every tab switch asks the extension again — a visible
+  // reload, and for a panel that talks to the network, a wasted call.
+  const panelViewCache = useRef(new Map<string, PanelView>());
   const projectPath = tab?.project.path ?? "";
   // Undefined once the tab is gone, so a tab that closes another way
   // takes its own question with it.
@@ -120,6 +128,24 @@ export function App({ context }: { context: AppContext }) {
   // question when the answer is "ask".
   useEffect(() => {
     context.quitApp.guard(setQuitBlockedBy);
+  }, [context]);
+
+  // Ctrl+1…Ctrl+8 jump to a tab by position. Capture phase on the
+  // window, and the event stops there: a focused terminal reads several
+  // of these as control characters, and Ctrl+3 must switch tabs rather
+  // than also sending ESC to the shell. The listener never re-registers
+  // — which tab a digit means is the use case's to answer, read fresh
+  // from the store on each press.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const index = tabShortcutIndex(e);
+      if (index === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void context.switchTab.byIndex(index);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [context]);
 
   // Ctrl+= / Ctrl+- / Ctrl+0, wherever the caret is: zoom belongs to the
@@ -221,6 +247,10 @@ export function App({ context }: { context: AppContext }) {
   const extensionPanelsView: ExtensionPanelsView = useMemo(
     () => ({
       panels: panelRefs,
+      cached: (panel) =>
+        panelViewCache.current.get(panelCacheKey(panel, activeProjectId)) ?? null,
+      remember: (panel, view) =>
+        panelViewCache.current.set(panelCacheKey(panel, activeProjectId), view),
       load: (panel) => context.extensionPanels.load(panel, activeProjectId, projectPath),
       action: (panel, request) =>
         context.extensionPanels.action(panel, request, activeProjectId, projectPath),
@@ -352,6 +382,9 @@ export function App({ context }: { context: AppContext }) {
               tab.project.worktreeOf ?? tab.project.path,
             )
           }
+          onDismissWorktreeProblem={() =>
+            context.worktrees.dismissProblem(tab.project.id)
+          }
           onCheckWorktreeRemoval={(path) =>
             context.removeWorktree.check(tab.project.id, path)
           }
@@ -446,4 +479,8 @@ export function App({ context }: { context: AppContext }) {
       <TooltipLayer />
     </div>
   );
+}
+
+function panelCacheKey(panel: ExtensionPanelRef, projectId: string): string {
+  return `${panel.extensionId}:${panel.panelId}:${projectId}`;
 }

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { tabLabel } from "../../core/entities/project";
 import { describeScope } from "../../core/entities/subtask";
 import type { TabColorId } from "../../core/entities/tabColor";
+import { MAX_TAB_SHORTCUT } from "../../core/entities/tabShortcut";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
 import { CTRL_IS_SECONDARY_CLICK, useDragReorder } from "../useDragReorder";
@@ -42,7 +43,7 @@ export function TabBar({
   return (
     // The header itself drags the window; the tabs on it drag each other.
     <header className={`tab-bar tab-bar--${density}`} data-tauri-drag-region ref={strip}>
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const id = tab.project.id;
         const isActive = id === activeTabId;
         const status = tabStatus(tab);
@@ -59,13 +60,18 @@ export function TabBar({
         // A named tab still has to say where it points: the name took the
         // folder's place in the strip, so the tooltip is where that goes.
         const named = tab.project.label ? `${tab.project.label} — ${where}` : where;
+        // The only place the tab shortcuts are written down, the way the
+        // terminal's Ctrl+` lives on its own button.
+        const shortcut = index < MAX_TAB_SHORTCUT ? ` — Ctrl+${index + 1}` : "";
         return (
           <div
             key={id}
             className={`tab ${isActive ? "tab--active" : ""} tab--${status} ${
               drag.draggingId === id ? "tab--dragging" : ""
             }`}
-            title={statusLabel ? `${named} — ${statusLabel}` : named}
+            title={
+              statusLabel ? `${named} — ${statusLabel}${shortcut}` : `${named}${shortcut}`
+            }
             data-color={tab.project.color}
             onPointerDown={(e) => drag.startDrag(id, e)}
             // The click that ends a drop is the drop, not a tab switch. On

@@ -88,6 +88,16 @@ export interface TabState {
   readonly preparing?: boolean;
   /** What went wrong preparing them, once, until dismissed. */
   readonly preparingProblem?: string;
+  /**
+   * Branches whose worktree git is checking out for this tab right now.
+   *
+   * A list rather than a flag because nothing stops a second creation
+   * being started while the first is still writing files — which is the
+   * whole point of not blocking on it (see `Worktrees.create`).
+   */
+  readonly creatingWorktrees?: readonly string[];
+  /** Why the last creation from this tab failed, until dismissed. */
+  readonly worktreeProblem?: string;
   /** Context-window usage of the tab's agent session. `estimated` marks
    *  a client-side approximation (no `usage_update` from the agent);
    *  `provisional` marks an agent report whose `size` is the adapter's
@@ -248,6 +258,10 @@ export type Action =
   | { type: "worktree/preparing"; tabId: string }
   /** `problem` is absent when everything landed. */
   | { type: "worktree/prepared"; tabId: string; problem?: string }
+  | { type: "worktree/creating"; tabId: string; branch: string }
+  /** `problem` is absent when git made the worktree. */
+  | { type: "worktree/created"; tabId: string; branch: string; problem?: string }
+  | { type: "worktree/problemDismissed"; tabId: string }
   | { type: "subtask/scopeChanged"; tabId: string; scope: SubtaskScope }
   | { type: "tab/activated"; tabId: string }
   | { type: "tab/moved"; tabId: string; toIndex: number }
@@ -469,6 +483,28 @@ export function reduce(state: AppState, action: Action): AppState {
         ...tab,
         preparing: false,
         preparingProblem: action.problem,
+      }));
+
+    case "worktree/creating":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        creatingWorktrees: [...(tab.creatingWorktrees ?? []), action.branch],
+        worktreeProblem: undefined,
+      }));
+
+    case "worktree/created":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        // One occurrence, not every match: two creations of the same
+        // name can overlap, and the second is still running.
+        creatingWorktrees: dropFirst(tab.creatingWorktrees ?? [], action.branch),
+        worktreeProblem: action.problem,
+      }));
+
+    case "worktree/problemDismissed":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        worktreeProblem: undefined,
       }));
 
     // Only a tab that already is a subtask can change scope: converting
@@ -945,6 +981,12 @@ function appendDelta(
   const last = messages[messages.length - 1];
   if (!last || last.role !== role) return messages;
   return [...messages.slice(0, -1), { ...last, text: last.text + text }];
+}
+
+/** The list without its first `value` — the rest, duplicates included. */
+function dropFirst(list: readonly string[], value: string): readonly string[] {
+  const at = list.indexOf(value);
+  return at === -1 ? list : [...list.slice(0, at), ...list.slice(at + 1)];
 }
 
 function mapTab(

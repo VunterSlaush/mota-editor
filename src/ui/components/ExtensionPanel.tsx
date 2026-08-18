@@ -1,14 +1,16 @@
 import { ArrowSquareOut, ArrowsClockwise, Trash } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 import type {
   PanelActionResult,
   PanelDetail,
+  PanelMenuItem,
   PanelView,
 } from "../../core/entities/extensionPanels";
 import type { PanelActionRequest } from "../../core/ports/extensionHost";
 import { openExternalLink } from "../externalLink";
 import { Markdown } from "./MarkdownLite";
+import { type HostRect, tooltipPlacement } from "./tooltipPlacement";
 
 /**
  * What extension panels need from outside, bundled like `ShellsView` —
@@ -17,6 +19,10 @@ import { Markdown } from "./MarkdownLite";
  */
 export interface ExtensionPanelsView {
   readonly panels: readonly ExtensionPanelRef[];
+  /** The last view this panel produced for the active project, kept
+   *  outside the remounting subtree — null the first time it is opened. */
+  readonly cached: (panel: ExtensionPanelRef) => PanelView | null;
+  readonly remember: (panel: ExtensionPanelRef, view: PanelView) => void;
   readonly load: (panel: ExtensionPanelRef) => Promise<PanelView>;
   readonly action: (
     panel: ExtensionPanelRef,
@@ -38,22 +44,42 @@ interface Props {
  * already validated; this component only draws it.
  */
 export function ExtensionPanel({ panel, panels }: Props) {
-  const [view, setView] = useState<PanelView | null>(null);
-  const [loading, setLoading] = useState(true);
+  const remembered = panels.cached(panel);
+  const [view, setView] = useState<PanelView | null>(remembered);
+  const [loading, setLoading] = useState(remembered === null);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<PanelDetail | null>(null);
+  const [menu, setMenu] = useState<OpenMenu | null>(null);
   const [pendingItemId, setPendingItemId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [draft, setDraft] = useState("");
+  // A remembered view is already on screen, so the mount that follows a
+  // tab switch must NOT pull again — only an explicit refresh or the
+  // extension's own push does. Cleared after that first skipped run.
+  const servedFromCache = useRef(remembered !== null);
+
+  /** Every view that reaches the screen is also the one a later mount
+   *  should start from — including the ones actions hand back. */
+  const showView = useCallback(
+    (next: PanelView) => {
+      setView(next);
+      panels.remember(panel, next);
+    },
+    [panels, panel],
+  );
 
   useEffect(() => {
+    if (servedFromCache.current) {
+      servedFromCache.current = false;
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
     panels
       .load(panel)
       .then((loaded) => {
-        if (!cancelled) setView(loaded);
+        if (!cancelled) showView(loaded);
       })
       .catch((e) => {
         if (!cancelled) setError(messageOf(e));
@@ -64,7 +90,7 @@ export function ExtensionPanel({ panel, panels }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [panels, panel, refreshKey]);
+  }, [panels, panel, refreshKey, showView]);
 
   // The extension's own "something changed" push becomes a re-pull.
   useEffect(
@@ -87,28 +113,36 @@ export function ExtensionPanel({ panel, panels }: Props) {
 
   const openItem = (itemId: string) =>
     run({ action: "open", itemId }, (result) => {
-      if (result.view) setView(result.view);
+      if (result.view) showView(result.view);
       if (result.detail) setDetail(result.detail);
     });
 
   const selectValue = (itemId: string, value: string) =>
     run({ action: "select", itemId, value }, (result) => {
-      if (result.view) setView(result.view);
+      if (result.view) showView(result.view);
     });
 
   const toggleItem = (itemId: string, checked: boolean) =>
     run({ action: "toggle", itemId, value: checked ? "true" : "false" }, (result) => {
-      if (result.view) setView(result.view);
+      if (result.view) showView(result.view);
     });
 
   const removeItem = (itemId: string) =>
     run({ action: "remove", itemId }, (result) => {
-      if (result.view) setView(result.view);
+      if (result.view) showView(result.view);
     });
+
+  const chooseMenuEntry = (itemId: string, entryId: string) => {
+    setMenu(null);
+    run({ action: "menu", itemId, value: entryId }, (result) => {
+      if (result.view) showView(result.view);
+      if (result.detail) setDetail(result.detail);
+    });
+  };
 
   const pressButton = (buttonId: string) =>
     run({ action: "button", itemId: buttonId }, (result) => {
-      if (result.view) setView(result.view);
+      if (result.view) showView(result.view);
       if (result.detail) setDetail(result.detail);
     });
 
@@ -117,7 +151,7 @@ export function ExtensionPanel({ panel, panels }: Props) {
     if (!value) return;
     run({ action: "submit", itemId: inputId, value }, (result) => {
       setDraft("");
-      if (result.view) setView(result.view);
+      if (result.view) showView(result.view);
     });
   };
 
@@ -202,6 +236,18 @@ export function ExtensionPanel({ panel, panels }: Props) {
                     disabled={pendingItemId === item.id}
                     title={item.title}
                     onClick={() => openItem(item.id)}
+                    onContextMenu={(e) => {
+                      // Always swallow the browser menu: a panel item is
+                      // an app control, not a document. With no entries
+                      // declared, that is all right-click does.
+                      e.preventDefault();
+                      if (!item.menu) return;
+                      setMenu({
+                        itemId: item.id,
+                        entries: item.menu,
+                        anchor: e.currentTarget.getBoundingClientRect(),
+                      });
+                    }}
                   >
                     <span className="ext-panel__item-main">
                       <span
@@ -212,7 +258,13 @@ export function ExtensionPanel({ panel, panels }: Props) {
                         {item.title}
                       </span>
                       {item.badge && (
-                        <span className="ext-panel__badge">{item.badge}</span>
+                        <span
+                          className={`ext-panel__badge ${
+                            item.badgeTone ? `ext-panel__badge--${item.badgeTone}` : ""
+                          }`}
+                        >
+                          {item.badge}
+                        </span>
                       )}
                     </span>
                     {item.subtitle && (
@@ -252,8 +304,86 @@ export function ExtensionPanel({ panel, panels }: Props) {
           </ul>
         </section>
       ))}
+      {menu && (
+        <PanelItemMenu
+          anchor={menu.anchor}
+          entries={menu.entries}
+          onChoose={(entryId) => chooseMenuEntry(menu.itemId, entryId)}
+          onClose={() => setMenu(null)}
+        />
+      )}
       {detail && <PanelDetailModal detail={detail} onClose={() => setDetail(null)} />}
     </aside>
+  );
+}
+
+/** The right-click menu of one item, while it is open. */
+interface OpenMenu {
+  readonly itemId: string;
+  readonly entries: readonly PanelMenuItem[];
+  readonly anchor: HostRect;
+}
+
+/**
+ * UI — an item's right-click menu, placed and dismissed like `TabMenu`:
+ * measured after it is drawn, closed by Escape or a click elsewhere. The
+ * entries are the extension's; this only draws and reports them.
+ */
+function PanelItemMenu({
+  anchor,
+  entries,
+  onChoose,
+  onClose,
+}: {
+  anchor: HostRect;
+  entries: readonly PanelMenuItem[];
+  onChoose: (entryId: string) => void;
+  onClose: () => void;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    const { left, top } = tooltipPlacement(
+      anchor,
+      { width: element.offsetWidth, height: element.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    element.style.left = `${left}px`;
+    element.style.top = `${top}px`;
+    element.style.visibility = "visible";
+  }, [anchor]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!panel.current?.contains(event.target as Node)) onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="ext-menu" ref={panel} role="menu" aria-label="Item actions">
+      {entries.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          role="menuitem"
+          className="ext-menu__entry"
+          onClick={() => onChoose(entry.id)}
+        >
+          {entry.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

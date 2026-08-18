@@ -6,7 +6,7 @@ import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort"
 import { defaultSettings, projectDefaults, tabById } from "../state/appState";
 import { Store } from "../state/store";
 import { ApplyPendingSpec, DiscardPendingSpec } from "./applyPendingSpec";
-import { SelectEffort, SelectModel } from "./switchTab";
+import { SelectEffort, SelectModel, SwitchTab } from "./switchTab";
 
 class FakeAgentGateway implements Partial<AgentGateway> {
   warms = 0;
@@ -247,5 +247,59 @@ describe("resolving a deferred change", () => {
     store.dispatch({ type: "chat/sessionReset", tabId: "t1", provider: "claude" });
 
     expect(tab(store)?.project.model).toBeUndefined();
+  });
+});
+
+describe("SwitchTab.byIndex", () => {
+  /** Three tabs on the strip, left to right, with the first active. */
+  function strip() {
+    const store = new Store();
+    for (const [id, path] of [
+      ["t1", "/work/alpha"],
+      ["t2", "/work/beta"],
+      ["t3", "/work/gamma"],
+    ]) {
+      store.dispatch({ type: "tab/opened", project: newProject(id, path, DEFAULTS) });
+    }
+    store.dispatch({ type: "tab/activated", tabId: "t1" });
+    const workspace = new FakeWorkspaceStore();
+    return { store, workspace, switchTab: new SwitchTab(store, workspace) };
+  }
+
+  it("activates the tab at that position on the strip", async () => {
+    const { store, switchTab } = strip();
+
+    await switchTab.byIndex(1);
+
+    expect(store.getState().activeTabId).toBe("t2");
+  });
+
+  it("follows the strip, not the order the tabs were opened in", async () => {
+    // The whole point of a positional binding: Ctrl+1 is whatever is
+    // leftmost now, not whichever project got opened first.
+    const { store, switchTab } = strip();
+    store.dispatch({ type: "tab/moved", tabId: "t3", toIndex: 0 });
+
+    await switchTab.byIndex(0);
+
+    expect(store.getState().activeTabId).toBe("t3");
+  });
+
+  it("does nothing at a position past the last tab", async () => {
+    // Not "the last tab": a shortcut that lands somewhere different
+    // depending on how many tabs are open is worse than one that misses.
+    const { store, switchTab } = strip();
+
+    await switchTab.byIndex(7);
+
+    expect(store.getState().activeTabId).toBe("t1");
+  });
+
+  it("persists the switch, so the tab is still active after a restart", async () => {
+    const { workspace, switchTab } = strip();
+
+    await switchTab.byIndex(2);
+
+    expect(workspace.saved?.activeTabId).toBe("t3");
   });
 });
