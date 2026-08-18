@@ -3852,6 +3852,16 @@ body {
   white-space: nowrap;
 }
 
+/* How many edits a file collected — only shown past one, where the row
+   stands for a run of changes rather than a single one. */
+.changes__edits {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Worktrees panel ----
    The repository's checkouts and what each one's agent is doing. It
    borrows the Changes panel's rows wholesale; only the leading icon and

@@ -50,7 +50,7 @@ interface Props {
   onOpenFile: (path: string) => Promise<string | null>;
   /** Show the file's diff in a modal. */
   onShowDiff: (file: GitChange, staged: boolean) => void;
-  /** Show an agent-reported diff (full old/new text) in the modal. */
+  /** Show every edit the agent reported for one file in the modal. */
   onShowAgentDiff: (diff: AgentDiff) => void;
 }
 
@@ -151,19 +151,24 @@ export function ChangesPanel({
               type="button"
               className="changes__file"
               title={
-                file.diff
-                  ? `Show the agent's change to ${file.path}`
+                file.edits.length > 0
+                  ? `Show the agent's ${editCount(file.edits.length)} to ${file.path}`
                   : `Open ${file.path}`
               }
               onClick={() =>
-                file.diff
-                  ? onShowAgentDiff({ path: file.path, ...file.diff })
+                file.edits.length > 0
+                  ? onShowAgentDiff({ path: file.path, edits: file.edits })
                   : void onOpenFile(file.path)
               }
             >
               <span className="changes__filename">{fileName(file.path)}</span>
               {parentDir(file.path) && (
                 <span className="changes__dir">{parentDir(file.path)}</span>
+              )}
+              {/* One edit is the unremarkable case and stays quiet; more
+                  than one says so, since the row opens all of them. */}
+              {file.edits.length > 1 && (
+                <span className="changes__edits">×{file.edits.length}</span>
               )}
             </button>
           </li>
@@ -451,6 +456,11 @@ interface ListProps {
   onAction: (path: string) => void;
   onOpenFile: (path: string) => void;
   onShowDiff: (file: GitChange) => void;
+}
+
+/** "3 changes" / "1 change" — the agent-edits row's tooltip counts them. */
+function editCount(count: number): string {
+  return `${String(count)} ${count === 1 ? "change" : "changes"}`;
 }
 
 /** The path without its file name — the gray VS-style suffix. */
