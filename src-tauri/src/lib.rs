@@ -5,6 +5,7 @@
 mod acp_session;
 mod app_badge;
 mod billing_log;
+mod checkpoint;
 mod command_discovery;
 mod commands;
 mod extension_discovery;
@@ -103,6 +104,12 @@ pub fn run() {
             git::git_worktree_remove,
             git::git_worktree_prune,
             git::git_branches_merged,
+            checkpoint::checkpoint_available,
+            checkpoint::checkpoint_create,
+            checkpoint::checkpoint_preview,
+            checkpoint::checkpoint_restore,
+            checkpoint::checkpoint_file_diff,
+            checkpoint::checkpoint_forget,
             worktree::worktree_provision,
             worktree::worktree_unprovision,
             worktree::worktree_supports_cow,

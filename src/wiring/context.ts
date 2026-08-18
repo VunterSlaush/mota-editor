@@ -2,6 +2,7 @@ import {
   DemoAgentGateway,
   DemoAppBadge,
   DemoBillingStore,
+  DemoCheckpoints,
   DemoCommandCatalog,
   DemoExtensionHost,
   DemoFilePicker,
@@ -23,6 +24,7 @@ import { isTauriRuntime } from "../adapters/tauri/runtime";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
 import { TauriAppBadge } from "../adapters/tauri/tauriAppBadge";
 import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
+import { TauriCheckpoints } from "../adapters/tauri/tauriCheckpoints";
 import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
 import { TauriExtensionHost } from "../adapters/tauri/tauriExtensionHost";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
@@ -68,6 +70,7 @@ import { QuitApp } from "../core/usecases/quitApp";
 import { ReorderTabs } from "../core/usecases/reorderTabs";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
+import { Rewind } from "../core/usecases/rewind";
 import { RunExtensionCommand } from "../core/usecases/runExtensionCommand";
 import { ScopeMcpServer } from "../core/usecases/scopeMcpServer";
 import { ScopeWorktreeProvisioning } from "../core/usecases/scopeWorktreeProvisioning";
@@ -116,6 +119,7 @@ export interface AppContext {
   readonly loadGitChanges: LoadGitChanges;
   readonly loadBranches: LoadBranches;
   readonly gitActions: GitActions;
+  readonly rewind: Rewind;
   readonly worktrees: Worktrees;
   /** Exposed for the settings panel, which asks what a copy would cost. */
   readonly worktreeProvisioning: WorktreeProvisioning;
@@ -166,6 +170,7 @@ export function createAppContext(): AppContext {
   const filePicker = inTauri ? new TauriFilePicker() : new DemoFilePicker();
   const commandCatalog = inTauri ? new TauriCommandCatalog() : new DemoCommandCatalog();
   const gitPort = inTauri ? new TauriGitStatus() : new DemoGit();
+  const checkpoints = inTauri ? new TauriCheckpoints() : new DemoCheckpoints();
   const transcriptStore = inTauri
     ? new TauriTranscriptStore()
     : new DemoTranscriptStore();
@@ -230,6 +235,7 @@ export function createAppContext(): AppContext {
     ),
     newId,
     runExtensionCommand,
+    checkpoints,
   );
   runExtensionCommand.connectTurnStarter((tabId, prompt) =>
     sendPrompt.execute(tabId, prompt),
@@ -270,6 +276,7 @@ export function createAppContext(): AppContext {
     loadGitChanges: new LoadGitChanges(store, gitPort),
     loadBranches: new LoadBranches(store, gitPort),
     gitActions: new GitActions(store, gitPort),
+    rewind: new Rewind(store, checkpoints),
     worktrees,
     worktreeProvisioning,
     removeWorktree: new RemoveWorktree(

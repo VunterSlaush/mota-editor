@@ -11,14 +11,21 @@ import { diffTexts } from "../../core/entities/textDiff";
 import type { AgentEdit } from "../../core/entities/tool";
 import { fileName } from "../fileName";
 
-/** Where the diff comes from: git (loaded async) or the agent's own
- *  reported edit (full old/new text, diffed locally). */
+/** Where the diff comes from: git or a `/rewind` checkpoint (both
+ *  loaded async as a unified diff), or the agent's own reported edit
+ *  (full old/new text, diffed locally). */
 export type DiffSource =
   | {
       readonly kind: "git";
       /** True when showing the index side rather than the working tree. */
       readonly staged: boolean;
       /** Resolves with the unified diff, or rejects with git's message. */
+      readonly load: () => Promise<{ ok: boolean; message: string }>;
+    }
+  | {
+      readonly kind: "checkpoint";
+      /** The checkpoint side is the OLD side: this shows what rewinding
+       *  would take away, which is the question being asked. */
       readonly load: () => Promise<{ ok: boolean; message: string }>;
     }
   | {
@@ -87,8 +94,10 @@ export function DiffModal({ path, source, onClose }: Props) {
   }, [onClose]);
 
   const staged = source.kind === "git" && source.staged;
+  // Both loaded kinds arrive the same way; only the badge differs.
+  const loaded = source.kind !== "agent";
   useEffect(() => {
-    if (source.kind !== "git") return;
+    if (source.kind === "agent") return;
     let cancelled = false;
     source.load().then((r) => {
       if (cancelled) return;
@@ -103,7 +112,7 @@ export function DiffModal({ path, source, onClose }: Props) {
     };
     // The loader is a fresh closure per render; the file identifies the work.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, staged]);
+  }, [path, staged, loaded]);
 
   const edits = source.kind === "agent" ? source.edits : undefined;
   const hunks = useMemo(() => {
@@ -111,8 +120,8 @@ export function DiffModal({ path, source, onClose }: Props) {
     return result.state === "loaded" ? parseUnifiedDiff(result.text) : [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edits, result]);
-  const loading = source.kind === "git" && result.state === "loading";
-  const failed = source.kind === "git" && result.state === "failed" ? result : null;
+  const loading = loaded && result.state === "loading";
+  const failed = loaded && result.state === "failed" ? result : null;
   const empty = !loading && !failed && hunks.length === 0;
   const { added, removed } = countChanges(hunks);
 
@@ -131,7 +140,13 @@ export function DiffModal({ path, source, onClose }: Props) {
           <span className="diff-modal__name">{fileName(path)}</span>
           <span className="diff-modal__path">{path}</span>
           <span className="diff-modal__badge">
-            {source.kind === "agent" ? "agent edit" : staged ? "staged" : "not staged"}
+            {source.kind === "agent"
+              ? "agent edit"
+              : source.kind === "checkpoint"
+                ? "since checkpoint"
+                : staged
+                  ? "staged"
+                  : "not staged"}
           </span>
           {hunks.length > 0 && (
             <span className="diff-modal__stat">

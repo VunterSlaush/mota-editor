@@ -9,6 +9,7 @@
 pub mod acp;
 pub mod badge;
 pub mod billing;
+pub mod checkpoint;
 pub mod commands;
 pub mod event;
 pub mod extension;

@@ -71,6 +71,9 @@ interface Props {
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
   onShowPlan: () => void;
+  /** Rewind the project to just before a prompt. Absent when the tab
+   *  cannot be checkpointed, which is what hides the action. */
+  onRewind?: (checkpoint: string) => void;
 }
 
 // Info stays visible: cancellations, fallback notices, and stop-reason
@@ -100,6 +103,7 @@ export function MessageList({
   onRespondPermission,
   onAnswerQuestion,
   onShowPlan,
+  onRewind,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLDivElement>(null);
@@ -189,6 +193,7 @@ export function MessageList({
         onOpenFile={onOpenFile}
         onShowAgentDiff={onShowAgentDiff}
         onReadTerminal={onReadTerminal}
+        onRewind={onRewind}
         innerRef={m.id === askedMessage?.id ? promptRef : undefined}
       />
     );
@@ -501,6 +506,7 @@ const MessageBubble = memo(function MessageBubble({
   onOpenFile,
   onShowAgentDiff,
   onReadTerminal,
+  onRewind,
   innerRef,
 }: {
   message: ChatMessage;
@@ -522,6 +528,8 @@ const MessageBubble = memo(function MessageBubble({
   onShowAgentDiff?: (diff: AgentDiff) => void;
   /** Read an agent-owned terminal's output (tool rows). */
   onReadTerminal?: ReadTerminal;
+  /** Rewind to just before this prompt (user rows with a checkpoint). */
+  onRewind?: (checkpoint: string) => void;
   /** Set on the message the PinnedPrompt tracks, so it can be measured. */
   innerRef?: React.Ref<HTMLDivElement>;
 }) {
@@ -651,16 +659,31 @@ const MessageBubble = memo(function MessageBubble({
           >
             <Info size={12} weight="bold" />
           </button>
-          {turnOpen && <TurnDetails turn={turn} />}
+          {turnOpen && <TurnDetails turn={turn} onRewind={onRewind} />}
         </>
       )}
     </div>
   );
 });
 
-/** The expanded per-prompt details. Pure display: every value is already
- *  on the message, so there are no timers and no store reads. */
-function TurnDetails({ turn }: { turn: TurnMeta }) {
+/**
+ * The expanded per-prompt details. Almost pure display: every value is
+ * already on the message, so there are no timers and no store reads.
+ *
+ * Rewind lives here rather than on the bubble itself. It is a rare,
+ * destructive action, and a button that appears on hover over every
+ * prompt in the transcript would be one mis-click from undoing an
+ * afternoon. Behind the details toggle it is one deliberate step away,
+ * next to the rest of what that turn did.
+ */
+function TurnDetails({
+  turn,
+  onRewind,
+}: {
+  turn: TurnMeta;
+  onRewind?: (checkpoint: string) => void;
+}) {
+  const checkpoint = turn.checkpoint;
   return (
     <div className="msg__turn-details">
       {turn.command && <span className="msg__turn-cmd">{turn.command}</span>}
@@ -677,6 +700,16 @@ function TurnDetails({ turn }: { turn: TurnMeta }) {
       <span>{turn.mode}</span>
       <span>{turn.permission}</span>
       {turn.stopReason && <span>{turn.stopReason}</span>}
+      {checkpoint && onRewind && (
+        <button
+          type="button"
+          className="msg__turn-rewind"
+          title="Put the files back the way they were before this message"
+          onClick={() => onRewind(checkpoint)}
+        >
+          Rewind to here
+        </button>
+      )}
     </div>
   );
 }

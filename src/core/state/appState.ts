@@ -97,6 +97,18 @@ export interface TabState {
   readonly creatingWorktrees?: readonly string[];
   /** Why the last creation from this tab failed, until dismissed. */
   readonly worktreeProblem?: string;
+  /** True while the rewind picker is open. Tab-scoped rather than local
+   *  to the panel because `/rewind` is typed into the composer, and the
+   *  composer is not where the picker lives. */
+  readonly rewindOpen?: boolean;
+  /** The last rewind, until dismissed — what it changed, so the bar
+   *  above the composer can offer to undo it. */
+  readonly rewound?: {
+    readonly summary: string;
+    /** The checkpoint taken just BEFORE the rewind, so undoing it is
+     *  itself just another rewind. */
+    readonly undo: string;
+  };
   /** Context-window usage of the tab's agent session. `estimated` marks
    *  a client-side approximation (no `usage_update` from the agent);
    *  `provisional` marks an agent report whose `size` is the adapter's
@@ -261,6 +273,9 @@ export type Action =
   /** `problem` is absent when git made the worktree. */
   | { type: "worktree/created"; tabId: string; branch: string; problem?: string }
   | { type: "worktree/problemDismissed"; tabId: string }
+  | { type: "rewind/pickerToggled"; tabId: string; open: boolean }
+  | { type: "rewind/done"; tabId: string; summary: string; undo: string }
+  | { type: "rewind/dismissed"; tabId: string }
   | { type: "tab/activated"; tabId: string }
   | { type: "tab/moved"; tabId: string; toIndex: number }
   | { type: "tab/attentionRequested"; tabId: string }
@@ -495,6 +510,25 @@ export function reduce(state: AppState, action: Action): AppState {
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         worktreeProblem: undefined,
+      }));
+
+    case "rewind/pickerToggled":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        rewindOpen: action.open,
+      }));
+
+    case "rewind/done":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        rewindOpen: false,
+        rewound: { summary: action.summary, undo: action.undo },
+      }));
+
+    case "rewind/dismissed":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        rewound: undefined,
       }));
 
     case "tab/moved": {

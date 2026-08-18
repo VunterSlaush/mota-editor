@@ -13,6 +13,7 @@ import type {
 } from "../../core/ports/agentGateway";
 import type { AppBadgePort } from "../../core/ports/appBadgePort";
 import type { BillingStore } from "../../core/ports/billingStore";
+import type { CheckpointPort, CheckpointPreview } from "../../core/ports/checkpointPort";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
 import type {
   ExtensionHostEvent,
@@ -500,6 +501,51 @@ export class DemoGit implements GitPort {
   async branchesMerged(): Promise<GitBranch[]> {
     return [{ name: "dev", current: false, remote: false }];
   }
+}
+
+/**
+ * Checkpoints without a repository. Every turn gets one so the picker
+ * has rows to lay out, and rewinding reports a fixed handful of files —
+ * enough to exercise the confirm dialog without a disk to put back.
+ */
+export class DemoCheckpoints implements CheckpointPort {
+  private counter = 0;
+
+  async available(): Promise<boolean> {
+    return true;
+  }
+  async create(): Promise<string> {
+    this.counter += 1;
+    return `demo-checkpoint-${this.counter}`;
+  }
+  async preview(): Promise<CheckpointPreview> {
+    return {
+      changes: [
+        { path: "src/ui/App.tsx", fate: "restore", label: "modified" },
+        { path: "src/core/state/appState.ts", fate: "restore", label: "modified" },
+        { path: "src/ui/components/NewThing.tsx", fate: "delete", label: "added" },
+      ],
+      stat: { files: 3, insertions: 41, deletions: 12 },
+    };
+  }
+  async restore(): Promise<string[]> {
+    return [
+      "src/ui/App.tsx",
+      "src/core/state/appState.ts",
+      "src/ui/components/NewThing.tsx",
+    ];
+  }
+  async fileDiff(): Promise<string> {
+    return [
+      "@@ -1,4 +1,5 @@",
+      ' import { useState } from "react";',
+      '-const TITLE = "Mota";',
+      '+const TITLE = "Mota Editor";',
+      '+const SUBTITLE = "an agent workbench";',
+      " ",
+    ].join("\n");
+  }
+  async forget(): Promise<void> {}
 }
 
 /**

@@ -1,6 +1,11 @@
 import { GitBranch, GitFork, NotePencil, TerminalWindow } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
+import {
+  describeRestore,
+  describeStat,
+  rewindPoints,
+} from "../../core/entities/checkpoint";
 import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
@@ -10,6 +15,7 @@ import {
   countFileChangingTools,
 } from "../../core/entities/tool";
 import type { RemovalCheck } from "../../core/entities/worktree";
+import type { CheckpointPreview } from "../../core/ports/checkpointPort";
 import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
 import type { ShellSize } from "../../core/ports/shellPort";
 import type { TabState } from "../../core/state/appState";
@@ -28,6 +34,7 @@ import {
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
 import { Composer } from "./Composer";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { ContextFullBar } from "./ContextFullBar";
 import { DiffModal } from "./DiffModal";
 import { ExtensionPanel, type ExtensionPanelsView } from "./ExtensionPanel";
@@ -36,6 +43,8 @@ import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
 import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
+import { RewindPicker } from "./RewindPicker";
+import { RewoundBar } from "./RewoundBar";
 import { TerminalPanel } from "./TerminalPanel";
 import type { AgentDiff } from "./ToolCallContentView";
 import { WorktreePicker } from "./WorktreePicker";
@@ -85,6 +94,12 @@ type DiffTarget =
       readonly path: string;
       /** Every edit the agent reported for it, oldest first. */
       readonly edits: readonly AgentEdit[];
+    }
+  | {
+      readonly kind: "checkpoint";
+      readonly path: string;
+      /** The snapshot being compared against. */
+      readonly checkpoint: string;
     };
 
 /** The views a linked worktree's tab offers — every one but its own. */
@@ -167,6 +182,14 @@ interface Props {
     staged: boolean,
     untracked: boolean,
   ) => Promise<GitActionResult>;
+  /** What rewinding to a snapshot would change; null when it is gone. */
+  onRewindPreview: (checkpoint: string) => Promise<CheckpointPreview | null>;
+  /** One file's diff between a snapshot and now. */
+  onRewindFileDiff: (checkpoint: string, path: string) => Promise<string>;
+  onRewind: (checkpoint: string) => void;
+  onRewindUndo: () => void;
+  onRewindDismiss: () => void;
+  onCloseRewind: () => void;
   /** The repo's checkouts, for the worktree picker. */
   loadWorktrees: () => Promise<WorktreeItem[]>;
   onOpenWorktree: (path: string, mainPath: string) => void;
@@ -245,6 +268,12 @@ export function ChatPanel({
   onGitPull,
   onGitFetch,
   onGitDiff,
+  onRewindPreview,
+  onRewindFileDiff,
+  onRewind,
+  onRewindUndo,
+  onRewindDismiss,
+  onCloseRewind,
   loadWorktrees,
   onOpenWorktree,
   onCreateWorktree,
@@ -278,6 +307,11 @@ export function ChatPanel({
   const [worktreePickerOpen, setWorktreePickerOpen] = useState(false);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
+  // A chosen rewind, held while the confirm dialog asks about it.
+  const [pendingRewind, setPendingRewind] = useState<{
+    readonly checkpoint: string;
+    readonly preview: CheckpointPreview;
+  } | null>(null);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
 
@@ -328,6 +362,20 @@ export function ChatPanel({
     (diff: AgentDiff) => setDiffTarget({ kind: "agent", ...diff }),
     [],
   );
+  // Reaches memoized transcript rows — must be stable. Asking what the
+  // rewind would cost before showing the dialog is the point: an empty
+  // one would be a confirm with nothing to confirm.
+  const askToRewind = useCallback(
+    async (checkpoint: string) => {
+      const preview = await onRewindPreview(checkpoint);
+      if (preview) setPendingRewind({ checkpoint, preview });
+    },
+    [onRewindPreview],
+  );
+  const rewindFromTranscript = useCallback(
+    (checkpoint: string) => void askToRewind(checkpoint),
+    [askToRewind],
+  );
   const openTouchedFile = useCallback(
     (path: string) => void onOpenFile(path),
     [onOpenFile],
@@ -350,6 +398,16 @@ export function ChatPanel({
     () => agentEditedFiles(tab.messages),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [messageCount, fileChangingTools],
+  );
+
+  // Which prompts can be rewound to. Keyed on the count for the same
+  // reason as above: a checkpoint is stamped when the prompt is
+  // appended and never patched afterwards, so a new message is the only
+  // thing that can change this list.
+  const rewindable = useMemo(
+    () => rewindPoints(tab.messages),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [messageCount],
   );
 
   // The running agent's own command list is the source of truth; the
@@ -672,6 +730,7 @@ export function ChatPanel({
             onRespondPermission={onRespondPermission}
             onAnswerQuestion={onAnswerQuestion}
             onShowPlan={showPlan}
+            onRewind={rewindFromTranscript}
           />
           {tab.contextFullPercent !== undefined && (
             <ContextFullBar
@@ -680,6 +739,13 @@ export function ChatPanel({
               onCompact={onCompactNow}
               onNewChat={onNewChat}
               onDismiss={onDismissContextFull}
+            />
+          )}
+          {tab.rewound && (
+            <RewoundBar
+              summary={tab.rewound.summary}
+              onUndo={onRewindUndo}
+              onDismiss={onRewindDismiss}
             />
           )}
           {tab.pendingSpec && (
@@ -773,7 +839,9 @@ export function ChatPanel({
           key={
             diffTarget.kind === "git"
               ? `git:${diffTarget.path}:${diffTarget.staged}`
-              : `agent:${diffTarget.path}`
+              : diffTarget.kind === "checkpoint"
+                ? `checkpoint:${diffTarget.checkpoint}:${diffTarget.path}`
+                : `agent:${diffTarget.path}`
           }
           path={diffTarget.path}
           source={
@@ -784,7 +852,19 @@ export function ChatPanel({
                   load: () =>
                     onGitDiff(diffTarget.path, diffTarget.staged, diffTarget.untracked),
                 }
-              : { kind: "agent", edits: diffTarget.edits }
+              : diffTarget.kind === "checkpoint"
+                ? {
+                    kind: "checkpoint" as const,
+                    load: () =>
+                      onRewindFileDiff(diffTarget.checkpoint, diffTarget.path).then(
+                        (text) => ({ ok: true, message: text }),
+                        (error: unknown) => ({
+                          ok: false,
+                          message: error instanceof Error ? error.message : String(error),
+                        }),
+                      ),
+                  }
+                : { kind: "agent", edits: diffTarget.edits }
           }
           onClose={() => setDiffTarget(null)}
         />
@@ -814,6 +894,41 @@ export function ChatPanel({
           onCheckRemoval={onCheckWorktreeRemoval}
           onRemove={onRemoveWorktree}
           onClose={() => setWorktreePickerOpen(false)}
+        />
+      )}
+      {tab.rewindOpen && (
+        <RewindPicker
+          points={rewindable}
+          onPreview={onRewindPreview}
+          onPick={(point, preview) =>
+            setPendingRewind({ checkpoint: point.checkpoint, preview })
+          }
+          onClose={onCloseRewind}
+        />
+      )}
+      {pendingRewind && (
+        <ConfirmDialog
+          title="Rewind files?"
+          message={`${describeRestore(pendingRewind.preview.changes)} — ${describeStat(
+            pendingRewind.preview.stat,
+          )}. The conversation is not changed.`}
+          detail={pendingRewind.preview.changes.map((change) => ({
+            id: change.path,
+            label: `${change.path} — ${change.label}`,
+            onSelect: () =>
+              setDiffTarget({
+                kind: "checkpoint",
+                path: change.path,
+                checkpoint: pendingRewind.checkpoint,
+              }),
+          }))}
+          confirmLabel="Rewind"
+          onCancel={() => setPendingRewind(null)}
+          onConfirm={() => {
+            const { checkpoint } = pendingRewind;
+            setPendingRewind(null);
+            onRewind(checkpoint);
+          }}
         />
       )}
     </main>

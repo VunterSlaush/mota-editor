@@ -143,6 +143,11 @@ export interface TurnMeta {
   readonly effort?: string;
   /** Leading slash command, when the prompt was one (e.g. "/review"). */
   readonly command?: string;
+  /** Opaque handle to the project as it was just before this prompt went
+   *  out — what `/rewind` restores. Absent when the project could not be
+   *  snapshotted (not a git repository, or the snapshot ran out of time),
+   *  which is what makes a turn un-rewindable rather than broken. */
+  readonly checkpoint?: string;
   // — patched at completion; durationMs presence gates the details icon —
   /** Turn wall time in ms. */
   readonly durationMs?: number;

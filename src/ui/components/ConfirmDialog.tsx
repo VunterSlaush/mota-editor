@@ -7,9 +7,14 @@ interface Props {
   /**
    * What is at stake, named one line at a time. Each line carries its
    * own id: two tabs can wear the same label, and the list must still
-   * show both.
+   * show both. A line with `onSelect` becomes a button — used where a
+   * named file has a diff worth reading before agreeing to lose it.
    */
-  detail?: readonly { readonly id: string; readonly label: string }[];
+  detail?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly onSelect?: () => void;
+  }[];
   /** The wording on the button that goes ahead. */
   confirmLabel: string;
   onCancel: () => void;
@@ -61,7 +66,19 @@ export function ConfirmDialog({
         {detail && detail.length > 0 && (
           <ul className="confirm-dialog__detail">
             {detail.map((line) => (
-              <li key={line.id}>{line.label}</li>
+              <li key={line.id}>
+                {line.onSelect ? (
+                  <button
+                    type="button"
+                    className="confirm-dialog__detail-link"
+                    onClick={line.onSelect}
+                  >
+                    {line.label}
+                  </button>
+                ) : (
+                  line.label
+                )}
+              </li>
             ))}
           </ul>
         )}

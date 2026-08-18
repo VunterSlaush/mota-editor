@@ -45,6 +45,19 @@ const CLEAR: CommandInfo = {
 };
 
 /**
+ * Put the files back the way they were before an earlier prompt. Mota's
+ * own for the same reason as the others: the snapshots are Mota's, taken
+ * before each turn goes out, and no agent knows they exist.
+ */
+export const REWIND_COMMAND = "/rewind";
+
+const REWIND: CommandInfo = {
+  name: REWIND_COMMAND,
+  description: "Undo an earlier turn's file changes",
+  source: "builtin",
+};
+
+/**
  * Built-in commands each CLI understands in headless mode (plus Mota's
  * own, above). Custom commands (project/user command folders) are
  * discovered at runtime and merged by the ListCommands use case.
@@ -53,6 +66,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
   claude: [
     CREATE_EXTENSION,
     CLEAR,
+    REWIND,
     {
       name: "/init",
       description: "Create or refresh CLAUDE.md with project guidance",
@@ -72,6 +86,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
   codex: [
     CREATE_EXTENSION,
     CLEAR,
+    REWIND,
     {
       name: "/init",
       description: "Create AGENTS.md with project guidance",
@@ -79,7 +94,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
-  gemini: [CREATE_EXTENSION, CLEAR],
+  gemini: [CREATE_EXTENSION, CLEAR, REWIND],
 };
 
 /**

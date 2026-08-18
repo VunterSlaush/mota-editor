@@ -369,6 +369,26 @@ export function App({ context }: { context: AppContext }) {
           onGitDiff={(path, staged, untracked) =>
             context.gitActions.diff(tab.project.id, path, staged, untracked)
           }
+          onRewindPreview={(checkpoint) =>
+            context.rewind.preview(tab.project.id, checkpoint)
+          }
+          onRewindFileDiff={(checkpoint, path) =>
+            context.rewind.fileDiff(tab.project.id, checkpoint, path)
+          }
+          onRewind={(checkpoint) =>
+            void context.rewind.execute(tab.project.id, checkpoint)
+          }
+          onRewindUndo={() => void context.rewind.undo(tab.project.id)}
+          onRewindDismiss={() =>
+            context.store.dispatch({ type: "rewind/dismissed", tabId: tab.project.id })
+          }
+          onCloseRewind={() =>
+            context.store.dispatch({
+              type: "rewind/pickerToggled",
+              tabId: tab.project.id,
+              open: false,
+            })
+          }
           loadWorktrees={() => context.worktrees.list(tab.project.id)}
           onOpenWorktree={(path, mainPath) =>
             void context.worktrees.open(path, mainPath, tab.project.id)

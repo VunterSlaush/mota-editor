@@ -1,5 +1,5 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
-import { CLEAR_COMMAND, dedupeCommands } from "../entities/command";
+import { CLEAR_COMMAND, dedupeCommands, REWIND_COMMAND } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
 import {
   CREATE_EXTENSION_COMMAND,
@@ -23,6 +23,7 @@ import { tabLabel } from "../entities/project";
 import { COMPACT_COMMAND, contextWindowFor, providerById } from "../entities/provider";
 import { estimateTokens } from "../entities/tokens";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
+import type { CheckpointPort } from "../ports/checkpointPort";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
 import type { WorkspaceStore } from "../ports/workspacePort";
@@ -63,6 +64,20 @@ const DELTA_FLUSH_MS = 33;
  */
 export const FOLLOWUP_SETTLE_MS = 8_000;
 
+/**
+ * How long a pre-turn checkpoint may take before the prompt goes out
+ * without one.
+ *
+ * It has to be awaited — a snapshot taken after the agent's first edit
+ * records the damage instead of the state before it, which is worse than
+ * no snapshot at all. So the only lever is how long the user waits, and
+ * a prompt that stalls behind git is a worse feature than a turn that
+ * cannot be rewound. Big repositories are where both costs land, which
+ * is why the budget is small and the failure is silent-but-visible: the
+ * turn simply has no rewind point, and the picker does not list it.
+ */
+export const CHECKPOINT_BUDGET_MS = 3_000;
+
 interface DeltaBuffer {
   role: "assistant" | "thought";
   text: string;
@@ -92,6 +107,7 @@ export class SendPrompt {
     private readonly applyCommandConfig: ApplyCommandConfig,
     private readonly newId: IdGenerator,
     private readonly extensionCommands?: RunExtensionCommand,
+    private readonly checkpoints?: CheckpointPort,
   ) {
     agentGateway.subscribeAgentInitiated((tabId, event) =>
       this.onAgentInitiated(tabId, event),
@@ -148,12 +164,23 @@ export class SendPrompt {
     // starting the new chat clears the messages, so anything said first
     // is wiped by the very action it was explaining.
     if (command === CLEAR_COMMAND) {
+      // The cleared conversation is the only thing that referred to its
+      // checkpoints, so let go of them here rather than growing a ref
+      // per chat forever.
+      void this.checkpoints?.forget(path, tabId).catch(() => {});
       await startNewChat(this.store, this.agentGateway, tabId);
       this.store.dispatch({
         type: "chat/messageAppended",
         tabId,
         message: infoMessage("New chat. The previous one is saved in History."),
       });
+      return;
+    }
+
+    // Mota's own as well: `/rewind` opens the picker over this tab's own
+    // snapshots. Nothing is sent and no turn starts.
+    if (command === REWIND_COMMAND) {
+      this.store.dispatch({ type: "rewind/pickerToggled", tabId, open: true });
       return;
     }
 
@@ -189,6 +216,10 @@ export class SendPrompt {
           ? expandPromptCommand(extensionHit.command.template, commandArgs)
           : trimmed;
 
+    // Before the prompt goes out and before the message is appended, so
+    // the turn the user sees is the one the checkpoint belongs to.
+    const checkpoint = await this.takeCheckpoint(path, tabId);
+
     const message = userMessage(trimmed, attachments, {
       sentAt,
       mode,
@@ -196,6 +227,7 @@ export class SendPrompt {
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(command ? { command } : {}),
+      ...(checkpoint ? { checkpoint } : {}),
     });
     this.inflight.set(tabId, {
       messageId: message.id,
@@ -258,6 +290,40 @@ export class SendPrompt {
     });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
   }
+
+  /**
+   * Snapshot the project so this turn can be undone, or resolve with
+   * undefined and let the turn go without one.
+   *
+   * Two failures, told apart on purpose. A project that is not a git
+   * repository throws immediately and will throw every time, so it is
+   * remembered and never asked again — otherwise every prompt in a
+   * non-repo folder pays for a subprocess that cannot succeed. A
+   * timeout is transient (a cold file cache, a huge tree) and is not
+   * remembered, so the next turn tries again.
+   */
+  private async takeCheckpoint(
+    projectPath: string,
+    tabId: string,
+  ): Promise<string | undefined> {
+    if (!this.checkpoints || this.uncheckpointable.has(projectPath)) return undefined;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const budget = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), CHECKPOINT_BUDGET_MS);
+    });
+    try {
+      return await Promise.race([this.checkpoints.create(projectPath, tabId), budget]);
+    } catch {
+      this.uncheckpointable.add(projectPath);
+      return undefined;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** Projects where checkpointing threw — asked once, then left alone. */
+  private readonly uncheckpointable = new Set<string>();
 
   /** Start the turn; the failure, or null when it went. */
   private async tryStart(
