@@ -5241,6 +5241,11 @@ body {
   color: var(--text-dim);
 }
 
+/* The refresh icon, turning while the extension is being asked. */
+.ext-panel__spin {
+  animation: tool-spin 0.9s linear infinite;
+}
+
 /* An item's right-click menu — placed by the same measure-then-position
    as .tab-menu, so it hangs off the row and never off-screen. */
 .ext-menu {
@@ -5340,6 +5345,21 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  /* The modal itself scrolls, and a close button that scrolls out of
+     reach is no close button. Negative margins let it span the modal's
+     padding so nothing shows through beside it as content passes under. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -16px -20px 0;
+  padding: 16px 20px 8px;
+  background: var(--bg-raised);
+}
+
+.ext-detail__actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
 }
 
 .ext-detail__title {

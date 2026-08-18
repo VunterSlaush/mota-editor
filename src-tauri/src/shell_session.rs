@@ -97,7 +97,11 @@ fn kill_tree(pid: u32) {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let _ = command.spawn();
+    // `status`, not `spawn`: the caller's next move is usually deleting
+    // the folder this shell is sitting in, and on Windows that fails
+    // while the process still lives. Returning before taskkill has even
+    // run makes `close_project` a promise it does not keep.
+    let _ = command.status();
 }
 
 #[cfg(not(windows))]
@@ -106,7 +110,7 @@ fn kill_tree(pid: u32) {
     // heads — that is the shell plus everything it started.
     let _ = std::process::Command::new("kill")
         .args(["-9", &format!("-{pid}")])
-        .spawn();
+        .status();
 }
 
 /// Every live terminal, by the ids this manager hands out.

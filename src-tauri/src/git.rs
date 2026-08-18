@@ -384,7 +384,37 @@ pub async fn git_worktree_remove(
         return Err("This worktree is locked. Unlock it in git first.".to_owned());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    run_git(&project_path, &borrowed).await.map(summary)
+    remove_with_retries(&project_path, &borrowed).await.map(summary)
+}
+
+/// How many times a busy folder is given another moment. Four attempts
+/// spans about 1.5s, which covers a process finishing its exit and a
+/// scanner letting go, without leaving a stuck delete spinning for long.
+const REMOVAL_ATTEMPTS: u32 = 4;
+
+/// `git worktree remove`, retried while the folder is merely busy.
+///
+/// The app kills a project's terminals before it gets here, and waits
+/// for them, so this is the second line rather than the first: what is
+/// left is the gap between a process being terminated and Windows
+/// releasing what it held, plus whatever a virus scanner is doing. A
+/// refusal that will not change — uncommitted work, not a worktree — is
+/// returned on the first attempt, unretried.
+async fn remove_with_retries(project_path: &str, args: &[&str]) -> Result<String, String> {
+    let mut wait = std::time::Duration::from_millis(120);
+    for attempt in 1..=REMOVAL_ATTEMPTS {
+        match run_git(project_path, args).await {
+            Ok(output) => return Ok(output),
+            Err(error) => {
+                if attempt == REMOVAL_ATTEMPTS || !worktree::removal_is_transient(&error) {
+                    return Err(error);
+                }
+                tokio::time::sleep(wait).await;
+                wait *= 2;
+            }
+        }
+    }
+    unreachable!("the loop returns on the last attempt")
 }
 
 /// Drop the bookkeeping for worktrees whose folders are already gone.

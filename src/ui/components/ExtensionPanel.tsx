@@ -1,4 +1,4 @@
-import { ArrowSquareOut, ArrowsClockwise, Trash } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsClockwise, Trash, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 import type {
@@ -169,7 +169,9 @@ export function ExtensionPanel({ panel, panels }: Props) {
           title="Ask the extension again"
           onClick={() => setRefreshKey((key) => key + 1)}
         >
-          <ArrowsClockwise />
+          {/* The button greys out while it works, which says "not now"
+              but not "something is happening" — the turning icon does. */}
+          <ArrowsClockwise className={loading ? "ext-panel__spin" : undefined} />
         </button>
       </div>
       {error && <p className="changes__notice changes__notice--error">{error}</p>}
@@ -416,17 +418,28 @@ function PanelDetailModal({
             <h2 className="ext-detail__title">{detail.title}</h2>
             {detail.subtitle && <p className="ext-detail__subtitle">{detail.subtitle}</p>}
           </div>
-          {detail.url && (
+          <div className="ext-detail__actions">
+            {detail.url && (
+              <button
+                type="button"
+                className="changes__action changes__action--icon"
+                aria-label="Open in browser"
+                title={detail.url}
+                onClick={() => detail.url && openExternalLink(detail.url)}
+              >
+                <ArrowSquareOut />
+              </button>
+            )}
             <button
               type="button"
               className="changes__action changes__action--icon"
-              aria-label="Open in browser"
-              title={detail.url}
-              onClick={() => detail.url && openExternalLink(detail.url)}
+              aria-label="Close"
+              title="Close (Esc)"
+              onClick={onClose}
             >
-              <ArrowSquareOut />
+              <X />
             </button>
-          )}
+          </div>
         </div>
         {detail.fields.length > 0 && (
           <dl className="ext-detail__fields">
