@@ -13,12 +13,17 @@ import type { TabState } from "../../core/state/appState";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryItem } from "../../core/usecases/history";
 import type { WorktreeRow } from "../../core/usecases/worktreeOverview";
-import { worktreeOverview } from "../../core/usecases/worktreeOverview";
+import {
+  filterWorktreeRows,
+  worktreeOverview,
+} from "../../core/usecases/worktreeOverview";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { RemovalConfirm } from "./WorktreeRemoval";
 
 /** How many worktree sessions the panel lists before saying "see all". */
 const SESSION_LIMIT = 6;
+/** Worktrees a repository can have before searching them is worth a box. */
+const SEARCH_FROM = 5;
 
 interface Props {
   /** The repository's checkouts. Asked once per refresh, not per render. */
@@ -75,6 +80,7 @@ export function WorktreesPanel({
   const [armed, setArmed] = useState<{ path: string; check: RemovalCheck } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   // The listing changes when a worktree is created or removed, and both
   // of those open or close a tab — so the set of tab ids is the signal,
@@ -107,12 +113,15 @@ export function WorktreesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPath, tabIds, idleTabs, refreshKey]);
 
-  const rows = useMemo(
+  const all = useMemo(
     () => worktreeOverview(worktrees ?? [], tabs, currentPath),
     [worktrees, tabs, currentPath],
   );
-  const mainPath = rows.find((row) => row.main)?.path ?? currentPath;
-  const linked = rows.filter((row) => !row.main);
+  const rows = useMemo(() => filterWorktreeRows(all, query), [all, query]);
+  // From every row, not the filtered ones: the main checkout is what a
+  // removal is run against, and searching must not change what that is.
+  const mainPath = all.find((row) => row.main)?.path ?? currentPath;
+  const linked = all.filter((row) => !row.main);
 
   /** First click asks git what it would cost; the second one removes. */
   const arm = async (path: string) => {
@@ -138,7 +147,7 @@ export function WorktreesPanel({
   return (
     <aside className="worktrees">
       <div className="changes__actions">
-        {rows.length > 0 && (
+        {all.length > 0 && (
           <button
             type="button"
             className="changes__action"
@@ -159,9 +168,31 @@ export function WorktreesPanel({
         </button>
       </div>
 
+      {/* Only once there is enough to hunt through: below that the box
+          is a row of chrome above a list you can already read. */}
+      {all.length > SEARCH_FROM && (
+        <input
+          className="worktrees__search"
+          value={query}
+          placeholder="Search branch or folder…"
+          aria-label="Search worktrees"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && query !== "") {
+              // Clears the box rather than closing the panel around it.
+              e.stopPropagation();
+              setQuery("");
+            }
+          }}
+        />
+      )}
+
       {worktrees === null && <p className="changes__empty">Loading worktrees…</p>}
-      {worktrees !== null && rows.length === 0 && (
+      {worktrees !== null && all.length === 0 && (
         <p className="changes__empty">Not a git repository (or git isn't installed).</p>
+      )}
+      {all.length > 0 && rows.length === 0 && (
+        <p className="changes__empty">No worktree matches “{query}”.</p>
       )}
       {rows.length > 0 && (
         <ul className="changes__list">
@@ -186,7 +217,7 @@ export function WorktreesPanel({
         </ul>
       )}
       {error && <p className="changes__notice changes__notice--error">{error}</p>}
-      {worktrees !== null && rows.length > 0 && linked.length === 0 && (
+      {worktrees !== null && all.length > 0 && linked.length === 0 && (
         <p className="changes__empty">
           No worktrees yet — New worktree makes one and opens it in its own tab.
         </p>

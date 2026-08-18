@@ -1508,3 +1508,57 @@ describe("a follow-up the agent starts on its own", () => {
     expect(last?.text).toBe("CI is green.");
   });
 });
+
+describe("/clear", () => {
+  it("never reaches the agent", async () => {
+    // The whole point of handling it here: a provider that has no such
+    // command would take the slash text for an ordinary prompt.
+    const { gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello"]);
+  });
+
+  it("empties the transcript and drops the resumable session", async () => {
+    const { store, useCase } = setup([{ kind: "completed", isError: false }]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    const tab = store.getState().tabs[0];
+    expect(tab.messages.some((m) => m.text === "Hello")).toBe(false);
+    // Left behind, the old session id would resume the chat just cleared.
+    expect(tab.project.providerSessions.claude).toBeUndefined();
+  });
+
+  it("says so IN the new chat, where the message survives the reset", async () => {
+    const { store, useCase } = setup([{ kind: "completed", isError: false }]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    const tab = store.getState().tabs[0];
+    expect(tab.messages.every((m) => m.role === "info")).toBe(true);
+    expect(tab.messages.at(-1)?.text).toContain("History");
+  });
+
+  it("saves the conversation before wiping it from the screen", async () => {
+    // Same safety property the newChat policy has: the action that
+    // empties the screen must never be the one that loses the work.
+    const { store, transcripts, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    expect(transcripts.saved.at(-1)?.messages.some((m) => m.text === "Hello")).toBe(true);
+    expect(store.getState().tabs[0].messages.some((m) => m.text === "Hello")).toBe(false);
+  });
+});

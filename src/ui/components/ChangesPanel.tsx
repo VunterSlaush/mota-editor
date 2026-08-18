@@ -14,6 +14,7 @@ import {
   GitDiff,
   Minus,
   Plus,
+  X,
 } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { commitUrl } from "../../core/entities/gitRemote";
@@ -86,6 +87,7 @@ export function ChangesPanel({
 }: Props) {
   // Opening a file is the panel's own business — no git, no tab state.
   const [fileProblem, setFileProblem] = useState<GitActionResult | null>(null);
+  const [dismissed, setDismissed] = useState<GitActionResult | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [open, setOpen] = useState(ALL_OPEN);
 
@@ -130,7 +132,12 @@ export function ChangesPanel({
   const verbIcon = (verb: GitVerb, Idle: Icon) =>
     working === verb ? <CircleNotch className="changes__watching" /> : <Idle />;
 
-  const shown = fileProblem ?? notice;
+  // A notice stays until it is dismissed or replaced. Remembering the
+  // dismissed object rather than a flag is what makes the next notice
+  // appear on its own: a new result is a different object, so nothing
+  // has to reset anything when one arrives.
+  const latest = fileProblem ?? notice;
+  const shown = latest && latest !== dismissed ? latest : null;
 
   // Rendered below "Not staged" (or under the no-repo notice: the agent
   // reports its edits even where git can't).
@@ -265,7 +272,16 @@ export function ChangesPanel({
 
       {shown && (
         <p className={`changes__notice ${shown.ok ? "" : "changes__notice--error"}`}>
-          {shown.message}
+          <span className="changes__notice-text">{shown.message}</span>
+          <button
+            type="button"
+            className="changes__notice-dismiss"
+            aria-label="Dismiss this message"
+            title="Dismiss"
+            onClick={() => setDismissed(shown)}
+          >
+            <X size={12} />
+          </button>
         </p>
       )}
 

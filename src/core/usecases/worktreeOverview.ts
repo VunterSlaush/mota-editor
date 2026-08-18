@@ -60,3 +60,27 @@ export function worktreeOverview(
       };
     });
 }
+
+/**
+ * The rows matching what the user typed into the panel's search box.
+ *
+ * Branch and path both, because a worktree is known by either — the
+ * branch is what you were told to review, the folder is what you cloned
+ * it into, and which one you remember is not something a search box gets
+ * to decide. Every whitespace-separated word must match somewhere, so
+ * "art edit" narrows rather than widens; case is ignored, and so is the
+ * difference between the separators git and Windows disagree on.
+ */
+export function filterWorktreeRows(
+  rows: readonly WorktreeRow[],
+  query: string,
+): WorktreeRow[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [...rows];
+  return rows.filter((row) => {
+    const haystack = `${row.branch} ${row.path} ${row.head}`
+      .toLowerCase()
+      .replace(/\\/g, "/");
+    return words.every((word) => haystack.includes(word.replace(/\\/g, "/")));
+  });
+}
