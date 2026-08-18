@@ -122,6 +122,11 @@ pub struct AcpSession {
     /// `session/update` stream restores the AGENT's memory, not the
     /// chat (which never lost the conversation), so updates are muted.
     replaying: AtomicBool,
+    /// Set on a throwaway session whose ANSWER is the point: the
+    /// assistant's words are collected here for the caller instead of
+    /// emitted to a tab. No tab is listening for a session that exists
+    /// only to answer one question (see `ask_once`).
+    capture: Mutex<Option<String>>,
     /// What the agent advertised at `initialize` — gates optional calls
     /// (`session/list`, `session/load`) instead of assuming support.
     caps: Mutex<acp::AgentCaps>,
@@ -272,6 +277,35 @@ impl AcpSession {
 
     fn set_sid(&self, session_id: String) {
         *self.session_id.lock().unwrap_or_else(PoisonError::into_inner) = session_id;
+    }
+
+    /// Start collecting the assistant's words instead of emitting them.
+    fn start_capture(&self) {
+        *self.capture.lock().unwrap_or_else(PoisonError::into_inner) = Some(String::new());
+    }
+
+    /// Everything the assistant said since `start_capture`.
+    fn captured(&self) -> String {
+        self.capture
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_default()
+    }
+
+    /// Fold one event into the capture buffer. Returns false when this
+    /// session is not capturing, and the event belongs to a tab instead.
+    fn capture_event(&self, event: &AgentEvent) -> bool {
+        let mut buffer = self.capture.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(text) = buffer.as_mut() else { return false };
+        match event {
+            AgentEvent::AssistantMessage { text: said }
+            | AgentEvent::AssistantDelta { text: said } => text.push_str(said),
+            // Thoughts, tool calls and plans are how the agent got to the
+            // answer, not the answer.
+            _ => {}
+        }
+        true
     }
 
     async fn write_message(&self, message: &Value) -> Result<(), String> {
@@ -871,6 +905,7 @@ async fn boot_agent(
         has_conversation: AtomicBool::new(false),
         dead: AtomicBool::new(false),
         replaying: AtomicBool::new(false),
+        capture: Mutex::new(None),
         caps: Mutex::new(acp::AgentCaps::default()),
         available_modes: Mutex::new(Vec::new()),
         stderr_tail: Mutex::new(VecDeque::new()),
@@ -1231,6 +1266,94 @@ pub(crate) async fn probe_handshake(
     result
 }
 
+/// Ask a throwaway agent one question and return what it answered.
+///
+/// A session of its own, booted and shut down for this one exchange: the
+/// answer must not land in a tab's conversation, and it must not eat a
+/// tab's context window. Read-only throughout — the scope rides the
+/// prompt (and codex's sandbox via `native_scope_mode_id`), so an agent
+/// asked to look around cannot decide to tidy up while it is there.
+///
+/// Costs the user real tokens, so nothing calls this on its own: every
+/// caller is behind a button the user pressed.
+pub(crate) async fn ask_once(
+    app: &AppHandle,
+    provider_id: &str,
+    project_path: &str,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<String, AcpStartError> {
+    let spec = SessionSpec {
+        project_path: project_path.to_owned(),
+        model: None,
+        effort: None,
+        // No MCP servers: this asks about the folder tree, and a failing
+        // server would only give the boot a way to fail for other reasons.
+        mcp_servers: Vec::new(),
+        subtask: Some(agent_core::SubtaskScope::ReadOnly),
+    };
+    let tab_id = format!("ask:{provider_id}");
+    let session = boot_agent(app, &tab_id, provider_id, &spec, false).await?;
+    session.start_capture();
+
+    let answer = ask_in_session(&session, provider_id, project_path, prompt, timeout).await;
+    session.shutdown();
+    answer
+}
+
+/// The exchange itself, split out so the caller above always shuts the
+/// agent down — an early return here must not leak the process.
+async fn ask_in_session(
+    session: &Arc<AcpSession>,
+    provider_id: &str,
+    project_path: &str,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<String, AcpStartError> {
+    let id = session.request_id();
+    let opened = session
+        .call_with_timeout(acp::session_new_request(id, project_path, &[]), id, timeout)
+        .await
+        .map_err(|e| AcpStartError::Failed(session.with_stderr(e)))?;
+    if let (Some(session_id), _) = acp::parse_session_new_result(&opened) {
+        session.set_sid(session_id);
+    }
+
+    // Belt and braces on top of the prompt's own read-only wording: where
+    // the vendor has a read-only session mode, take it.
+    apply_mode(
+        session,
+        provider_id,
+        agent_core::Mode::Ask,
+        agent_core::Permission::Manual,
+        Some(&agent_core::SubtaskScope::ReadOnly),
+    )
+    .await;
+
+    let request = agent_core::TurnRequest {
+        prompt: prompt.to_owned(),
+        project_path: project_path.to_owned(),
+        resume_session_id: None,
+        mode: agent_core::Mode::Ask,
+        permission: agent_core::Permission::Manual,
+        attachments: Vec::new(),
+        model: None,
+        effort: None,
+        subtask: Some(agent_core::SubtaskScope::ReadOnly),
+    };
+    let id = session.request_id();
+    session
+        .call_with_timeout(
+            acp::prompt_request_for_provider(id, &session.sid(), provider_id, &request),
+            id,
+            timeout,
+        )
+        .await
+        .map_err(|e| AcpStartError::Failed(session.with_stderr(e)))?;
+
+    Ok(session.captured())
+}
+
 /// Serve one `terminal/*` request against the session's terminals.
 async fn handle_terminal_request(
     session: &Arc<AcpSession>,
@@ -1451,7 +1574,10 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 return;
             }
             for event in events {
-                runner::emit(app, tab_id, &event);
+                // A capturing session answers its caller, not a tab.
+                if !session.capture_event(&event) {
+                    runner::emit(app, tab_id, &event);
+                }
             }
         }
         // Client fs, spawned off the reader loop (disk must never stall

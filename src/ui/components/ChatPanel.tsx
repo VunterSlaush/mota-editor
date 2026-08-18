@@ -845,6 +845,7 @@ export function ChatPanel({
       {subtaskPicker && (
         <SubtaskPicker
           loadFolders={loadFolderCandidates}
+          presets={tab.project.boundaryPresets ?? []}
           initialScope={subtaskPicker === "edit" ? tab.project.subtask : undefined}
           onSubmit={subtaskPicker === "edit" ? onChangeSubtaskScope : onNewSubtask}
           onClose={() => setSubtaskPicker(null)}

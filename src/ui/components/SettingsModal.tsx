@@ -9,6 +9,7 @@ import {
   Terminal,
   TerminalWindow,
   Toolbox,
+  TreeStructure,
   X,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
@@ -16,15 +17,18 @@ import type { CommandInfo } from "../../core/entities/command";
 import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
+import type { BoundaryPreset } from "../../core/entities/subtask";
 import type { ProvisionEntry } from "../../core/entities/worktree";
 import type { McpProbe } from "../../core/ports/mcpProbe";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
+import type { SuggestedPresets } from "../../core/usecases/subtasks";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsExtensions } from "./SettingsExtensions";
 import { SettingsInsights } from "./SettingsInsights";
 import { SettingsProviders } from "./SettingsProviders";
+import { SettingsSubtasks } from "./SettingsSubtasks";
 import { SettingsTerminal } from "./SettingsTerminal";
 import { SettingsTheme } from "./SettingsTheme";
 import { SettingsTools } from "./SettingsTools";
@@ -38,6 +42,7 @@ export type SettingsSection =
   | "extensions"
   | "providers"
   | "worktrees"
+  | "subtasks"
   | "terminal"
   | "usage"
   | "insights"
@@ -71,6 +76,11 @@ interface Props {
   supportsCow: boolean | null;
   /** The active project's folders, for the Worktrees path suggestions. */
   loadFolders?: () => Promise<string[]>;
+  /** The active project's named subtask areas: save, and propose with an agent. */
+  onSaveBoundaryPresets: (
+    presets: readonly BoundaryPreset[],
+  ) => Promise<string | undefined>;
+  onSuggestBoundaryPresets: () => Promise<SuggestedPresets>;
   onClose: () => void;
 }
 
@@ -82,6 +92,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
     { id: "extensions", label: "Extensions", Icon: PuzzlePiece },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
     { id: "worktrees", label: "Worktrees", Icon: GitFork },
+    { id: "subtasks", label: "Subtasks", Icon: TreeStructure },
     { id: "terminal", label: "Terminal", Icon: Terminal },
     { id: "usage", label: "Usage", Icon: Gauge },
     { id: "insights", label: "Insights", Icon: ChartBar },
@@ -113,6 +124,8 @@ export function SettingsModal({
   readExtensionLog,
   supportsCow,
   loadFolders,
+  onSaveBoundaryPresets,
+  onSuggestBoundaryPresets,
   onClose,
 }: Props) {
   const [section, setSection] = useState<SettingsSection>("defaults");
@@ -192,6 +205,15 @@ export function SettingsModal({
               onScopeProvisioning={onScopeProvisioning}
               supportsCow={supportsCow}
               loadFolders={loadFolders}
+            />
+          )}
+          {section === "subtasks" && (
+            <SettingsSubtasks
+              activeTab={activeTab}
+              onSave={onSaveBoundaryPresets}
+              onSuggest={onSuggestBoundaryPresets}
+              loadFolders={loadFolders}
+              newId={newId}
             />
           )}
           {section === "terminal" && (

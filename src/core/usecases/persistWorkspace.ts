@@ -27,6 +27,7 @@ export function toPersisted(state: AppState): PersistedWorkspace {
       provisioningOverride: t.project.provisioningOverride,
       worktreeOf: t.project.worktreeOf,
       subtask: t.project.subtask,
+      boundaryPresets: t.project.boundaryPresets,
     })),
     activeTabId: state.activeTabId,
     settings: state.settings,

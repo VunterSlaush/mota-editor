@@ -4,7 +4,7 @@ import {
   DEFAULT_PERMISSION,
 } from "../entities/agentSettings";
 import { normalizedTabLabel, projectNameFromPath } from "../entities/project";
-import { restoredSubtaskScope } from "../entities/subtask";
+import { restoredBoundaryPresets, restoredSubtaskScope } from "../entities/subtask";
 import { isTabColorId } from "../entities/tabColor";
 import type { WorktreeSettings } from "../entities/worktree";
 import { clampZoomLevel } from "../entities/zoom";
@@ -53,6 +53,7 @@ export class RestoreWorkspace {
         provisioningOverride: p.provisioningOverride,
         worktreeOf: p.worktreeOf,
         subtask: restoredSubtaskScope(p.subtask),
+        boundaryPresets: restoredBoundaryPresets(p.boundaryPresets),
       },
       messages: [],
       // A claim on the transcript this tab was writing to — honoured

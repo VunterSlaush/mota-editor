@@ -2,6 +2,7 @@ import {
   DemoAgentGateway,
   DemoAppBadge,
   DemoBillingStore,
+  DemoBoundarySuggestions,
   DemoCommandCatalog,
   DemoExtensionHost,
   DemoFilePicker,
@@ -23,6 +24,7 @@ import { isTauriRuntime } from "../adapters/tauri/runtime";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
 import { TauriAppBadge } from "../adapters/tauri/tauriAppBadge";
 import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
+import { TauriBoundarySuggestions } from "../adapters/tauri/tauriBoundarySuggestions";
 import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
 import { TauriExtensionHost } from "../adapters/tauri/tauriExtensionHost";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
@@ -274,7 +276,14 @@ export function createAppContext(): AppContext {
     loadBranches: new LoadBranches(store, gitPort),
     gitActions: new GitActions(store, gitPort),
     worktrees,
-    subtasks: new Subtasks(store, workspaceStore, agentGateway, newId),
+    subtasks: new Subtasks(
+      store,
+      workspaceStore,
+      agentGateway,
+      newId,
+      worktreeProvisioning,
+      inTauri ? new TauriBoundarySuggestions() : new DemoBoundarySuggestions(),
+    ),
     worktreeProvisioning,
     removeWorktree: new RemoveWorktree(
       store,

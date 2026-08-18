@@ -101,6 +101,62 @@ export function describeScope(scope: SubtaskScope): string {
 }
 
 /**
+ * A named set of write boundaries, saved on the project so the areas of
+ * a monorepo are described once rather than re-picked per subtask.
+ */
+export interface BoundaryPreset {
+  readonly id: string;
+  /** What the user calls this area — "Frontend", "API". */
+  readonly name: string;
+  readonly boundaries: readonly string[];
+}
+
+/** The longest preset name worth storing; the rows ellipsise well before. */
+export const MAX_PRESET_NAME_LENGTH = 40;
+
+/** Why this preset cannot be saved, or undefined when it can. */
+export function presetProblem(preset: BoundaryPreset): string | undefined {
+  if (!preset.name.trim()) return "Needs a name.";
+  return subtaskScopeProblem({ access: "boundary", boundaries: preset.boundaries });
+}
+
+/** The preset as it should be stored: name trimmed, folders cleaned up. */
+export function normalizedPreset(preset: BoundaryPreset): BoundaryPreset {
+  return {
+    id: preset.id,
+    name: preset.name.trim().slice(0, MAX_PRESET_NAME_LENGTH),
+    boundaries: normalizedBoundaries(preset.boundaries),
+  };
+}
+
+/** The scope a preset stands for — what applying one selects. */
+export function presetScope(preset: BoundaryPreset): SubtaskScope {
+  return { access: "boundary", boundaries: normalizedBoundaries(preset.boundaries) };
+}
+
+/**
+ * Presets as they come off disk (or back from an agent's suggestion):
+ * every entry validated, unusable ones dropped. Unlike a scope these
+ * fail OPEN — a preset is a convenience, not a restriction, so a broken
+ * one is simply not offered. Absent stays absent.
+ */
+export function restoredBoundaryPresets(raw: unknown): BoundaryPreset[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const presets = raw
+    .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
+    .map((p) => ({
+      id: typeof p.id === "string" ? p.id : "",
+      name: typeof p.name === "string" ? p.name : "",
+      boundaries: Array.isArray(p.boundaries)
+        ? p.boundaries.filter((b): b is string => typeof b === "string")
+        : [],
+    }))
+    .map(normalizedPreset)
+    .filter((p) => p.id !== "" && !presetProblem(p));
+  return presets.length > 0 ? presets : undefined;
+}
+
+/**
  * A scope as it comes off disk. Fails closed: a malformed scope was
  * still a decision to restrict this tab, so it degrades to read-only —
  * dropping the field would silently grant full write instead. Absent

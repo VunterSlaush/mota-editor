@@ -31,7 +31,7 @@ import {
 } from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
-import type { SubtaskScope } from "../entities/subtask";
+import type { BoundaryPreset, SubtaskScope } from "../entities/subtask";
 import type { TabColorId } from "../entities/tabColor";
 import { tabIsWorking } from "../entities/tabStatus";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
@@ -263,6 +263,12 @@ export type Action =
   | { type: "worktree/created"; tabId: string; branch: string; problem?: string }
   | { type: "worktree/problemDismissed"; tabId: string }
   | { type: "subtask/scopeChanged"; tabId: string; scope: SubtaskScope }
+  | {
+      type: "subtask/presetsChanged";
+      tabId: string;
+      /** Empty clears the field — the project names no areas. */
+      presets: readonly BoundaryPreset[];
+    }
   | { type: "tab/activated"; tabId: string }
   | { type: "tab/moved"; tabId: string; toIndex: number }
   | { type: "tab/attentionRequested"; tabId: string }
@@ -516,6 +522,29 @@ export function reduce(state: AppState, action: Action): AppState {
           ? { ...tab, project: { ...tab.project, subtask: action.scope } }
           : tab,
       );
+
+    // Every tab on this folder shares its areas — they describe the
+    // repository, not the tab that happened to be open when they were
+    // written. An empty list deletes the key rather than storing [],
+    // the same tri-state the other per-project fields keep.
+    case "subtask/presetsChanged": {
+      const edited = tabById(state, action.tabId);
+      if (!edited) return state;
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) => {
+          if (!samePath(tab.project.path, edited.project.path)) return tab;
+          const { boundaryPresets: _, ...project } = tab.project;
+          return {
+            ...tab,
+            project:
+              action.presets.length > 0
+                ? { ...project, boundaryPresets: action.presets }
+                : project,
+          };
+        }),
+      };
+    }
 
     case "tab/moved": {
       // Reordering is purely cosmetic: which tab you are looking at never

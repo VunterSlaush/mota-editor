@@ -99,6 +99,111 @@ pub fn scope_preamble(scope: Option<&SubtaskScope>) -> Option<String> {
     }
 }
 
+/// One boundary group an agent proposed: a name a person would
+/// recognise, and the folders it writes in.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedBoundary {
+    pub name: String,
+    pub boundaries: Vec<String>,
+}
+
+/// How many groups a suggestion run ever returns. A monorepo has a
+/// handful of real areas; a list longer than this is the model padding,
+/// and the user has to read every row it produces.
+pub const SUGGESTION_LIMIT: usize = 12;
+
+/// What to ask an agent for, given the folders the project actually has.
+/// The folder list is included so the answer names real paths instead of
+/// the model's idea of a typical repository.
+pub fn boundary_suggestion_prompt(folders: &[String]) -> String {
+    let listing = folders
+        .iter()
+        .map(|f| format!("- {f}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Group this project's folders into the areas someone would scope a task to \
+         — a frontend app, a backend service, a shared library, the docs.\n\n\
+         These are the project's folders:\n{listing}\n\n\
+         Read whatever configuration you need (workspace manifests, build files) to \
+         tell real areas apart from incidental folders. Then reply with ONLY a JSON \
+         array, no prose and no code fence, of at most {SUGGESTION_LIMIT} objects:\n\
+         [{{\"name\": \"Frontend\", \"boundaries\": [\"apps/web\", \"packages/ui\"]}}]\n\n\
+         Rules: every path must be one of the folders listed above or a folder \
+         inside one; paths are relative to the project root, use forward slashes, \
+         and never start with '/', a drive letter, '..' or '.git'. Leave out \
+         dependency and build-output folders — nobody scopes a task to those. \
+         Give each group a short human name."
+    )
+}
+
+/// The suggestions in an agent's reply, or an empty list when it did not
+/// answer in the shape it was asked for. Tolerant of a code fence and of
+/// prose around the array, because models add both; strict about the
+/// paths, because these become write permissions — anything absolute or
+/// escaping is dropped rather than shown to the user as an option.
+pub fn parse_boundary_suggestions(reply: &str) -> Vec<SuggestedBoundary> {
+    let Some(array) = json_array(reply) else {
+        return Vec::new();
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(array) else {
+        return Vec::new();
+    };
+    let Some(items) = parsed.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(suggestion_from)
+        .take(SUGGESTION_LIMIT)
+        .collect()
+}
+
+fn suggestion_from(item: &serde_json::Value) -> Option<SuggestedBoundary> {
+    let name = item.get("name").and_then(serde_json::Value::as_str)?.trim();
+    let boundaries: Vec<String> = item
+        .get("boundaries")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(normalize_boundary)
+        .filter(|path| valid_boundary(path))
+        .collect();
+    // A group with no usable folder is not a group. Neither is a nameless
+    // one — the user picks these by name.
+    (!name.is_empty() && !boundaries.is_empty()).then(|| SuggestedBoundary {
+        name: name.to_owned(),
+        boundaries,
+    })
+}
+
+/// The outermost `[...]` in a reply, fence and prose ignored.
+fn json_array(reply: &str) -> Option<&str> {
+    let start = reply.find('[')?;
+    let end = reply.rfind(']')?;
+    (end > start).then(|| &reply[start..=end])
+}
+
+fn normalize_boundary(path: &str) -> String {
+    path.trim().replace('\\', "/").trim_end_matches('/').to_owned()
+}
+
+/// Whether a suggested path is one we would let a user grant writes to.
+/// Mirrors the frontend's `boundaryPathProblem`; a suggestion is
+/// untrusted input like any other model output.
+pub fn valid_boundary(path: &str) -> bool {
+    if path.is_empty() || path.starts_with('/') {
+        return false;
+    }
+    // A drive letter ("C:/work") is absolute too.
+    if path.chars().nth(1) == Some(':') {
+        return false;
+    }
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    !segments.is_empty() && !segments.contains(&"..") && segments.first() != Some(&".git")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +322,70 @@ mod tests {
         assert_eq!(native_scope_mode_id("claude", Some(&SubtaskScope::ReadOnly)), None);
         assert_eq!(native_scope_mode_id("codex", Some(&boundary(&["apps/web"]))), None);
         assert_eq!(native_scope_mode_id("codex", None), None);
+    }
+
+    #[test]
+    fn the_suggestion_prompt_names_the_projects_own_folders() {
+        let prompt = boundary_suggestion_prompt(&["apps/web".to_owned(), "libs".to_owned()]);
+        assert!(prompt.contains("- apps/web"));
+        assert!(prompt.contains("- libs"));
+        assert!(prompt.contains("JSON array"));
+    }
+
+    #[test]
+    fn parses_a_plain_json_array() {
+        let reply = r#"[{"name":"Frontend","boundaries":["apps/web","packages/ui"]}]"#;
+        assert_eq!(
+            parse_boundary_suggestions(reply),
+            vec![SuggestedBoundary {
+                name: "Frontend".to_owned(),
+                boundaries: vec!["apps/web".to_owned(), "packages/ui".to_owned()],
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_through_a_code_fence_and_surrounding_prose() {
+        let reply = "Sure! Here you go:\n```json\n[{\"name\":\"API\",\"boundaries\":[\"services/api\"]}]\n```\nHope that helps.";
+        let parsed = parse_boundary_suggestions(reply);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "API");
+    }
+
+    #[test]
+    fn drops_paths_that_would_escape_the_project() {
+        let reply = r#"[{"name":"Bad","boundaries":["../secrets","/etc","C:/windows",".git/hooks","apps/web"]}]"#;
+        let parsed = parse_boundary_suggestions(reply);
+        // The one good path survives; nothing absolute or escaping does.
+        assert_eq!(parsed[0].boundaries, vec!["apps/web".to_owned()]);
+    }
+
+    #[test]
+    fn drops_a_group_with_no_usable_folder_or_no_name() {
+        let reply = r#"[{"name":"Bad","boundaries":["/etc"]},{"name":"","boundaries":["src"]}]"#;
+        assert_eq!(parse_boundary_suggestions(reply), Vec::new());
+    }
+
+    #[test]
+    fn normalizes_separators_and_trailing_slashes() {
+        let reply = r#"[{"name":"UI","boundaries":["apps\\web\\"]}]"#;
+        assert_eq!(parse_boundary_suggestions(reply)[0].boundaries, vec!["apps/web".to_owned()]);
+    }
+
+    #[test]
+    fn a_reply_in_the_wrong_shape_yields_nothing_rather_than_erroring() {
+        assert_eq!(parse_boundary_suggestions("I could not determine that."), Vec::new());
+        assert_eq!(parse_boundary_suggestions("[not json"), Vec::new());
+        assert_eq!(parse_boundary_suggestions(r#"{"name":"x"}"#), Vec::new());
+    }
+
+    #[test]
+    fn caps_a_model_that_pads_the_list() {
+        let items: Vec<String> = (0..40)
+            .map(|n| format!(r#"{{"name":"G{n}","boundaries":["src/{n}"]}}"#))
+            .collect();
+        let reply = format!("[{}]", items.join(","));
+        assert_eq!(parse_boundary_suggestions(&reply).len(), SUGGESTION_LIMIT);
     }
 
     #[test]

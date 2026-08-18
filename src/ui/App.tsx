@@ -440,6 +440,16 @@ export function App({ context }: { context: AppContext }) {
           readExtensionLog={(id) => context.manageExtensions.readLog(id)}
           supportsCow={supportsCow}
           loadFolders={projectPath ? loadFolders : undefined}
+          onSaveBoundaryPresets={(presets) =>
+            tab
+              ? context.subtasks.savePresets(tab.project.id, presets)
+              : Promise.resolve("No project open.")
+          }
+          onSuggestBoundaryPresets={() =>
+            tab
+              ? context.subtasks.suggestPresets(tab.project.id)
+              : Promise.resolve({ presets: [], problem: "No project open." })
+          }
           onClose={closeSettings}
         />
       )}

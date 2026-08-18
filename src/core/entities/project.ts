@@ -1,7 +1,7 @@
 import type { AgentMode, PermissionPolicy } from "./agentSettings";
 import type { ProjectMcpOverrides } from "./mcpServer";
 import type { ProviderId } from "./provider";
-import type { SubtaskScope } from "./subtask";
+import type { BoundaryPreset, SubtaskScope } from "./subtask";
 import type { TabColorId } from "./tabColor";
 import type { ProvisionEntry } from "./worktree";
 
@@ -58,6 +58,12 @@ export interface Project {
    * for ordinary tabs; a tab never converts to or from a subtask.
    */
   readonly subtask?: SubtaskScope;
+  /**
+   * This project's named write-boundary areas, offered when scoping a
+   * subtask. Per project because the paths are: `apps/web` describes
+   * this repository and means nothing in another one.
+   */
+  readonly boundaryPresets?: readonly BoundaryPreset[];
 }
 
 export function projectNameFromPath(path: string): string {

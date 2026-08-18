@@ -3,6 +3,10 @@ import {
   boundaryPathProblem,
   describeScope,
   normalizedBoundaries,
+  normalizedPreset,
+  presetProblem,
+  presetScope,
+  restoredBoundaryPresets,
   restoredSubtaskScope,
   sameScope,
   subtaskScopeProblem,
@@ -161,5 +165,77 @@ describe("restoredSubtaskScope", () => {
     expect(
       restoredSubtaskScope({ access: "boundary", boundaries: ["apps/web", 7, "../out"] }),
     ).toEqual({ access: "boundary", boundaries: ["apps/web"] });
+  });
+});
+
+describe("boundary presets", () => {
+  const preset = (
+    over: Partial<{ id: string; name: string; boundaries: string[] }> = {},
+  ) => ({
+    id: "p1",
+    name: "Frontend",
+    boundaries: ["apps/web"],
+    ...over,
+  });
+
+  it("accepts a named preset with a usable folder", () => {
+    expect(presetProblem(preset())).toBeUndefined();
+  });
+
+  it("refuses a preset with no name", () => {
+    expect(presetProblem(preset({ name: "  " }))).toBeDefined();
+  });
+
+  it("refuses a preset with no usable folder", () => {
+    expect(presetProblem(preset({ boundaries: [] }))).toBeDefined();
+    expect(presetProblem(preset({ boundaries: ["../out"] }))).toBeDefined();
+  });
+
+  it("normalises the name and the folders", () => {
+    expect(
+      normalizedPreset(preset({ name: "  Web  ", boundaries: ["apps\\web\\"] })),
+    ).toEqual({
+      id: "p1",
+      name: "Web",
+      boundaries: ["apps/web"],
+    });
+  });
+
+  it("caps an over-long name", () => {
+    const long = "x".repeat(80);
+    expect(normalizedPreset(preset({ name: long })).name).toHaveLength(40);
+  });
+
+  it("applies as a boundary scope", () => {
+    expect(presetScope(preset({ boundaries: ["apps\\web"] }))).toEqual({
+      access: "boundary",
+      boundaries: ["apps/web"],
+    });
+  });
+});
+
+describe("restoredBoundaryPresets", () => {
+  it("leaves a project with no presets alone", () => {
+    expect(restoredBoundaryPresets(undefined)).toBeUndefined();
+    expect(restoredBoundaryPresets("nonsense")).toBeUndefined();
+  });
+
+  it("restores usable presets and drops the rest", () => {
+    // Unlike a scope, presets fail OPEN: a convenience that no longer
+    // parses is simply not offered, never silently narrowed.
+    const restored = restoredBoundaryPresets([
+      { id: "p1", name: "Frontend", boundaries: ["apps\\web"] },
+      { id: "p2", name: "", boundaries: ["apps/api"] },
+      { id: "p3", name: "Escape", boundaries: ["../etc"] },
+      { id: "", name: "Nameless id", boundaries: ["src"] },
+      "not an object",
+    ]);
+    expect(restored).toEqual([{ id: "p1", name: "Frontend", boundaries: ["apps/web"] }]);
+  });
+
+  it("returns undefined when nothing survived", () => {
+    expect(
+      restoredBoundaryPresets([{ id: "p1", name: "x", boundaries: ["/etc"] }]),
+    ).toBeUndefined();
   });
 });

@@ -53,6 +53,13 @@ export interface PersistedProject {
     readonly access: string;
     readonly boundaries?: readonly string[];
   };
+  /** This project's named boundary areas; unusable entries are dropped
+   *  at restore rather than trusted by the type. */
+  readonly boundaryPresets?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly boundaries: readonly string[];
+  }[];
 }
 
 /**

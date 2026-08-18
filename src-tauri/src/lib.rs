@@ -5,6 +5,7 @@
 mod acp_session;
 mod app_badge;
 mod billing_log;
+mod boundary_suggest;
 mod command_discovery;
 mod commands;
 mod extension_discovery;
@@ -80,6 +81,7 @@ pub fn run() {
             commands::open_path,
             commands::save_pasted_image,
             provider_probe::probe_provider,
+            boundary_suggest::suggest_boundaries,
             sign_in::open_provider_login,
             git::git_status,
             git::git_log,

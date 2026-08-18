@@ -1,12 +1,16 @@
 import { defaultsFromProject, newProject } from "../entities/project";
-import type { SubtaskScope } from "../entities/subtask";
+import type { BoundaryPreset, SubtaskScope } from "../entities/subtask";
 import {
   normalizedBoundaries,
+  normalizedPreset,
+  presetProblem,
   sameScope,
   subtaskScopeProblem,
 } from "../entities/subtask";
 import type { AgentGateway } from "../ports/agentGateway";
+import type { BoundarySuggestions } from "../ports/boundarySuggestions";
 import type { WorkspaceStore } from "../ports/workspacePort";
+import type { WorktreeProvisioning } from "../ports/worktreeProvisioning";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import type { IdGenerator } from "./openProject";
@@ -25,6 +29,10 @@ export class Subtasks {
     private readonly workspaceStore: WorkspaceStore,
     private readonly agentGateway: AgentGateway,
     private readonly newId: IdGenerator,
+    /** Where the project's folders come from — the same shallow scan the
+     *  worktree settings offer, rather than a second one of our own. */
+    private readonly folders: WorktreeProvisioning,
+    private readonly suggestions: BoundarySuggestions,
   ) {}
 
   /**
@@ -77,6 +85,58 @@ export class Subtasks {
     await persistWorkspace(this.store.getState(), this.workspaceStore);
     return undefined;
   }
+
+  /**
+   * Replace the project's named areas. No agent is touched: a preset is
+   * a shortcut for picking folders, not authority anyone holds — a tab
+   * only gets narrower when its own scope changes.
+   */
+  async savePresets(
+    tabId: string,
+    presets: readonly BoundaryPreset[],
+  ): Promise<string | undefined> {
+    if (!tabById(this.store.getState(), tabId)) return "Unknown tab.";
+    const normalized = presets.map(normalizedPreset);
+    const problem = normalized.map(presetProblem).find(Boolean);
+    if (problem) return problem;
+
+    this.store.dispatch({ type: "subtask/presetsChanged", tabId, presets: normalized });
+    await persistWorkspace(this.store.getState(), this.workspaceStore);
+    return undefined;
+  }
+
+  /**
+   * Ask an agent to name this project's areas and keep the ones that
+   * survive validation. Costs the user tokens, so the caller is a button
+   * that said as much before it ran; the answer is returned rather than
+   * saved, because a suggestion is a draft until someone accepts it.
+   */
+  async suggestPresets(tabId: string): Promise<SuggestedPresets> {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab) return { presets: [], problem: "Unknown tab." };
+    try {
+      const folders = await this.folders.folderCandidates(tab.project.path);
+      const suggested = await this.suggestions.suggest(
+        tab.project.provider,
+        tab.project.path,
+        folders,
+      );
+      const presets = suggested
+        .map((s) => normalizedPreset({ ...s, id: this.newId() }))
+        .filter((p) => !presetProblem(p));
+      return presets.length > 0
+        ? { presets }
+        : { presets: [], problem: "Nothing usable came back — add the folders by hand." };
+    } catch (e) {
+      return { presets: [], problem: e instanceof Error ? e.message : String(e) };
+    }
+  }
+}
+
+/** What a suggestion run produced, or why it produced nothing. */
+export interface SuggestedPresets {
+  readonly presets: readonly BoundaryPreset[];
+  readonly problem?: string;
 }
 
 /** The scope as it should live in state: boundary folders cleaned up. */

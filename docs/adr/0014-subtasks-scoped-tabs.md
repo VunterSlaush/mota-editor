@@ -46,6 +46,24 @@ same folder the user already has open, just with less authority.
 - The permission policy is capped by the scope: `read-only` forces
   `manual`, `boundary` caps `bypass` down to `auto` — Mota's own
   auto-approval must never approve what the scope forbids.
+- The scope preamble is written by **both** prompt paths: `effective_prompt`
+  for the headless fallback and `acp::prompt_request_for_provider` for the
+  ACP transport real turns actually take. It is deliberately NOT skipped
+  for a provider with a native mode, unlike the mode preamble — no vendor
+  enforces a folder boundary for us, so there is nothing to defer to.
+- A project may name its **boundary areas** once — `BoundaryPreset`, a
+  name plus folders — and the picker offers them as one click. They live
+  on the `Project` (per project, shared by every tab on that folder)
+  because the paths do: `apps/web` describes one repository. Unlike a
+  scope they fail **open** at restore: a preset is a convenience, not a
+  restriction, so an unusable one is dropped rather than narrowed.
+- The Subtasks settings section can ask an agent to propose those areas.
+  It runs through `acp_session::ask_once` — a throwaway, read-only
+  session that never touches a tab's conversation or context window —
+  and it runs only after a confirmation that states plainly that the
+  request spends tokens from the user's plan. The answer is a draft: the
+  parser drops any path that is absolute or escaping (model output is
+  untrusted input), and nothing is saved until the user keeps it.
 
 ## Consequences
 
