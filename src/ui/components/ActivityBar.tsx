@@ -10,10 +10,16 @@ import {
   ListChecks,
   PuzzlePiece,
   Rocket,
+  TreeStructure,
 } from "@phosphor-icons/react";
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 
-export type SidebarView = "changes" | "history" | "worktrees" | `ext:${string}`;
+export type SidebarView =
+  | "changes"
+  | "history"
+  | "worktrees"
+  | "subtasks"
+  | `ext:${string}`;
 
 /** The sidebar-view id an extension panel occupies. */
 export function panelSidebarView(panel: ExtensionPanelRef): SidebarView {
@@ -34,6 +40,7 @@ const ITEMS: readonly { view: SidebarView; Icon: Icon; title: string }[] = [
   { view: "changes", Icon: GitBranch, title: "Source control" },
   { view: "history", Icon: ClockCounterClockwise, title: "Session history" },
   { view: "worktrees", Icon: GitFork, title: "Worktrees" },
+  { view: "subtasks", Icon: TreeStructure, title: "Subtasks" },
 ];
 
 /** Every builtin view, for the tabs that offer all of them. */

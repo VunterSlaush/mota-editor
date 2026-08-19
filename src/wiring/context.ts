@@ -2,6 +2,7 @@ import {
   DemoAgentGateway,
   DemoAppBadge,
   DemoBillingStore,
+  DemoBoundarySuggestions,
   DemoCommandCatalog,
   DemoExtensionHost,
   DemoFilePicker,
@@ -23,6 +24,7 @@ import { isTauriRuntime } from "../adapters/tauri/runtime";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
 import { TauriAppBadge } from "../adapters/tauri/tauriAppBadge";
 import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
+import { TauriBoundarySuggestions } from "../adapters/tauri/tauriBoundarySuggestions";
 import { TauriCommandCatalog } from "../adapters/tauri/tauriCommandCatalog";
 import { TauriExtensionHost } from "../adapters/tauri/tauriExtensionHost";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
@@ -74,6 +76,7 @@ import { ScopeWorktreeProvisioning } from "../core/usecases/scopeWorktreeProvisi
 import { SendPrompt } from "../core/usecases/sendPrompt";
 import { SessionStatus } from "../core/usecases/sessionStatus";
 import { Shells } from "../core/usecases/shells";
+import { Subtasks } from "../core/usecases/subtasks";
 import {
   SelectEffort,
   SelectMode,
@@ -117,6 +120,8 @@ export interface AppContext {
   readonly loadBranches: LoadBranches;
   readonly gitActions: GitActions;
   readonly worktrees: Worktrees;
+  /** Scoped tabs on a folder already open: create one, re-scope one. */
+  readonly subtasks: Subtasks;
   /** Exposed for the settings panel, which asks what a copy would cost. */
   readonly worktreeProvisioning: WorktreeProvisioning;
   readonly removeWorktree: RemoveWorktree;
@@ -271,6 +276,14 @@ export function createAppContext(): AppContext {
     loadBranches: new LoadBranches(store, gitPort),
     gitActions: new GitActions(store, gitPort),
     worktrees,
+    subtasks: new Subtasks(
+      store,
+      workspaceStore,
+      agentGateway,
+      newId,
+      worktreeProvisioning,
+      inTauri ? new TauriBoundarySuggestions() : new DemoBoundarySuggestions(),
+    ),
     worktreeProvisioning,
     removeWorktree: new RemoveWorktree(
       store,

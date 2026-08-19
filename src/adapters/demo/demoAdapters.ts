@@ -13,6 +13,7 @@ import type {
 } from "../../core/ports/agentGateway";
 import type { AppBadgePort } from "../../core/ports/appBadgePort";
 import type { BillingStore } from "../../core/ports/billingStore";
+import type { BoundarySuggestions } from "../../core/ports/boundarySuggestions";
 import type { CommandCatalog } from "../../core/ports/commandCatalog";
 import type {
   ExtensionHostEvent,
@@ -557,6 +558,21 @@ export class DemoWorktreeProvisioning implements WorktreeProvisioning {
       ],
       truncated: false,
     };
+  }
+}
+
+/**
+ * Boundary suggestions without an agent: a fixed grouping of the demo
+ * folder list, after a pause long enough to see the button work.
+ */
+export class DemoBoundarySuggestions implements BoundarySuggestions {
+  async suggest(): Promise<{ name: string; boundaries: string[] }[]> {
+    await delay(900);
+    return [
+      { name: "Frontend", boundaries: ["src/ui", "src/core"] },
+      { name: "Backend", boundaries: ["src-tauri"] },
+      { name: "Docs", boundaries: ["docs"] },
+    ];
   }
 }
 

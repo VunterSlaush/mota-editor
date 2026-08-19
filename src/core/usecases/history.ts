@@ -313,6 +313,7 @@ export class SessionHistory {
         model,
         effort,
         agentServers(state, provider, mcpOverrides),
+        tab.project.subtask,
       );
     } catch (e) {
       listError = e instanceof Error ? e.message : String(e);
@@ -520,6 +521,7 @@ export class SessionHistory {
           effort,
           sessionId,
           mcpServers,
+          subtask: tab.project.subtask,
           preferResume: localCopy !== null,
         },
         (event) => replay.fold(event),

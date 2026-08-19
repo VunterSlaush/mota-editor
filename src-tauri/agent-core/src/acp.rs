@@ -600,16 +600,30 @@ pub fn slice_lines(text: &str, line: Option<u64>, limit: Option<u64>) -> String 
 
 /// The prompt request for one turn: mode preamble folded into the text
 /// block (skipped when the mode is enforced natively via
-/// `session/set_mode`); attachments as baseline `resource_link` blocks.
+/// `session/set_mode`), then the subtask scope, then the user's prompt;
+/// attachments as baseline `resource_link` blocks.
+///
+/// The scope preamble is NOT skipped for a native mode. It is the only
+/// layer every provider gets (ADR-0014), and this is the transport real
+/// turns actually take — leaving it to `turn::effective_prompt` would
+/// have stated the scope on the headless fallback alone.
 pub fn prompt_request_for_provider(
     id: i64,
     session_id: &str,
     provider_id: &str,
     request: &TurnRequest,
 ) -> Value {
-    let text = match mode_preamble(request.mode, plan_is_native(provider_id)) {
-        Some(preamble) => format!("{preamble}\n\n{}", request.prompt),
-        None => request.prompt.clone(),
+    let mut preambles: Vec<String> = Vec::new();
+    if let Some(preamble) = mode_preamble(request.mode, plan_is_native(provider_id)) {
+        preambles.push(preamble.to_owned());
+    }
+    if let Some(scope) = crate::scope::scope_preamble(request.subtask.as_ref()) {
+        preambles.push(scope);
+    }
+    let text = if preambles.is_empty() {
+        request.prompt.clone()
+    } else {
+        format!("{}\n\n{}", preambles.join("\n\n"), request.prompt)
     };
     let mut blocks = vec![json!({ "type": "text", "text": text })];
     for path in &request.attachments {
@@ -1812,6 +1826,31 @@ mod tests {
         let gemini = prompt_request_for_provider(3, "s", "gemini", &request);
         let text = gemini["params"]["prompt"][0]["text"].as_str().unwrap();
         assert!(text.starts_with("You are in PLAN MODE."));
+    }
+
+    #[test]
+    fn the_scope_reaches_the_wire_even_when_the_mode_is_native() {
+        // This is the transport real turns take. The mode preamble stands
+        // down for Claude's native plan mode; the scope never does, or
+        // the advisory layer would exist only on the headless fallback.
+        let request = TurnRequest {
+            mode: Mode::Plan,
+            subtask: Some(crate::scope::SubtaskScope::Boundary {
+                boundaries: vec!["apps/web".to_owned()],
+            }),
+            ..test_request("ship it")
+        };
+        let claude = prompt_request_for_provider(3, "s", "claude", &request);
+        let text = claude["params"]["prompt"][0]["text"].as_str().unwrap();
+        assert!(text.contains("- apps/web"));
+        assert!(text.ends_with("ship it"));
+    }
+
+    #[test]
+    fn an_unscoped_turn_still_sends_the_bare_prompt() {
+        let request = test_request("hello");
+        let claude = prompt_request_for_provider(3, "s", "claude", &request);
+        assert_eq!(claude["params"]["prompt"][0]["text"], "hello");
     }
 
     #[test]

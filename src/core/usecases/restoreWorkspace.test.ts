@@ -244,6 +244,56 @@ describe("RestoreWorkspace projects", () => {
   });
 });
 
+describe("RestoreWorkspace subtasks", () => {
+  it("brings a subtask scope back, and it survives a round-trip", async () => {
+    const subtask = { access: "boundary", boundaries: ["apps/web"] };
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          subtask,
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.subtask).toEqual(subtask);
+    expect(toPersisted(state).projects[0].subtask).toEqual(subtask);
+  });
+
+  it("leaves an ordinary tab ordinary", async () => {
+    const state = await restore({
+      projects: [
+        { id: "t1", path: "/work/alpha", provider: "claude", providerSessions: {} },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.subtask).toBeUndefined();
+  });
+
+  it("degrades a mangled scope to read-only rather than dropping it", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          subtask: { access: "everything" },
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    // A restriction that no longer parses is still a restriction.
+    expect(state.tabs[0].project.subtask).toEqual({ access: "read-only" });
+  });
+});
+
 describe("RestoreWorkspace tab names and colours", () => {
   it("brings a tab's name and colour back, still naming the folder from the path", async () => {
     const state = await restore({

@@ -5472,3 +5472,139 @@ body {
   outline: none;
   border-color: var(--accent);
 }
+
+/* ---- Subtask picker ---- */
+
+.subtask-picker {
+  background: var(--panel, #1e1e1e);
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  padding: 16px;
+  width: 420px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.subtask-picker__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.subtask-picker__hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.subtask-picker__option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subtask-picker__option input {
+  margin-top: 2px;
+}
+
+.subtask-picker__folders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.subtask-picker__folder {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subtask-picker__typed {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.subtask-picker__typed .settings-input {
+  flex: 1;
+}
+
+.subtask-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- Subtask areas (settings) ---- */
+
+.subtask-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.subtask-preset__folders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.subtask-preset__folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--border, #333);
+  border-radius: 10px;
+}
+
+.subtask-preset__folder button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0;
+  line-height: 1;
+}
+
+.subtask-preset__folder button:hover {
+  opacity: 1;
+}
+
+.subtask-preset__proposed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.subtask-picker__presets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subtask-picker__preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

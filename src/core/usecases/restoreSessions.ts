@@ -143,6 +143,9 @@ async function rejoinAgent(
         effort,
         sessionId: providerSessionId,
         mcpServers: agentServers(state, provider, mcpOverrides),
+        // A subtask tab must rejoin under its scope — the spec decides
+        // which agent process serves it, and scope-less would be wider.
+        subtask: tab.project.subtask,
         preferResume: true,
       },
       () => undefined,

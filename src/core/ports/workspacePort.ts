@@ -44,6 +44,22 @@ export interface PersistedProject {
   readonly provisioningOverride?: readonly ProvisionEntry[];
   /** Main-checkout path when this project is a linked git worktree. */
   readonly worktreeOf?: string;
+  /**
+   * The subtask scope, when this tab is one. Plain strings, not
+   * `SubtaskScope`: it comes out of a file, so the guard at restore
+   * decides what it still means — and fails closed to read-only.
+   */
+  readonly subtask?: {
+    readonly access: string;
+    readonly boundaries?: readonly string[];
+  };
+  /** This project's named boundary areas; unusable entries are dropped
+   *  at restore rather than trusted by the type. */
+  readonly boundaryPresets?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly boundaries: readonly string[];
+  }[];
 }
 
 /**

@@ -2,6 +2,7 @@ import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
 import type { McpServerSpec } from "../entities/mcpServer";
 import type { Question, ToolCallContent, ToolLocation } from "../entities/message";
 import type { ProviderId } from "../entities/provider";
+import type { SubtaskScope } from "../entities/subtask";
 
 /**
  * Ports layer — boundary interface the use cases call to run an agent turn.
@@ -109,6 +110,8 @@ export interface AgentTurnRequest {
   readonly resumeSessionId?: string;
   /** MCP servers to hand the agent when its session is created. */
   readonly mcpServers?: readonly McpServerSpec[];
+  /** The tab's subtask scope; absent for a tab with full authority. */
+  readonly subtask?: SubtaskScope;
 }
 
 export interface AgentGateway {
@@ -177,6 +180,7 @@ export interface AgentGateway {
     model?: string,
     effort?: string,
     mcpServers?: readonly McpServerSpec[],
+    subtask?: SubtaskScope,
   ): Promise<void>;
 
   /**
@@ -192,6 +196,7 @@ export interface AgentGateway {
     model?: string,
     effort?: string,
     mcpServers?: readonly McpServerSpec[],
+    subtask?: SubtaskScope,
   ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[] | null>;
 
   /**
@@ -210,6 +215,7 @@ export interface AgentGateway {
       effort?: string;
       sessionId: string;
       mcpServers?: readonly McpServerSpec[];
+      subtask?: SubtaskScope;
       /** Set only when a local transcript copy exists to paint from. */
       preferResume?: boolean;
     },

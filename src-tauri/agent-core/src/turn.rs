@@ -43,6 +43,8 @@ pub struct TurnRequest {
     pub model: Option<String>,
     /// Reasoning-effort override (vendor vocabulary); None = default.
     pub effort: Option<String>,
+    /// The tab's subtask scope; None for a tab with full authority.
+    pub subtask: Option<crate::scope::SubtaskScope>,
 }
 
 const PLAN_PREAMBLE: &str = "You are in PLAN MODE. Do not create, modify, or delete any \
@@ -84,6 +86,13 @@ pub fn effective_prompt(request: &TurnRequest, mode_is_native: bool) -> String {
 
     if let Some(preamble) = mode_preamble(request.mode, mode_is_native) {
         parts.push(preamble.to_owned());
+    }
+
+    // Always stated, even where a sandbox also enforces it: vendor CLIs
+    // own their tools, so the preamble is the one layer every provider
+    // gets (ADR-0014).
+    if let Some(scope_text) = crate::scope::scope_preamble(request.subtask.as_ref()) {
+        parts.push(scope_text);
     }
 
     if !request.attachments.is_empty() {
@@ -135,6 +144,7 @@ pub fn test_request(prompt: &str) -> TurnRequest {
         attachments: Vec::new(),
         model: None,
         effort: None,
+        subtask: None,
     }
 }
 
@@ -166,6 +176,21 @@ mod tests {
     fn debug_mode_prepends_the_debug_preamble_even_for_native_providers() {
         let request = TurnRequest { mode: Mode::Debug, ..test_request("it crashes") };
         assert!(effective_prompt(&request, true).starts_with("You are in DEBUG MODE."));
+    }
+
+    #[test]
+    fn a_scope_is_stated_even_when_the_mode_is_native() {
+        // Mode preambles stand down for a native mode; the scope never
+        // does — no vendor enforces a folder boundary for us.
+        let request = TurnRequest {
+            subtask: Some(crate::scope::SubtaskScope::Boundary {
+                boundaries: vec!["apps/web".to_owned()],
+            }),
+            ..test_request("edit the web app")
+        };
+        let prompt = effective_prompt(&request, true);
+        assert!(prompt.contains("- apps/web"));
+        assert!(prompt.ends_with("edit the web app"));
     }
 
     #[test]

@@ -421,6 +421,12 @@ export function App({ context }: { context: AppContext }) {
           onRemoveWorktree={(path, mode) =>
             context.removeWorktree.execute(tab.project.id, path, mode)
           }
+          loadFolderCandidates={loadFolders}
+          onNewSubtask={(scope) => context.subtasks.open(tab.project.id, scope)}
+          onChangeSubtaskScope={(scope) =>
+            context.subtasks.changeScope(tab.project.id, scope)
+          }
+          onActivateTab={(tabId) => void context.switchTab.execute(tabId)}
           onOpenFile={(path) => openFileExternally(tab.project.path, path)}
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}
@@ -464,6 +470,16 @@ export function App({ context }: { context: AppContext }) {
           readExtensionLog={(id) => context.manageExtensions.readLog(id)}
           supportsCow={supportsCow}
           loadFolders={projectPath ? loadFolders : undefined}
+          onSaveBoundaryPresets={(presets) =>
+            tab
+              ? context.subtasks.savePresets(tab.project.id, presets)
+              : Promise.resolve("No project open.")
+          }
+          onSuggestBoundaryPresets={() =>
+            tab
+              ? context.subtasks.suggestPresets(tab.project.id)
+              : Promise.resolve({ presets: [], problem: "No project open." })
+          }
           onClose={closeSettings}
         />
       )}

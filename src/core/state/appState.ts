@@ -31,10 +31,11 @@ import {
 } from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
+import type { BoundaryPreset, SubtaskScope } from "../entities/subtask";
 import type { TabColorId } from "../entities/tabColor";
 import { tabIsWorking } from "../entities/tabStatus";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
-import { defaultWorktreeSettings } from "../entities/worktree";
+import { defaultWorktreeSettings, samePath } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
 
 /**
@@ -261,6 +262,13 @@ export type Action =
   /** `problem` is absent when git made the worktree. */
   | { type: "worktree/created"; tabId: string; branch: string; problem?: string }
   | { type: "worktree/problemDismissed"; tabId: string }
+  | { type: "subtask/scopeChanged"; tabId: string; scope: SubtaskScope }
+  | {
+      type: "subtask/presetsChanged";
+      tabId: string;
+      /** Empty clears the field — the project names no areas. */
+      presets: readonly BoundaryPreset[];
+    }
   | { type: "tab/activated"; tabId: string }
   | { type: "tab/moved"; tabId: string; toIndex: number }
   | { type: "tab/attentionRequested"; tabId: string }
@@ -431,7 +439,15 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, settings: { ...state.settings, ...action.patch } };
 
     case "tab/opened": {
-      const existing = state.tabs.find((t) => t.project.path === action.project.path);
+      // Re-activate rather than duplicate — but only among plain tabs.
+      // Subtasks exist to put several agents on one folder, so a subtask
+      // never absorbs another tab and is never absorbed by one.
+      const existing = state.tabs.find(
+        (t) =>
+          t.project.path === action.project.path &&
+          !t.project.subtask &&
+          !action.project.subtask,
+      );
       if (existing) return { ...state, activeTabId: existing.project.id };
       const tab: TabState = {
         project: action.project,
@@ -496,6 +512,39 @@ export function reduce(state: AppState, action: Action): AppState {
         ...tab,
         worktreeProblem: undefined,
       }));
+
+    // Only a tab that already is a subtask can change scope: converting
+    // a plain tab would silently rescope a conversation the user started
+    // under full authority — closing it is the honest way out.
+    case "subtask/scopeChanged":
+      return mapTab(state, action.tabId, (tab) =>
+        tab.project.subtask
+          ? { ...tab, project: { ...tab.project, subtask: action.scope } }
+          : tab,
+      );
+
+    // Every tab on this folder shares its areas — they describe the
+    // repository, not the tab that happened to be open when they were
+    // written. An empty list deletes the key rather than storing [],
+    // the same tri-state the other per-project fields keep.
+    case "subtask/presetsChanged": {
+      const edited = tabById(state, action.tabId);
+      if (!edited) return state;
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) => {
+          if (!samePath(tab.project.path, edited.project.path)) return tab;
+          const { boundaryPresets: _, ...project } = tab.project;
+          return {
+            ...tab,
+            project:
+              action.presets.length > 0
+                ? { ...project, boundaryPresets: action.presets }
+                : project,
+          };
+        }),
+      };
+    }
 
     case "tab/moved": {
       // Reordering is purely cosmetic: which tab you are looking at never
@@ -1061,6 +1110,11 @@ export function activeTab(state: AppState): TabState | null {
 
 export function tabById(state: AppState, tabId: string): TabState | null {
   return state.tabs.find((t) => t.project.id === tabId) ?? null;
+}
+
+/** The open subtask tabs working this folder, in tab order. */
+export function subtaskTabsOn(state: AppState, path: string): TabState[] {
+  return state.tabs.filter((t) => t.project.subtask && samePath(t.project.path, path));
 }
 
 /** Every tab with agent work in flight — what a close has to ask about. */
