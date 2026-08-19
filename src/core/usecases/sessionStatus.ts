@@ -1,6 +1,6 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
 import { infoMessage } from "../entities/message";
-import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
+import type { AgentEventEnvelope, AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 
@@ -17,12 +17,17 @@ export class SessionStatus {
     private readonly store: Store,
     agentGateway: AgentGateway,
   ) {
-    agentGateway.subscribeSessionEvents((tabId, event) => this.onEvent(tabId, event));
+    agentGateway.subscribeSessionEvents((envelope) => this.onEvent(envelope));
   }
 
-  private onEvent(tabId: string, event: AgentTurnEvent): void {
+  private onEvent({ tabId, chatId, event }: AgentEventEnvelope): void {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab) return;
+    // A session the user has replaced still boots, still switches mode
+    // and still announces its id. None of that describes the tab any
+    // more, and stamping its session id here is what would make the next
+    // transcript claim a conversation the agent does not have.
+    if (chatId !== undefined && chatId !== tab.chatId) return;
 
     if (event.kind === "sessionStage") {
       this.store.dispatch({

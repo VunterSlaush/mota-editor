@@ -3,7 +3,7 @@ import { questionMessage } from "../entities/message";
 import { newProject } from "../entities/project";
 import type { GitWorktree } from "../ports/gitPort";
 import type { TabState } from "../state/appState";
-import { defaultSettings, projectDefaults } from "../state/appState";
+import { defaultSettings, firstChatId, projectDefaults } from "../state/appState";
 import { filterWorktreeRows, worktreeOverview } from "./worktreeOverview";
 
 const DEFAULTS = projectDefaults(defaultSettings);
@@ -23,6 +23,7 @@ function worktree(partial: Partial<GitWorktree> & { path: string }): GitWorktree
 function tab(path: string, partial: Partial<TabState> = {}): TabState {
   return {
     project: newProject(`id:${path}`, path, DEFAULTS),
+    chatId: firstChatId(`id:${path}`),
     messages: [],
     busy: false,
     queued: [],

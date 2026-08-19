@@ -272,6 +272,8 @@ export class DemoAgentGateway implements AgentGateway {
   }
 
   async endSession(): Promise<void> {}
+  async retireSession(): Promise<void> {}
+  async discardRetired(): Promise<void> {}
   async warmSession(): Promise<void> {}
   async listNativeSessions(): Promise<{ sessionId: string }[] | null> {
     return null; // demo: no live agent, so no native history to ask

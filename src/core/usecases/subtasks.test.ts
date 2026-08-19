@@ -19,8 +19,8 @@ class FakeWorkspaceStore implements WorkspaceStore {
 
 class FakeAgentGateway {
   warmed: string[] = [];
-  async warmSession(tabId: string): Promise<void> {
-    this.warmed.push(tabId);
+  async warmSession(spec: { tabId: string }): Promise<void> {
+    this.warmed.push(spec.tabId);
   }
 }
 

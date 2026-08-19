@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newProject } from "../entities/project";
 import type {
+  AgentEventEnvelope,
   AgentGateway,
   AgentTurnEvent,
   AgentTurnRequest,
@@ -11,9 +12,10 @@ import type {
   TranscriptStore,
 } from "../ports/transcriptStore";
 import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
-import { defaultSettings, projectDefaults } from "../state/appState";
+import { defaultSettings, firstChatId, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { ApplyCommandConfig } from "./applyCommandConfig";
+import type { RetiredChats } from "./retiredChats";
 import { FOLLOWUP_SETTLE_MS, SendPrompt } from "./sendPrompt";
 import { SelectEffort, SelectMode, SelectModel, SelectPermission } from "./switchTab";
 
@@ -42,8 +44,8 @@ class FakeAgentGateway implements AgentGateway {
   subscribeSessionEvents(): void {}
 
   /** The agent-initiated lane's sink, so a test can play a follow-up. */
-  agentInitiated: ((tabId: string, event: AgentTurnEvent) => void) | null = null;
-  subscribeAgentInitiated(onEvent: (tabId: string, event: AgentTurnEvent) => void): void {
+  agentInitiated: ((envelope: AgentEventEnvelope) => void) | null = null;
+  subscribeAgentInitiated(onEvent: (envelope: AgentEventEnvelope) => void): void {
     this.agentInitiated = onEvent;
   }
 
@@ -68,6 +70,14 @@ class FakeAgentGateway implements AgentGateway {
   }
 
   async endSession(): Promise<void> {}
+  retired: string[] = [];
+  async retireSession(tabId: string): Promise<void> {
+    this.retired.push(tabId);
+  }
+  discarded: { tabId: string; chatId: string }[] = [];
+  async discardRetired(tabId: string, chatId: string): Promise<void> {
+    this.discarded.push({ tabId, chatId });
+  }
   warms = 0;
   async warmSession(): Promise<void> {
     this.warms += 1;
@@ -88,6 +98,16 @@ class FakeWorkspaceStore implements WorkspaceStore {
   async save(workspace: PersistedWorkspace) {
     this.saved = workspace;
   }
+}
+
+/** Test double — where a replaced conversation's agent keeps talking. */
+class RecordingRetiredChats {
+  accepted: { chatId?: string; text: string }[] = [];
+  accept({ chatId, event }: AgentEventEnvelope) {
+    if ("text" in event) this.accepted.push({ chatId, text: event.text });
+  }
+  retire() {}
+  forget() {}
 }
 
 class FakeNotifications {
@@ -146,6 +166,7 @@ function setup(script: AgentTurnEvent[] = []) {
     new SelectEffort(store, workspace, gateway),
     new SelectModel(store, workspace, gateway),
   );
+  const retired = new RecordingRetiredChats();
   const useCase = new SendPrompt(
     store,
     gateway,
@@ -154,8 +175,10 @@ function setup(script: AgentTurnEvent[] = []) {
     notifications,
     applyCommandConfig,
     () => `s${++counter}`,
+    undefined,
+    retired as unknown as RetiredChats,
   );
-  return { store, gateway, workspace, transcripts, notifications, useCase };
+  return { store, gateway, workspace, transcripts, notifications, retired, useCase };
 }
 
 const DEFAULTS = projectDefaults(defaultSettings);
@@ -563,6 +586,7 @@ function restoreTabWith(store: Store, historySessionId: string): void {
     tabs: [
       {
         project: newProject("t1", "/work/alpha", DEFAULTS),
+        chatId: firstChatId("t1"),
         messages: [],
         busy: false,
         queued: [],
@@ -1322,7 +1346,9 @@ describe("a follow-up the agent starts on its own", () => {
   async function afterATurn() {
     const made = setup([{ kind: "completed", isError: false }]);
     await made.useCase.execute("t1", "watch CI and tell me");
-    const say = (event: AgentTurnEvent) => made.gateway.agentInitiated?.("t1", event);
+    const chatId = tabOf(made.store).chatId;
+    const say = (event: AgentTurnEvent) =>
+      made.gateway.agentInitiated?.({ tabId: "t1", chatId, event });
     return { ...made, say };
   }
 
@@ -1491,7 +1517,10 @@ describe("a follow-up the agent starts on its own", () => {
     const { store, gateway } = await afterATurn();
 
     expect(() =>
-      gateway.agentInitiated?.("gone", { kind: "assistant", text: "hello?" }),
+      gateway.agentInitiated?.({
+        tabId: "gone",
+        event: { kind: "assistant", text: "hello?" },
+      }),
     ).not.toThrow();
     expect(tabOf(store).messages.some((m) => m.text === "hello?")).toBe(false);
   });
@@ -1506,6 +1535,54 @@ describe("a follow-up the agent starts on its own", () => {
     const last = tabOf(store).messages.at(-1);
     expect(last?.role).toBe("assistant");
     expect(last?.text).toBe("CI is green.");
+  });
+});
+
+describe("a follow-up from a chat the user has replaced", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  /** A turn, then "New chat" — with the agent still watching something. */
+  async function afterANewChat() {
+    const made = setup([{ kind: "completed", isError: false }]);
+    await made.useCase.execute("t1", "watch CI and tell me");
+    const retiredChatId = tabOf(made.store).chatId;
+    made.store.dispatch({ type: "chat/cleared", tabId: "t1" });
+    made.store.dispatch({ type: "chat/sessionReset", tabId: "t1", provider: "claude" });
+    const say = (event: AgentTurnEvent) =>
+      made.gateway.agentInitiated?.({ tabId: "t1", chatId: retiredChatId, event });
+    return { ...made, retiredChatId, say };
+  }
+
+  it("never lands in the chat that replaced it", async () => {
+    const { store, say } = await afterANewChat();
+
+    say({ kind: "assistant", text: "CI finished: 3 tests failed." });
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
+
+    // The new conversation never asked about CI and has no idea what
+    // this is — the agent is answering the chat the user left.
+    expect(tabOf(store).messages).toEqual([]);
+  });
+
+  it("goes to the conversation that asked for it", async () => {
+    const { retired, retiredChatId, say } = await afterANewChat();
+
+    say({ kind: "assistant", text: "CI finished: 3 tests failed." });
+
+    expect(retired.accepted).toEqual([
+      { chatId: retiredChatId, text: "CI finished: 3 tests failed." },
+    ]);
+  });
+
+  it("does not take the tab busy or hold its queue", async () => {
+    const { store, say } = await afterANewChat();
+
+    say({ kind: "assistant", text: "CI finished." });
+
+    // Stop would have nothing to stop: the agent working is not this
+    // tab's, and the composer must stay free.
+    expect(tabOf(store).busy).toBe(false);
   });
 });
 

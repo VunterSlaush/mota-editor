@@ -12,7 +12,7 @@ import type { AgentGateway } from "../ports/agentGateway";
 import type { TranscriptStore } from "../ports/transcriptStore";
 import type { PersistedSettings, WorkspaceStore } from "../ports/workspacePort";
 import type { AppSettings, TabState } from "../state/appState";
-import { defaultSettings } from "../state/appState";
+import { defaultSettings, firstChatId } from "../state/appState";
 import type { Store } from "../state/store";
 import { restoreSessions } from "./restoreSessions";
 
@@ -55,6 +55,7 @@ export class RestoreWorkspace {
         subtask: restoredSubtaskScope(p.subtask),
         boundaryPresets: restoredBoundaryPresets(p.boundaryPresets),
       },
+      chatId: firstChatId(p.id),
       messages: [],
       // A claim on the transcript this tab was writing to — honoured
       // only if the agent is still in that conversation. See TabState.

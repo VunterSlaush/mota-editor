@@ -5,7 +5,8 @@ import {
   serversForProvider,
 } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
-import type { AppState } from "../state/appState";
+import type { SessionSpec } from "../ports/agentGateway";
+import type { AppState, TabState } from "../state/appState";
 
 /**
  * The MCP servers to hand an agent: the user's configured rows plus the
@@ -23,4 +24,23 @@ export function agentServers(
     provider,
     overrides,
   );
+}
+
+/**
+ * How a tab describes the agent session it wants. Every caller that boots,
+ * reuses or interrogates a session builds it here, so none of them can
+ * forget the chat id that stamps the session's events.
+ */
+export function sessionSpec(state: AppState, tab: TabState): SessionSpec {
+  const { id, provider, path, model, effort, mcpOverrides, subtask } = tab.project;
+  return {
+    tabId: id,
+    chatId: tab.chatId,
+    provider,
+    projectPath: path,
+    model,
+    effort,
+    mcpServers: agentServers(state, provider, mcpOverrides),
+    subtask,
+  };
 }

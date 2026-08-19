@@ -34,6 +34,9 @@ pub struct CancelHandle {
 #[serde(rename_all = "camelCase")]
 pub struct StartTurnArgs {
     pub tab_id: String,
+    /// The conversation this prompt belongs to. See `SessionSpec::chat_id`.
+    #[serde(default)]
+    pub chat_id: String,
     pub provider_id: String,
     pub project_path: String,
     pub prompt: String,
@@ -103,7 +106,7 @@ pub async fn start_turn(
     match acp_session::start_turn(
         app.clone(),
         &acp,
-        &args.tab_id,
+        acp_session::ChatRef { tab_id: &args.tab_id, chat_id: &args.chat_id },
         provider.id(),
         request.clone(),
         args.mcp_servers.clone(),
@@ -163,6 +166,10 @@ pub async fn start_turn(
 #[serde(rename_all = "camelCase")]
 pub struct WarmSessionArgs {
     pub tab_id: String,
+    /// Which of the tab's conversations this session serves; stamped on
+    /// every event it emits. See `SessionSpec::chat_id`.
+    #[serde(default)]
+    pub chat_id: String,
     pub provider_id: String,
     pub project_path: String,
     #[serde(default)]
@@ -180,6 +187,7 @@ impl WarmSessionArgs {
     /// own default", not a model literally called "".
     fn spec(&self) -> Result<SessionSpec, String> {
         Ok(SessionSpec {
+            chat_id: self.chat_id.clone(),
             project_path: self.project_path.clone(),
             model: validate_token(self.model.clone(), "model")?,
             effort: validate_token(self.effort.clone(), "effort")?,
@@ -372,12 +380,44 @@ pub async fn end_session(
     tab_id: String,
 ) -> Result<(), String> {
     acp.end_session(&tab_id);
-    let handle = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(&tab_id);
+    cancel_running_turn(&turns, &tab_id).await;
+    Ok(())
+}
+
+/// "New chat" — the tab moves on and its agent is parked rather than
+/// killed, so a watcher it left running can still report to the
+/// conversation that asked for it (ADR-0016).
+#[tauri::command]
+pub async fn retire_session(
+    turns: State<'_, RunningTurns>,
+    acp: State<'_, AcpSessions>,
+    tab_id: String,
+) -> Result<(), String> {
+    acp.retire_for_new_chat(&tab_id);
+    cancel_running_turn(&turns, &tab_id).await;
+    Ok(())
+}
+
+/// End a retired agent: it reported, or it ran out of time to.
+#[tauri::command]
+pub async fn discard_retired(
+    acp: State<'_, AcpSessions>,
+    tab_id: String,
+    chat_id: String,
+) -> Result<(), String> {
+    acp.discard_retired(&tab_id, &chat_id);
+    Ok(())
+}
+
+/// Stop whatever headless turn the tab still has running. The flag is
+/// set as well as the channel signalled: a turn still in its startup
+/// window has no child to interrupt yet.
+async fn cancel_running_turn(turns: &State<'_, RunningTurns>, tab_id: &str) {
+    let handle = turns.0.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id);
     if let Some(handle) = handle {
         handle.cancelled.store(true, Ordering::SeqCst);
         let _ = handle.tx.send(()).await;
     }
-    Ok(())
 }
 
 /// A terminal's captured output, for the tool-call card that mirrors it.

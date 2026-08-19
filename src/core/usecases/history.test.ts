@@ -98,8 +98,13 @@ class FakeGateway implements AgentGateway {
   async endSession(tabId: string) {
     this.ended.push(tabId);
   }
-  async warmSession(tabId: string) {
-    this.warmed.push(tabId);
+  retired: string[] = [];
+  async retireSession(tabId: string) {
+    this.retired.push(tabId);
+  }
+  async discardRetired() {}
+  async warmSession(spec: { tabId: string }) {
+    this.warmed.push(spec.tabId);
   }
   async listNativeSessions() {
     this.listCalls += 1;
@@ -518,7 +523,7 @@ describe("SessionHistory", () => {
     await history.startNew("t1");
 
     const tab = store.getState().tabs[0];
-    expect(gateway.ended).toEqual(["t1"]);
+    expect(gateway.retired).toEqual(["t1"]);
     expect(gateway.warmed).toEqual(["t1"]);
     expect(tab.project.providerSessions.claude).toBeUndefined();
     expect(tab.usage).toBeUndefined();

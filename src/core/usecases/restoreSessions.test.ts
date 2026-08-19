@@ -3,7 +3,7 @@ import type { ChatMessage } from "../entities/message";
 import type { ProviderId } from "../entities/provider";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
-import type { TabState } from "../state/appState";
+import { firstChatId, type TabState } from "../state/appState";
 import { Store } from "../state/store";
 import { restoreSessions } from "./restoreSessions";
 
@@ -24,8 +24,8 @@ class FakeAgentGateway {
   loads: { tabId: string; sessionId: string; preferResume?: boolean }[] = [];
   constructor(private readonly refuse = false) {}
 
-  async warmSession(tabId: string): Promise<void> {
-    this.warmed.push(tabId);
+  async warmSession(spec: { tabId: string }): Promise<void> {
+    this.warmed.push(spec.tabId);
   }
 
   async loadNativeSession(request: {
@@ -51,6 +51,7 @@ function tabWith(claim: string | undefined, provider: ProviderId = "claude"): Ta
       verbose: true,
       providerSessions: { [provider]: "agent-abc" },
     },
+    chatId: firstChatId("t1"),
     messages: [],
     restoredHistorySessionId: claim,
     busy: false,

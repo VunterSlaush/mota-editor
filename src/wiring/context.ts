@@ -70,6 +70,7 @@ import { QuitApp } from "../core/usecases/quitApp";
 import { ReorderTabs } from "../core/usecases/reorderTabs";
 import { RespondPermission, RespondQuestion } from "../core/usecases/respondPermission";
 import { RestoreWorkspace } from "../core/usecases/restoreWorkspace";
+import { RetiredChats } from "../core/usecases/retiredChats";
 import { RunExtensionCommand } from "../core/usecases/runExtensionCommand";
 import { ScopeMcpServer } from "../core/usecases/scopeMcpServer";
 import { ScopeWorktreeProvisioning } from "../core/usecases/scopeWorktreeProvisioning";
@@ -192,11 +193,26 @@ export function createAppContext(): AppContext {
   // outside turns; registering the listener is the whole job.
   new SessionStatus(store, agentGateway);
 
+  // Conversations "New chat" replaced, whose agents may still report on
+  // something they were watching (ADR-0016).
+  const retiredChats = new RetiredChats(
+    agentGateway,
+    transcriptStore,
+    notifications,
+    newId,
+  );
+
   // Shared: the settings a slash command applies are the same use cases
   // the toolbar drives, so both routes persist and restart identically.
   // Removing a worktree closes its tab, and closing a tab is exactly
   // what CloseProject does — so it is shared rather than reimplemented.
-  const closeProject = new CloseProject(store, agentGateway, workspaceStore, shellPort);
+  const closeProject = new CloseProject(
+    store,
+    agentGateway,
+    workspaceStore,
+    shellPort,
+    retiredChats,
+  );
   // Shared for the same reason: the History panel opens a worktree's
   // session by opening that worktree's tab, which is Worktrees' verb.
   const worktrees = new Worktrees(
@@ -235,6 +251,7 @@ export function createAppContext(): AppContext {
     ),
     newId,
     runExtensionCommand,
+    retiredChats,
   );
   runExtensionCommand.connectTurnStarter((tabId, prompt) =>
     sendPrompt.execute(tabId, prompt),
@@ -303,7 +320,13 @@ export function createAppContext(): AppContext {
     shells: new Shells(store, shellPort, shellHistory),
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),
-    sessionHistory: new SessionHistory(store, transcriptStore, agentGateway, worktrees),
+    sessionHistory: new SessionHistory(
+      store,
+      transcriptStore,
+      agentGateway,
+      worktrees,
+      retiredChats,
+    ),
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),
     mcpProbe,

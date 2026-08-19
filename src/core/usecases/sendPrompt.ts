@@ -22,7 +22,11 @@ import {
 import { tabLabel } from "../entities/project";
 import { COMPACT_COMMAND, contextWindowFor, providerById } from "../entities/provider";
 import { estimateTokens } from "../entities/tokens";
-import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
+import type {
+  AgentEventEnvelope,
+  AgentGateway,
+  AgentTurnEvent,
+} from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
 import type { WorkspaceStore } from "../ports/workspacePort";
@@ -32,6 +36,7 @@ import { agentServers } from "./agentServers";
 import type { ApplyCommandConfig } from "./applyCommandConfig";
 import { persistWorkspace } from "./persistWorkspace";
 import { declineParkedPlan } from "./planApproval";
+import type { RetiredChats } from "./retiredChats";
 import type { RunExtensionCommand } from "./runExtensionCommand";
 import { startNewChat } from "./startNewChat";
 
@@ -64,6 +69,8 @@ const DELTA_FLUSH_MS = 33;
 export const FOLLOWUP_SETTLE_MS = 8_000;
 
 interface DeltaBuffer {
+  /** The conversation the text was streamed into. */
+  chatId: string;
   role: "assistant" | "thought";
   text: string;
   timer: ReturnType<typeof setTimeout>;
@@ -71,9 +78,20 @@ interface DeltaBuffer {
 
 /** One agent-initiated stretch, open until the events stop coming. */
 interface Followup {
+  /** The conversation the stretch belongs to. */
+  chatId: string;
   timer: ReturnType<typeof setTimeout>;
   /** Something the user would want to look at landed, not just usage. */
   notable: boolean;
+}
+
+/**
+ * Whether an event belongs to the conversation the tab is on now. An
+ * event with no chat behind it (a transport failure, an info row this app
+ * emitted itself) always does — there is nothing else it could be for.
+ */
+function isCurrentChat(tab: TabState, chatId: string | undefined): boolean {
+  return chatId === undefined || chatId === tab.chatId;
 }
 
 /**
@@ -92,10 +110,9 @@ export class SendPrompt {
     private readonly applyCommandConfig: ApplyCommandConfig,
     private readonly newId: IdGenerator,
     private readonly extensionCommands?: RunExtensionCommand,
+    private readonly retiredChats?: RetiredChats,
   ) {
-    agentGateway.subscribeAgentInitiated((tabId, event) =>
-      this.onAgentInitiated(tabId, event),
-    );
+    agentGateway.subscribeAgentInitiated((envelope) => this.onAgentInitiated(envelope));
   }
 
   async execute(
@@ -148,7 +165,7 @@ export class SendPrompt {
     // starting the new chat clears the messages, so anything said first
     // is wiped by the very action it was explaining.
     if (command === CLEAR_COMMAND) {
-      await startNewChat(this.store, this.agentGateway, tabId);
+      await startNewChat(this.store, this.agentGateway, tabId, this.retiredChats);
       this.store.dispatch({
         type: "chat/messageAppended",
         tabId,
@@ -197,7 +214,9 @@ export class SendPrompt {
       ...(effort ? { effort } : {}),
       ...(command ? { command } : {}),
     });
+    const chatId = configured.chatId;
     this.inflight.set(tabId, {
+      chatId,
       messageId: message.id,
       sentAt,
       usedBefore: configured.usage?.used ?? 0,
@@ -213,6 +232,7 @@ export class SendPrompt {
 
     const request = {
       tabId,
+      chatId,
       provider,
       projectPath: path,
       prompt: outgoing,
@@ -268,7 +288,7 @@ export class SendPrompt {
   ): Promise<unknown> {
     try {
       await this.agentGateway.startTurn(request, (event) =>
-        this.onEvent(tabId, event, turn),
+        this.onEvent(tabId, request.chatId, event, turn),
       );
       return null;
     } catch (e) {
@@ -283,6 +303,7 @@ export class SendPrompt {
   private readonly inflight = new Map<
     string,
     {
+      chatId: string;
       messageId: string;
       sentAt: number;
       usedBefore: number;
@@ -301,8 +322,15 @@ export class SendPrompt {
   /** Agent-initiated stretches, by tab. See `onAgentInitiated`. */
   private readonly followups = new Map<string, Followup>();
 
-  private onEvent(tabId: string, event: AgentTurnEvent, turn: number): void {
+  private onEvent(
+    tabId: string,
+    chatId: string,
+    event: AgentTurnEvent,
+    turn: number,
+  ): void {
     if (turn !== this.generation.get(tabId)) return; // a superseded turn's tail
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab || !isCurrentChat(tab, chatId)) return; // a retired chat's turn
     this.dispatchEvent(tabId, event);
   }
 
@@ -317,10 +345,18 @@ export class SendPrompt {
    * end: a stop reason answers a prompt, and this cycle answers none. So
    * the flag comes down on quiet, in `settleFollowup`, rather than on a
    * completion that is never coming.
+   *
+   * When it is a chat the user has since replaced doing the talking, the
+   * conversation it belongs to is off this tab — `RetiredChats` takes it
+   * and the chat on screen never hears a word of it (ADR-0016).
    */
-  private onAgentInitiated(tabId: string, event: AgentTurnEvent): void {
+  private onAgentInitiated({ tabId, chatId, event }: AgentEventEnvelope): void {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab) return;
+    if (!isCurrentChat(tab, chatId)) {
+      this.retiredChats?.accept({ tabId, chatId, event });
+      return;
+    }
 
     const open = this.followups.get(tabId);
     if (!open && !tab.busy) {
@@ -335,6 +371,7 @@ export class SendPrompt {
 
     if (open) clearTimeout(open.timer);
     this.followups.set(tabId, {
+      chatId: tab.chatId,
       notable: (open?.notable ?? false) || showsUpInTheChat(event),
       timer: setTimeout(() => this.settleFollowup(tabId), FOLLOWUP_SETTLE_MS),
     });
@@ -351,6 +388,11 @@ export class SendPrompt {
     if (!open) return;
     this.followups.delete(tabId);
     this.flushDeltas(tabId);
+    // The conversation the stretch belonged to is gone — a new chat was
+    // started while it was open. Releasing the tab, draining its queue
+    // and saving its transcript would all be done to the wrong chat.
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab || tab.chatId !== open.chatId) return;
     // A turn of ours started in the meantime: it owns the busy flag now,
     // and its own completion does the telling, saving and draining.
     if (this.inflight.has(tabId)) return;
@@ -370,8 +412,10 @@ export class SendPrompt {
     // Deltas coalesce; everything else flushes first so ordering holds
     // (a tool row must land after the text that preceded it).
     if (event.kind === "assistantDelta" || event.kind === "thoughtDelta") {
+      const chatId = tabById(this.store.getState(), tabId)?.chatId;
+      if (chatId === undefined) return;
       const role = event.kind === "assistantDelta" ? "assistant" : "thought";
-      this.bufferDelta(tabId, role, event.text);
+      this.bufferDelta(tabId, chatId, role, event.text);
       return;
     }
     this.flushDeltas(tabId);
@@ -591,7 +635,12 @@ export class SendPrompt {
     }
   }
 
-  private bufferDelta(tabId: string, role: "assistant" | "thought", text: string): void {
+  private bufferDelta(
+    tabId: string,
+    chatId: string,
+    role: "assistant" | "thought",
+    text: string,
+  ): void {
     const existing = this.deltas.get(tabId);
     if (existing && existing.role !== role) this.flushDeltas(tabId);
     const buffer = this.deltas.get(tabId);
@@ -600,6 +649,7 @@ export class SendPrompt {
       return;
     }
     this.deltas.set(tabId, {
+      chatId,
       role,
       text,
       timer: setTimeout(() => this.flushDeltas(tabId), DELTA_FLUSH_MS),
@@ -614,6 +664,11 @@ export class SendPrompt {
 
     const tab = tabById(this.store.getState(), tabId);
     if (!tab) return;
+    // Streamed into a conversation that is no longer on the tab. At most
+    // one flush interval of text is dropped, and it is dropped from a
+    // chat the user has just walked away from — the alternative is
+    // appending the old agent's words to the new one's first screen.
+    if (tab.chatId !== buffer.chatId) return;
     const last = tab.messages[tab.messages.length - 1];
     if (last?.role === buffer.role) {
       if (buffer.role === "assistant") {
@@ -770,15 +825,17 @@ export class SendPrompt {
       // chat clears the messages, so anything said first is wiped by the
       // very action it was explaining. A chat that emptied itself with no
       // reason given reads as a bug, not as the setting the user chose.
-      void startNewChat(this.store, this.agentGateway, tabId).then(() => {
-        this.store.dispatch({
-          type: "chat/messageAppended",
-          tabId,
-          message: infoMessage(
-            `The previous chat filled its context (${percent}%) and is saved in History. This one starts fresh.`,
-          ),
-        });
-      });
+      void startNewChat(this.store, this.agentGateway, tabId, this.retiredChats).then(
+        () => {
+          this.store.dispatch({
+            type: "chat/messageAppended",
+            tabId,
+            message: infoMessage(
+              `The previous chat filled its context (${percent}%) and is saved in History. This one starts fresh.`,
+            ),
+          });
+        },
+      );
       return;
     }
     this.store.dispatch({
@@ -801,7 +858,10 @@ export class SendPrompt {
     if (!entry) return;
     this.inflight.delete(tabId);
 
-    const usage = tabById(this.store.getState(), tabId)?.usage;
+    const tab = tabById(this.store.getState(), tabId);
+    // The prompt this outcome belongs to was cleared with its chat.
+    if (!tab || tab.chatId !== entry.chatId) return;
+    const usage = tab.usage;
     const delta = usage ? usage.used - entry.usedBefore : undefined;
     // A negative delta means compaction shrank the context mid-turn — a
     // token count would be noise, so only the duration is kept.
@@ -896,7 +956,7 @@ function effectiveText(prompt: string, attachments: readonly string[]): string |
  * Usage and session bookkeeping are not: a follow-up that only reported
  * a token count is not worth a notification and a tab-bar dot.
  */
-function showsUpInTheChat(event: AgentTurnEvent): boolean {
+export function showsUpInTheChat(event: AgentTurnEvent): boolean {
   switch (event.kind) {
     case "assistant":
     case "assistantDelta":

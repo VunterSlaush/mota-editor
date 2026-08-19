@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
-import type { SubtaskScope } from "../../core/entities/subtask";
 import type {
+  AgentEventEnvelope,
   AgentGateway,
   AgentTurnEvent,
   AgentTurnRequest,
+  SessionSpec,
 } from "../../core/ports/agentGateway";
 
 /**
@@ -17,6 +18,9 @@ import type {
 /** Wire shape emitted by the Rust backend (see src-tauri/agent-core). */
 interface WireEvent {
   tabId: string;
+  /** The conversation the emitting session serves; absent when no session
+   *  stands behind the event. See `AgentEventEnvelope`. */
+  chatId?: string;
   event:
     | { type: "sessionStarted"; providerSessionId: string }
     | { type: "notice"; message: string }
@@ -94,9 +98,8 @@ export class TauriAgentGateway implements AgentGateway {
    * one folded every later event twice.
    */
   private readonly handlers = new Map<string, (event: AgentTurnEvent) => void>();
-  private sessionHandler: ((tabId: string, event: AgentTurnEvent) => void) | null = null;
-  private agentInitiatedHandler: ((tabId: string, event: AgentTurnEvent) => void) | null =
-    null;
+  private sessionHandler: ((envelope: AgentEventEnvelope) => void) | null = null;
+  private agentInitiatedHandler: ((envelope: AgentEventEnvelope) => void) | null = null;
   /**
    * Tabs replaying a history session. A replay streams through its own
    * temporary listener AND this one, so the agent-initiated lane has to
@@ -107,7 +110,12 @@ export class TauriAgentGateway implements AgentGateway {
 
   private async ensureListener(): Promise<void> {
     this.listening ??= listen<WireEvent>("agent-event", ({ payload }) => {
-      const event = toDomainEvent(payload.event);
+      const envelope: AgentEventEnvelope = {
+        tabId: payload.tabId,
+        chatId: payload.chatId,
+        event: toDomainEvent(payload.event),
+      };
+      const { event } = envelope;
       const handler = this.handlers.get(payload.tabId);
       if (handler) {
         handler(event);
@@ -124,7 +132,7 @@ export class TauriAgentGateway implements AgentGateway {
         event.kind === "notice" ||
         event.kind === "session"
       ) {
-        this.sessionHandler?.(payload.tabId, event);
+        this.sessionHandler?.(envelope);
         return;
       }
       // Anything else with no turn of ours in flight is the agent
@@ -132,19 +140,19 @@ export class TauriAgentGateway implements AgentGateway {
       // it was watching finished. Dropping it, as this used to, is what
       // made "I'll check back when CI is done" never arrive.
       if (!this.replaying.has(payload.tabId)) {
-        this.agentInitiatedHandler?.(payload.tabId, event);
+        this.agentInitiatedHandler?.(envelope);
       }
     });
     await this.listening;
   }
 
-  subscribeSessionEvents(onEvent: (tabId: string, event: AgentTurnEvent) => void): void {
+  subscribeSessionEvents(onEvent: (envelope: AgentEventEnvelope) => void): void {
     this.sessionHandler = onEvent;
     // Warm-up stages can arrive before any turn ever starts.
     void this.ensureListener();
   }
 
-  subscribeAgentInitiated(onEvent: (tabId: string, event: AgentTurnEvent) => void): void {
+  subscribeAgentInitiated(onEvent: (envelope: AgentEventEnvelope) => void): void {
     this.agentInitiatedHandler = onEvent;
     // A follow-up can land in any quiet stretch, including before this
     // tab's first turn — the listener has to be up either way.
@@ -162,6 +170,7 @@ export class TauriAgentGateway implements AgentGateway {
       await invoke("start_turn", {
         args: {
           tabId: request.tabId,
+          chatId: request.chatId,
           providerId: request.provider,
           projectPath: request.projectPath,
           prompt: request.prompt,
@@ -213,7 +222,21 @@ export class TauriAgentGateway implements AgentGateway {
   }
 
   async endSession(tabId: string): Promise<void> {
+    // The tab's turn handler outlives the session it was listening to
+    // unless it is dropped here: a turn that never saw `completed` (the
+    // session was torn down under it) leaves one behind, and it would
+    // fold the dying agent's last words into whatever comes next.
+    this.handlers.delete(tabId);
     await invoke("end_session", { tabId });
+  }
+
+  async retireSession(tabId: string): Promise<void> {
+    this.handlers.delete(tabId);
+    await invoke("retire_session", { tabId });
+  }
+
+  async discardRetired(tabId: string, chatId: string): Promise<void> {
+    await invoke("discard_retired", { tabId, chatId });
   }
 
   async readTerminalOutput(
@@ -223,64 +246,20 @@ export class TauriAgentGateway implements AgentGateway {
     return invoke("get_terminal_output", { tabId, terminalId });
   }
 
-  async warmSession(
-    tabId: string,
-    provider: string,
-    projectPath: string,
-    model?: string,
-    effort?: string,
-    mcpServers?: readonly McpServerSpec[],
-    subtask?: SubtaskScope,
-  ): Promise<void> {
-    await invoke("warm_session", {
-      args: {
-        tabId,
-        providerId: provider,
-        projectPath,
-        model: model ?? null,
-        effort: effort ?? null,
-        mcpServers: toWireServers(mcpServers),
-        subtask: subtask ?? null,
-      },
-    });
+  async warmSession(spec: SessionSpec): Promise<void> {
+    await invoke("warm_session", { args: toWireSpec(spec) });
   }
 
   async listNativeSessions(
-    tabId: string,
-    provider: string,
-    projectPath: string,
-    model?: string,
-    effort?: string,
-    mcpServers?: readonly McpServerSpec[],
-    subtask?: SubtaskScope,
+    spec: SessionSpec,
   ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[] | null> {
     // Null when no live session exists — the shell never boots an
     // agent process just to answer the History panel.
-    return invoke("list_agent_sessions", {
-      args: {
-        tabId,
-        providerId: provider,
-        projectPath,
-        model: model ?? null,
-        effort: effort ?? null,
-        mcpServers: toWireServers(mcpServers),
-        subtask: subtask ?? null,
-      },
-    });
+    return invoke("list_agent_sessions", { args: toWireSpec(spec) });
   }
 
   async loadNativeSession(
-    request: {
-      tabId: string;
-      provider: string;
-      projectPath: string;
-      model?: string;
-      effort?: string;
-      sessionId: string;
-      mcpServers?: readonly McpServerSpec[];
-      subtask?: SubtaskScope;
-      preferResume?: boolean;
-    },
+    request: SessionSpec & { sessionId: string; preferResume?: boolean },
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<{ replayed: boolean }> {
     // A stale per-tab handler (e.g. left by a cancelled headless turn)
@@ -291,20 +270,17 @@ export class TauriAgentGateway implements AgentGateway {
     this.replaying.add(request.tabId);
     const unlisten = await listen<WireEvent>("agent-event", ({ payload }) => {
       if (payload.tabId !== request.tabId) return;
+      // A retired agent talking during the replay is not part of the
+      // conversation being restored — it would be painted into it.
+      if (payload.chatId !== undefined && payload.chatId !== request.chatId) return;
       onEvent(toDomainEvent(payload.event));
     });
     try {
       // The replay streams through the listener before this resolves.
       const replayed = await invoke<boolean>("load_agent_session", {
         args: {
-          tabId: request.tabId,
-          providerId: request.provider,
-          projectPath: request.projectPath,
-          model: request.model ?? null,
-          effort: request.effort ?? null,
+          ...toWireSpec(request),
           sessionId: request.sessionId,
-          mcpServers: toWireServers(request.mcpServers),
-          subtask: request.subtask ?? null,
           preferResume: request.preferResume ?? false,
         },
       });
@@ -314,6 +290,21 @@ export class TauriAgentGateway implements AgentGateway {
       this.replaying.delete(request.tabId);
     }
   }
+}
+
+/** The session spec as the backend's `SessionArgs` expects it: absent
+ *  optionals become explicit nulls, because serde does not read `undefined`. */
+function toWireSpec(spec: SessionSpec) {
+  return {
+    tabId: spec.tabId,
+    chatId: spec.chatId,
+    providerId: spec.provider,
+    projectPath: spec.projectPath,
+    model: spec.model ?? null,
+    effort: spec.effort ?? null,
+    mcpServers: toWireServers(spec.mcpServers),
+    subtask: spec.subtask ?? null,
+  };
 }
 
 /**

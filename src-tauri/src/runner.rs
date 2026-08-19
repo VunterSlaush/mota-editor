@@ -22,13 +22,27 @@ const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 #[serde(rename_all = "camelCase")]
 struct WireEvent<'a> {
     tab_id: &'a str,
+    /// The tab's CONVERSATION this event belongs to. The tab id names the
+    /// tab for its whole life, so on its own it cannot tell an event from
+    /// the chat on screen apart from one a retired agent is still
+    /// emitting under the same tab id (ADR-0016). Absent when no session
+    /// stands behind the event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_id: Option<&'a str>,
     event: &'a AgentEvent,
 }
 
 pub const EVENT_CHANNEL: &str = "agent-event";
 
+/// Emit an event no session is responsible for — a transport failure, or
+/// a line this app wrote itself. It belongs to whatever chat is current.
 pub fn emit(app: &AppHandle, tab_id: &str, event: &AgentEvent) {
-    let _ = app.emit(EVENT_CHANNEL, WireEvent { tab_id, event });
+    let _ = app.emit(EVENT_CHANNEL, WireEvent { tab_id, chat_id: None, event });
+}
+
+/// Emit an event on behalf of the session serving `chat_id`.
+pub fn emit_for(app: &AppHandle, tab_id: &str, chat_id: &str, event: &AgentEvent) {
+    let _ = app.emit(EVENT_CHANNEL, WireEvent { tab_id, chat_id: Some(chat_id), event });
 }
 
 /// Spawn the turn's process. Returns the child so the caller can register

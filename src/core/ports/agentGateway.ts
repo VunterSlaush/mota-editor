@@ -93,8 +93,36 @@ export type AgentTurnEvent =
       stopReason?: string;
     };
 
+/**
+ * One agent event and who it is for. The tab id says which tab; the chat
+ * id says which of that tab's CONVERSATIONS, which the tab id cannot —
+ * an agent retired by "New chat" goes on talking under the same tab id.
+ * Absent when no session stands behind the event (a transport-level
+ * failure), and then it belongs to whatever chat is current.
+ */
+export interface AgentEventEnvelope {
+  readonly tabId: string;
+  readonly chatId?: string;
+  readonly event: AgentTurnEvent;
+}
+
+/** Everything needed to boot (or reuse) a tab's agent session. */
+export interface SessionSpec {
+  readonly tabId: string;
+  /** The conversation this session serves; echoed back on its events. */
+  readonly chatId: string;
+  readonly provider: ProviderId;
+  readonly projectPath: string;
+  readonly model?: string;
+  readonly effort?: string;
+  readonly mcpServers?: readonly McpServerSpec[];
+  readonly subtask?: SubtaskScope;
+}
+
 export interface AgentTurnRequest {
   readonly tabId: string;
+  /** The conversation this prompt belongs to. See `AgentEventEnvelope`. */
+  readonly chatId: string;
   readonly provider: ProviderId;
   readonly projectPath: string;
   readonly prompt: string;
@@ -127,7 +155,7 @@ export interface AgentGateway {
    * background. At most one subscriber; events during a turn keep going
    * to the turn's own callback.
    */
-  subscribeSessionEvents(onEvent: (tabId: string, event: AgentTurnEvent) => void): void;
+  subscribeSessionEvents(onEvent: (envelope: AgentEventEnvelope) => void): void;
 
   /**
    * Receive everything else that arrives for a tab with no turn of ours
@@ -137,7 +165,7 @@ export interface AgentGateway {
    * to attribute the work to — but it is still the agent talking, and it
    * belongs in the conversation. At most one subscriber.
    */
-  subscribeAgentInitiated(onEvent: (tabId: string, event: AgentTurnEvent) => void): void;
+  subscribeAgentInitiated(onEvent: (envelope: AgentEventEnvelope) => void): void;
 
   /** Cancel the in-flight turn for a tab, if any. */
   cancelTurn(tabId: string): Promise<void>;
@@ -159,6 +187,21 @@ export interface AgentGateway {
   endSession(tabId: string): Promise<void>;
 
   /**
+   * Take the tab's agent OFF the tab without killing it: the chat is
+   * over, but a watcher it left running has not reported yet, and the
+   * conversation that asked for that report is the one that should get
+   * it. The retired agent keeps emitting under the chat id it was booted
+   * with; `discardRetired` is what finally ends it.
+   *
+   * At most one retired agent per tab — retiring again ends the previous.
+   */
+  retireSession(tabId: string): Promise<void>;
+
+  /** End a retired agent. Ignored when the tab's retired agent is not
+   *  the named chat's (it was already replaced or discarded). */
+  discardRetired(tabId: string, chatId: string): Promise<void>;
+
+  /**
    * Captured output of a client-owned terminal (`terminal/create`d by
    * the agent). Null when the terminal (or session) no longer exists.
    * Polled by the UI while the command runs.
@@ -173,15 +216,7 @@ export interface AgentGateway {
    * message doesn't pay the handshake cost. Best-effort: failures are
    * silent (the real turn will surface them properly).
    */
-  warmSession(
-    tabId: string,
-    provider: ProviderId,
-    projectPath: string,
-    model?: string,
-    effort?: string,
-    mcpServers?: readonly McpServerSpec[],
-    subtask?: SubtaskScope,
-  ): Promise<void>;
+  warmSession(spec: SessionSpec): Promise<void>;
 
   /**
    * The agent's OWN saved sessions for this project (native history),
@@ -190,13 +225,7 @@ export interface AgentGateway {
    * so the History panel can serve itself from the local store.
    */
   listNativeSessions(
-    tabId: string,
-    provider: ProviderId,
-    projectPath: string,
-    model?: string,
-    effort?: string,
-    mcpServers?: readonly McpServerSpec[],
-    subtask?: SubtaskScope,
+    spec: SessionSpec,
   ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[] | null>;
 
   /**
@@ -207,15 +236,8 @@ export interface AgentGateway {
    * conversation from its own transcript copy instead.
    */
   loadNativeSession(
-    request: {
-      tabId: string;
-      provider: ProviderId;
-      projectPath: string;
-      model?: string;
-      effort?: string;
+    request: SessionSpec & {
       sessionId: string;
-      mcpServers?: readonly McpServerSpec[];
-      subtask?: SubtaskScope;
       /** Set only when a local transcript copy exists to paint from. */
       preferResume?: boolean;
     },

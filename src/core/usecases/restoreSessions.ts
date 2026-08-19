@@ -6,7 +6,7 @@ import type { TranscriptStore } from "../ports/transcriptStore";
 import type { TabState } from "../state/appState";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import { agentServers } from "./agentServers";
+import { sessionSpec } from "./agentServers";
 import { warmTab } from "./warmSessions";
 
 /** Said once the agent has the conversation back in memory. */
@@ -121,7 +121,7 @@ async function rejoinAgent(
   const state = store.getState();
   const tab = tabById(state, tabId);
   if (!tab) return;
-  const { provider, path, model, effort, mcpOverrides } = tab.project;
+  const provider = tab.project.provider;
 
   // No id the agent would recognise (a transcript from before we
   // recorded one), or a provider that cannot be asked. Either way the
@@ -134,20 +134,10 @@ async function rejoinAgent(
 
   store.dispatch({ type: "tab/sessionStageChanged", tabId, stage: "recovering" });
   try {
+    // The spec carries the tab's subtask scope, which decides which agent
+    // process serves it — rejoining scope-less would be wider.
     await agentGateway.loadNativeSession(
-      {
-        tabId,
-        provider,
-        projectPath: path,
-        model,
-        effort,
-        sessionId: providerSessionId,
-        mcpServers: agentServers(state, provider, mcpOverrides),
-        // A subtask tab must rejoin under its scope — the spec decides
-        // which agent process serves it, and scope-less would be wider.
-        subtask: tab.project.subtask,
-        preferResume: true,
-      },
+      { ...sessionSpec(state, tab), sessionId: providerSessionId, preferResume: true },
       () => undefined,
     );
     note(store, tabId, REJOINED);

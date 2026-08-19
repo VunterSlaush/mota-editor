@@ -27,6 +27,8 @@ class RecordingGateway implements AgentGateway {
     this.cancelled.push(tabId);
   }
   async endSession(): Promise<void> {}
+  async retireSession(): Promise<void> {}
+  async discardRetired(): Promise<void> {}
   async warmSession(): Promise<void> {}
   async listNativeSessions(): Promise<{ sessionId: string }[] | null> {
     return null;

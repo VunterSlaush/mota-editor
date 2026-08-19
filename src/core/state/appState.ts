@@ -52,6 +52,18 @@ export interface QueuedPrompt {
 
 export interface TabState {
   readonly project: Project;
+  /**
+   * Which CONVERSATION this tab is on — the tab id names the tab for its
+   * whole life, and every agent event is addressed to it, so the tab id
+   * alone cannot say whether an event belongs to the chat on screen or
+   * to the one the user left behind. This can, and it is the only thing
+   * that can: an agent the user retired keeps talking (a watcher fires,
+   * a background task finishes) long after its chat was cleared.
+   *
+   * Minted here rather than passed in so the reducer stays pure — the
+   * serial is what makes it new, the tab id is what makes it readable.
+   */
+  readonly chatId: string;
   readonly messages: readonly ChatMessage[];
   readonly busy: boolean;
   /** When the running turn started, for the elapsed counter. */
@@ -451,6 +463,7 @@ export function reduce(state: AppState, action: Action): AppState {
       if (existing) return { ...state, activeTabId: existing.project.id };
       const tab: TabState = {
         project: action.project,
+        chatId: firstChatId(action.project.id),
         messages: [],
         busy: false,
         queued: [],
@@ -719,6 +732,10 @@ export function reduce(state: AppState, action: Action): AppState {
         delete sessions[action.provider];
         return {
           ...applied,
+          // The one action that means "this is a different conversation
+          // now" — so it is the one place the identity is re-minted, and
+          // everything the old session still says is stale from here on.
+          chatId: nextChatId(applied.chatId),
           usage: undefined,
           agentCommands: [],
           project: { ...applied.project, providerSessions: sessions },
@@ -838,6 +855,10 @@ export function reduce(state: AppState, action: Action): AppState {
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         messages: [],
+        // A prompt waiting behind the old conversation was written for
+        // it. Draining it into the fresh one delivers it to an agent
+        // that has never seen what it was answering.
+        queued: [],
         historySessionId: undefined,
         restoredHistorySessionId: undefined,
         plan: [],
@@ -1010,6 +1031,28 @@ function appendDelta(
   const last = messages[messages.length - 1];
   if (!last || last.role !== role) return messages;
   return [...messages.slice(0, -1), { ...last, text: last.text + text }];
+}
+
+/**
+ * The identity of a tab's first conversation. See `TabState.chatId`.
+ *
+ * A restored tab starts here again even when the backend session it is
+ * about to rejoin was on a later one — the frontend is authoritative
+ * about which conversation a tab is in, and the session adopts the id it
+ * is warmed or resumed with.
+ */
+export function firstChatId(tabId: string): string {
+  return `${tabId}#1`;
+}
+
+/**
+ * The identity of the conversation that replaces this one. A serial
+ * rather than a random id because the reducer may not generate one, and
+ * because "t3#4" in a log says which tab and how many chats ago.
+ */
+function nextChatId(chatId: string): string {
+  const at = chatId.lastIndexOf("#");
+  return `${chatId.slice(0, at)}#${Number(chatId.slice(at + 1)) + 1}`;
 }
 
 /** The list without its first `value` — the rest, duplicates included. */

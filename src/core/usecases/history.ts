@@ -14,7 +14,8 @@ import type { TranscriptMeta, TranscriptStore } from "../ports/transcriptStore";
 import type { TabState } from "../state/appState";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
-import { agentServers } from "./agentServers";
+import { sessionSpec } from "./agentServers";
+import type { RetiredChats } from "./retiredChats";
 import { startNewChat } from "./startNewChat";
 import type { WorktreeItem } from "./worktrees";
 
@@ -187,6 +188,7 @@ export class SessionHistory {
     private readonly transcriptStore: TranscriptStore,
     private readonly agentGateway: AgentGateway,
     private readonly worktrees: WorktreeAccess,
+    private readonly retiredChats?: RetiredChats,
   ) {}
 
   /**
@@ -294,7 +296,7 @@ export class SessionHistory {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
     if (!tab) return;
-    const { provider, path, model, effort, mcpOverrides } = tab.project;
+    const { provider, path } = tab.project;
 
     // Only Claude's store is readable without an agent; other vendors'
     // history stays whatever the live agent reports.
@@ -306,15 +308,7 @@ export class SessionHistory {
     let native: Awaited<ReturnType<AgentGateway["listNativeSessions"]>> = null;
     let listError: string | undefined;
     try {
-      native = await this.agentGateway.listNativeSessions(
-        tabId,
-        provider,
-        path,
-        model,
-        effort,
-        agentServers(state, provider, mcpOverrides),
-        tab.project.subtask,
-      );
+      native = await this.agentGateway.listNativeSessions(sessionSpec(state, tab));
     } catch (e) {
       listError = e instanceof Error ? e.message : String(e);
     }
@@ -495,8 +489,8 @@ export class SessionHistory {
     const historyId = item.id;
     const state = this.store.getState();
     const tab = tabById(state, tabId)!;
-    const { provider, path, model, effort, mcpOverrides } = tab.project;
-    const mcpServers = agentServers(state, provider, mcpOverrides);
+    const { path } = tab.project;
+    const spec = sessionSpec(state, tab);
 
     this.store.dispatch({ type: "chat/cleared", tabId });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: Date.now() });
@@ -513,17 +507,7 @@ export class SessionHistory {
     let replayed = true;
     try {
       ({ replayed } = await this.agentGateway.loadNativeSession(
-        {
-          tabId,
-          provider,
-          projectPath: path,
-          model,
-          effort,
-          sessionId,
-          mcpServers,
-          subtask: tab.project.subtask,
-          preferResume: localCopy !== null,
-        },
+        { ...spec, sessionId, preferResume: localCopy !== null },
         (event) => replay.fold(event),
       ));
       replay.note("Resumed — the agent remembers this conversation.");
@@ -572,7 +556,7 @@ export class SessionHistory {
             id: historyId,
             title: (firstUserMessage?.text ?? "Untitled").slice(0, 80),
             savedAt: item.savedAt,
-            provider,
+            provider: spec.provider,
             projectPath: path,
             providerSessionId: sessionId,
             messages: replay.messages,
@@ -632,7 +616,7 @@ export class SessionHistory {
   /** Start a fresh conversation in this tab. See `startNewChat` — the
    *  same step the context-full bar and the auto-compact policy use. */
   async startNew(tabId: string): Promise<void> {
-    await startNewChat(this.store, this.agentGateway, tabId);
+    await startNewChat(this.store, this.agentGateway, tabId, this.retiredChats);
   }
 
   /** Delete the transcript where it lives — the worktree's folder for a

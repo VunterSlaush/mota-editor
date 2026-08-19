@@ -73,6 +73,8 @@ pub fn run() {
             commands::respond_permission,
             commands::respond_question,
             commands::end_session,
+            commands::retire_session,
+            commands::discard_retired,
             commands::get_terminal_output,
             commands::list_custom_commands,
             app_badge::set_app_badge,

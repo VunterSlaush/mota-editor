@@ -5,6 +5,7 @@ import type { WorkspaceStore } from "../ports/workspacePort";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import { persistWorkspace } from "./persistWorkspace";
+import type { RetiredChats } from "./retiredChats";
 
 /**
  * Use case — close a project tab, tearing down its agent session (which
@@ -17,6 +18,7 @@ export class CloseProject {
     private readonly agentGateway: AgentGateway,
     private readonly workspaceStore: WorkspaceStore,
     private readonly shells: ShellPort,
+    private readonly retiredChats?: RetiredChats,
   ) {}
 
   /**
@@ -36,6 +38,9 @@ export class CloseProject {
     // trying to delete the folder.
     await this.shells.closeProject(tabId).catch(() => undefined);
     await this.agentGateway.cancelTurn(tabId).catch(() => undefined);
+    // Ends the tab's retired agent too, if it had one — so what it had
+    // already said is filed first, while there is still a chat to file.
+    this.retiredChats?.forget(tabId);
     await this.agentGateway.endSession(tabId).catch(() => undefined);
     this.store.dispatch({ type: "tab/closed", tabId });
     await persistWorkspace(this.store.getState(), this.workspaceStore);

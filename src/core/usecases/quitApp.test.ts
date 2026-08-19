@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WindowPort } from "../ports/windowPort";
-import type { TabState } from "../state/appState";
+import { firstChatId, type TabState } from "../state/appState";
 import { Store } from "../state/store";
 import { QuitApp } from "./quitApp";
 
@@ -27,6 +27,7 @@ function tab(id: string, over: Partial<TabState> = {}): TabState {
       verbose: true,
       providerSessions: {},
     },
+    chatId: firstChatId(id),
     messages: [],
     busy: false,
     queued: [],

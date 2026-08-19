@@ -97,6 +97,12 @@ tracked, and `stopTurn` clears busy itself.
 - A stop during a follow-up can still be trailed by a few events, which
   re-open a stretch for up to 8s. Same shape as a cancelled turn's tail,
   and bounded the same way.
+- ~~The lane is keyed by tab id~~ *(amended 2026-08-19 by ADR-0016)*: a tab
+  id names the tab, not the conversation, so a follow-up arriving after
+  "New chat" landed in the chat that replaced the one that asked for it —
+  the settle window above is exactly when a tab looks idle enough to start
+  one. Events now carry a chat id, and the agent a new chat replaces is
+  retired rather than killed so its report can still reach that chat.
 - Mota gains nothing to schedule *with* — the scheduling lives in the
   agent's own harness, which is the right place for it. Should we ever
   want Mota to trigger work itself, this lane is what it would deliver

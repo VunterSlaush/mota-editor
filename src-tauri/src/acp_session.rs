@@ -28,6 +28,16 @@ use crate::runner;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120); // first npx run downloads the adapter
 const SET_MODE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Where an event goes and where a turn comes from: the tab, and which
+/// of that tab's conversations. They travel together everywhere now — a
+/// tab id alone cannot tell the chat on screen apart from one the user
+/// retired, which is the whole point of ADR-0016.
+#[derive(Clone, Copy)]
+pub struct ChatRef<'a> {
+    pub tab_id: &'a str,
+    pub chat_id: &'a str,
+}
+
 /// Why an ACP turn could not start.
 pub enum AcpStartError {
     /// The agent isn't installed/launchable — fall back to headless mode.
@@ -64,6 +74,16 @@ pub struct AcpSessions {
     /// silently undone — the finished boot re-registers the conversation
     /// the user just cleared.
     resets: Mutex<HashMap<String, u64>>,
+    /// The agent "New chat" took off each tab, still running.
+    ///
+    /// An agent asked to watch something goes on watching it after the
+    /// user has moved on, and what it eventually reports belongs to the
+    /// conversation that asked (ADR-0016). Killing it there — which is
+    /// what `end_session` did — threw that report away before it existed.
+    ///
+    /// One per tab. A second retirement ends the first, which is also
+    /// what bounds how many adapter processes a tab can hold: two.
+    retired: Mutex<HashMap<String, Arc<AcpSession>>>,
 }
 
 pub struct AcpSession {
@@ -83,6 +103,12 @@ pub struct AcpSession {
     /// The agent-side session this tab currently talks to. Set after
     /// `session/new`, replaced when a saved session is loaded (resume).
     session_id: Mutex<String>,
+    /// The tab's conversation this session serves, stamped on everything
+    /// it emits. Mutable because the frontend is authoritative about it:
+    /// a reload mints a fresh chat id for a tab whose backend session
+    /// survived, and reusing that session adopts the new id rather than
+    /// leaving every event it sends addressed to a chat that is gone.
+    chat_id: Mutex<String>,
     child: Mutex<Option<Child>>,
     stdin: tokio::sync::Mutex<ChildStdin>,
     next_id: AtomicI64,
@@ -150,7 +176,52 @@ impl AcpSessions {
         self.map.lock().unwrap_or_else(PoisonError::into_inner).get(tab_id).cloned()
     }
 
+    /// The tab is done with its agent for good — it was closed, or the
+    /// app is quitting. Nothing is kept: no process, no recovery entry.
     pub fn end_session(&self, tab_id: &str) {
+        if let Some(session) = self.reset(tab_id) {
+            session.shutdown();
+        }
+        self.drop_retired(tab_id);
+    }
+
+    /// "New chat": the tab moves on, its agent does not die.
+    ///
+    /// The old agent may still be watching something it was asked to
+    /// report on, and that report belongs to the conversation that asked
+    /// for it — so the session is parked in `retired`, still reading its
+    /// stdout, still emitting under the chat id it was booted with, until
+    /// `discard_retired` ends it (ADR-0016).
+    pub fn retire_for_new_chat(&self, tab_id: &str) {
+        let Some(session) = self.reset(tab_id) else { return };
+        // One retired agent per tab: the previous one has had its chance.
+        if let Some(previous) = self
+            .retired
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(tab_id.to_owned(), session)
+        {
+            previous.shutdown();
+        }
+    }
+
+    /// End the tab's retired agent, if the one it holds is that chat's.
+    /// Named rather than unconditional because the frontend answers late:
+    /// by the time a settle timer fires, a second "New chat" may already
+    /// have put a different agent in this slot.
+    pub fn discard_retired(&self, tab_id: &str, chat_id: &str) {
+        let mut retired = self.retired.lock().unwrap_or_else(PoisonError::into_inner);
+        if retired.get(tab_id).is_some_and(|s| s.chat() == chat_id) {
+            if let Some(session) = retired.remove(tab_id) {
+                session.shutdown();
+            }
+        }
+    }
+
+    /// Take the tab's live session off it and mark the conversation over.
+    /// Both callers above start here; what they do with the session is
+    /// the only thing that differs.
+    fn reset(&self, tab_id: &str) -> Option<Arc<AcpSession>> {
         // Bumped FIRST: a boot running right now must see the reset even
         // if it finishes before this call returns.
         {
@@ -158,11 +229,17 @@ impl AcpSessions {
             let count = resets.entry(tab_id.to_owned()).or_insert(0);
             *count = count.wrapping_add(1);
         }
-        if let Some(session) = self.map.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id) {
-            session.shutdown();
-        }
         // An intentional reset must not resurrect the old context later.
         self.recovery.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id);
+        self.map.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id)
+    }
+
+    fn drop_retired(&self, tab_id: &str) {
+        if let Some(session) =
+            self.retired.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id)
+        {
+            session.shutdown();
+        }
     }
 
     /// The tab's reset count — taken when a boot begins and compared
@@ -181,7 +258,7 @@ impl AcpSessions {
     /// A reconfigure (model/effort/servers switch forces a respawn) is
     /// not a reset: the respawned agent should resume the conversation,
     /// not greet the user with amnesia.
-    fn retire_session(&self, tab_id: &str) {
+    fn kill_for_respawn(&self, tab_id: &str) {
         if let Some(session) =
             self.map.lock().unwrap_or_else(PoisonError::into_inner).remove(tab_id)
         {
@@ -190,9 +267,15 @@ impl AcpSessions {
     }
 
     /// App exit: kill every agent subprocess deliberately rather than
-    /// hoping `kill_on_drop` still runs.
+    /// hoping `kill_on_drop` still runs. Retired agents too — a watcher
+    /// nobody is left to read has nothing to report to.
     pub fn shutdown_all(&self) {
         for (_, session) in self.map.lock().unwrap_or_else(PoisonError::into_inner).drain() {
+            session.shutdown();
+        }
+        for (_, session) in
+            self.retired.lock().unwrap_or_else(PoisonError::into_inner).drain()
+        {
             session.shutdown();
         }
     }
@@ -236,11 +319,18 @@ impl AcpSessions {
     }
 
     /// Evict a session only if the map still holds THIS one — a respawn
-    /// may already have replaced it under the same tab id.
+    /// may already have replaced it under the same tab id. The retired
+    /// slot is swept too: a retired agent whose process has ended is a
+    /// dead entry the tab would otherwise hold until it closes.
     fn evict(&self, tab_id: &str, session: &Arc<AcpSession>) {
         let mut map = self.map.lock().unwrap_or_else(PoisonError::into_inner);
         if map.get(tab_id).is_some_and(|s| Arc::ptr_eq(s, session)) {
             map.remove(tab_id);
+        }
+        drop(map);
+        let mut retired = self.retired.lock().unwrap_or_else(PoisonError::into_inner);
+        if retired.get(tab_id).is_some_and(|s| Arc::ptr_eq(s, session)) {
+            retired.remove(tab_id);
         }
     }
 }
@@ -277,6 +367,21 @@ impl AcpSession {
 
     fn set_sid(&self, session_id: String) {
         *self.session_id.lock().unwrap_or_else(PoisonError::into_inner) = session_id;
+    }
+
+    fn chat(&self) -> String {
+        self.chat_id.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    fn set_chat(&self, chat_id: String) {
+        *self.chat_id.lock().unwrap_or_else(PoisonError::into_inner) = chat_id;
+    }
+
+    /// Emit on this session's behalf — stamped with the conversation it
+    /// serves, which is the only thing that tells a retired agent's words
+    /// apart from the live chat's.
+    fn emit(&self, app: &AppHandle, tab_id: &str, event: &AgentEvent) {
+        runner::emit_for(app, tab_id, &self.chat(), event);
     }
 
     /// Start collecting the assistant's words instead of emitting them.
@@ -363,13 +468,15 @@ impl AcpSession {
 pub async fn start_turn(
     app: AppHandle,
     sessions: &AcpSessions,
-    tab_id: &str,
+    chat: ChatRef<'_>,
     provider_id: &str,
     request: TurnRequest,
     mcp_servers: Vec<acp::McpServer>,
     cancelled: Arc<AtomicBool>,
 ) -> Result<(), AcpStartError> {
+    let ChatRef { tab_id, chat_id } = chat;
     let spec = SessionSpec {
+        chat_id: chat_id.to_owned(),
         project_path: request.project_path.clone(),
         model: request.model.clone(),
         effort: request.effort.clone(),
@@ -455,7 +562,7 @@ pub async fn start_turn(
         if result.is_ok() {
             crate::provider_probe::mark_verified(&provider);
         }
-        runner::emit(&app_for_task, &tab, &completion);
+        session_for_task.emit(&app_for_task, &tab, &completion);
     });
 
     Ok(())
@@ -614,7 +721,7 @@ pub async fn warm(
     // remembered from before — a conversation the tab may have left.
     let session_id = session.sid();
     if !session_id.is_empty() {
-        runner::emit(&app, tab_id, &AgentEvent::SessionStarted { provider_session_id: session_id });
+        session.emit(&app, tab_id, &AgentEvent::SessionStarted { provider_session_id: session_id });
     }
 }
 
@@ -624,6 +731,11 @@ pub async fn warm(
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSpec {
+    /// Which of the tab's conversations this session serves. Echoed on
+    /// every event the session emits, so the frontend can tell the chat
+    /// on screen apart from one it retired (ADR-0016).
+    #[serde(default)]
+    pub chat_id: String,
     pub project_path: String,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -643,7 +755,7 @@ async fn ensure_session(
     provider_id: &str,
     spec: &SessionSpec,
 ) -> Result<Arc<AcpSession>, AcpStartError> {
-    let SessionSpec { project_path, model, effort, mcp_servers, subtask } = spec;
+    let SessionSpec { chat_id, project_path, model, effort, mcp_servers, subtask } = spec;
     let (model, effort) = (model.clone(), effort.clone());
 
     // One boot per tab at a time: a second caller (the first prompt or
@@ -669,6 +781,10 @@ async fn ensure_session(
         // A dead session (agent crashed or was killed) must be respawned
         // even when the spec matches — reusing it can only fail or hang.
         if matches && !existing.dead.load(Ordering::SeqCst) {
+            // The caller's chat id wins: a frontend that reloaded is on a
+            // freshly minted one, and a session left addressing the id it
+            // booted with would have every event it sends dropped.
+            existing.set_chat(spec.chat_id.clone());
             return Ok(existing);
         }
         // Provider, model, effort or tools switched: start over. Servers
@@ -697,11 +813,11 @@ async fn ensure_session(
                 ));
             }
         }
-        sessions.retire_session(tab_id);
+        sessions.kill_for_respawn(tab_id);
     }
 
     let session = boot_agent(app, tab_id, provider_id, spec, true).await.inspect_err(|_| {
-        emit_stage(app, tab_id, "ready"); // never leave the chip stuck
+        emit_stage(app, tab_id, chat_id, "ready"); // never leave the chip stuck
     })?;
     discard_if_reset(app, sessions, tab_id, &session, mark)?;
 
@@ -713,7 +829,7 @@ async fn ensure_session(
     if let Some(old_id) = sessions.recoverable_session(tab_id, provider_id) {
         let caps = session.caps();
         if caps.session_resume || caps.load_session {
-            emit_stage(app, tab_id, "recovering");
+            emit_stage(app, tab_id, chat_id, "recovering");
             // `session/resume` restores the agent's memory without the
             // whole-conversation replay — which recovery mutes anyway
             // (the transcript never left the screen). Cheap path first,
@@ -744,7 +860,7 @@ async fn ensure_session(
                     session.has_conversation.store(true, Ordering::SeqCst);
                     adopt_session(app, tab_id, &session, old_id.clone());
                     if let Some(reason) = reconfigured {
-                        runner::emit(
+                        session.emit(
                             app,
                             tab_id,
                             &AgentEvent::Notice {
@@ -760,13 +876,13 @@ async fn ensure_session(
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
                         .insert(tab_id.to_owned(), Arc::clone(&session));
-                    emit_stage(app, tab_id, "ready");
+                    emit_stage(app, tab_id, chat_id, "ready");
                     return Ok(session);
                 }
                 Err(e) => {
                     // Fall through to a fresh session — but say so, or the
                     // agent's sudden amnesia looks like a model failure.
-                    runner::emit(
+                    session.emit(
                         app,
                         tab_id,
                         &AgentEvent::ErrorOccurred {
@@ -783,7 +899,7 @@ async fn ensure_session(
         }
     }
 
-    emit_stage(app, tab_id, "creating");
+    emit_stage(app, tab_id, chat_id, "creating");
     let new_id = session.request_id();
     let new_result = session
         .call_with_timeout(
@@ -798,14 +914,14 @@ async fn ensure_session(
                  problem, sign in to the {provider_id} CLI in a terminal first."
             ));
             session.shutdown();
-            emit_stage(app, tab_id, "ready");
+            emit_stage(app, tab_id, chat_id, "ready");
             AcpStartError::Failed(detail)
         })?;
 
     let (session_id, modes) = acp::parse_session_new_result(&new_result);
     let Some(session_id) = session_id else {
         session.shutdown();
-        emit_stage(app, tab_id, "ready");
+        emit_stage(app, tab_id, chat_id, "ready");
         return Err(AcpStartError::Failed("The agent returned no session id.".to_owned()));
     };
 
@@ -827,7 +943,7 @@ async fn ensure_session(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .insert(tab_id.to_owned(), Arc::clone(&session));
-    emit_stage(app, tab_id, "ready");
+    emit_stage(app, tab_id, chat_id, "ready");
     Ok(session)
 }
 
@@ -849,7 +965,7 @@ fn discard_if_reset(
         return Ok(());
     }
     session.shutdown();
-    emit_stage(app, tab_id, "ready");
+    emit_stage(app, tab_id, &session.chat(), "ready");
     Err(AcpStartError::Failed(
         "The chat was reset while the agent was starting.".to_owned(),
     ))
@@ -870,7 +986,7 @@ async fn boot_agent(
     spec: &SessionSpec,
     emit_stages: bool,
 ) -> Result<Arc<AcpSession>, AcpStartError> {
-    let SessionSpec { project_path, model, effort, mcp_servers, subtask } = spec;
+    let SessionSpec { chat_id, project_path, model, effort, mcp_servers, subtask } = spec;
     let spawned =
         spawn_agent(provider_id, project_path, model.as_deref(), effort.as_deref())?;
     let SpawnedAgent { mut child, install_hint, via_npx } = spawned;
@@ -879,7 +995,7 @@ async fn boot_agent(
     let stderr = child.stderr.take().expect("stderr piped");
 
     if emit_stages {
-        emit_stage(app, tab_id, if via_npx { "installing" } else { "booting" });
+        emit_stage(app, tab_id, chat_id, if via_npx { "installing" } else { "booting" });
     }
 
     let session = Arc::new(AcpSession {
@@ -890,6 +1006,7 @@ async fn boot_agent(
         effort: effort.clone(),
         mcp_servers: mcp_servers.clone(),
         session_id: Mutex::new(String::new()),
+        chat_id: Mutex::new(chat_id.clone()),
         child: Mutex::new(Some(child)),
         stdin: tokio::sync::Mutex::new(stdin),
         next_id: AtomicI64::new(0),
@@ -988,8 +1105,10 @@ fn respawn_reason(before: &SessionShape, after: &SessionShape) -> &'static str {
 }
 
 /// One startup-stage breadcrumb for the UI's progress chip.
-fn emit_stage(app: &AppHandle, tab_id: &str, stage: &str) {
-    runner::emit(app, tab_id, &AgentEvent::SessionStage { stage: stage.to_owned() });
+fn emit_stage(app: &AppHandle, tab_id: &str, chat_id: &str, stage: &str) {
+    runner::emit_for(app, tab_id, chat_id, &AgentEvent::SessionStage {
+        stage: stage.to_owned(),
+    });
 }
 
 /// Take ownership of the agent's session id AND tell the frontend.
@@ -1002,7 +1121,7 @@ fn emit_stage(app: &AppHandle, tab_id: &str, stage: &str) {
 /// the sid without emitting is the bug this function exists to prevent.
 fn adopt_session(app: &AppHandle, tab_id: &str, session: &AcpSession, session_id: String) {
     session.set_sid(session_id.clone());
-    runner::emit(app, tab_id, &AgentEvent::SessionStarted { provider_session_id: session_id });
+    session.emit(app, tab_id, &AgentEvent::SessionStarted { provider_session_id: session_id });
 }
 
 /// Drain the agent's stderr forever: every line goes into the session's
@@ -1241,6 +1360,8 @@ pub(crate) async fn probe_handshake(
     timeout: Duration,
 ) -> Result<acp::AgentCaps, AcpStartError> {
     let spec = SessionSpec {
+        // No tab, so no conversation to address anything to.
+        chat_id: String::new(),
         project_path: project_path.to_owned(),
         model: None,
         effort: None,
@@ -1284,6 +1405,8 @@ pub(crate) async fn ask_once(
     timeout: Duration,
 ) -> Result<String, AcpStartError> {
     let spec = SessionSpec {
+        // No tab, so no conversation to address anything to.
+        chat_id: String::new(),
         project_path: project_path.to_owned(),
         model: None,
         effort: None,
@@ -1438,7 +1561,7 @@ fn spawn_reader(
         // Agent process ended.
         if session.turn_active.swap(false, Ordering::SeqCst) {
             let tail = session.stderr_tail_text();
-            runner::emit(
+            session.emit(
                 &app,
                 &tab_id,
                 &AgentEvent::ErrorOccurred {
@@ -1449,7 +1572,7 @@ fn spawn_reader(
                     stderr_tail: (!tail.is_empty()).then_some(tail),
                 },
             );
-            runner::emit(
+            session.emit(
                 &app,
                 &tab_id,
                 &AgentEvent::TurnCompleted {
@@ -1508,7 +1631,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 }
             }
             session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).push(id);
-            runner::emit(
+            session.emit(
                 app,
                 tab_id,
                 &AgentEvent::PermissionRequested {
@@ -1532,7 +1655,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(id);
-            runner::emit(
+            session.emit(
                 app,
                 tab_id,
                 &AgentEvent::QuestionAsked {
@@ -1550,7 +1673,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
             let _ = session
                 .write_message(&acp::permission_cancelled_response(id))
                 .await;
-            runner::emit(
+            session.emit(
                 app,
                 tab_id,
                 &AgentEvent::Notice {
@@ -1576,7 +1699,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
             for event in events {
                 // A capturing session answers its caller, not a tab.
                 if !session.capture_event(&event) {
-                    runner::emit(app, tab_id, &event);
+                    session.emit(app, tab_id, &event);
                 }
             }
         }
@@ -1646,6 +1769,27 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retiring_overtakes_a_boot_even_with_no_session_to_retire() {
+        // The reset count is what a boot compares before registering what
+        // it built. "New chat" clicked during a handshake has no session
+        // to park, and the boot must still notice it was overtaken.
+        let sessions = AcpSessions::default();
+        let before = sessions.reset_mark("t1");
+
+        sessions.retire_for_new_chat("t1");
+
+        assert_ne!(sessions.reset_mark("t1"), before);
+    }
+
+    #[test]
+    fn discarding_a_retired_agent_the_tab_does_not_have_is_harmless() {
+        // The frontend answers late by design: a settle timer can fire
+        // after a second "New chat" has replaced what it was naming.
+        let sessions = AcpSessions::default();
+        sessions.discard_retired("t1", "t1#1");
+    }
 
     fn shape<'a>(
         provider_id: &'a str,
