@@ -3141,6 +3141,9 @@ body {
 }
 
 .changes__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-dim);
   background: var(--bg-raised);
@@ -3149,6 +3152,31 @@ body {
   padding: 6px 8px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.changes__notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Dimmer than the message it sits beside — a git error is the thing to
+   read; the way to get rid of it is not. */
+.changes__notice-dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.changes__notice-dismiss:hover {
+  opacity: 1;
+  background: var(--border);
 }
 
 .changes__notice--error {
@@ -3852,6 +3880,16 @@ body {
   white-space: nowrap;
 }
 
+/* How many edits a file collected — only shown past one, where the row
+   stands for a run of changes rather than a single one. */
+.changes__edits {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Worktrees panel ----
    The repository's checkouts and what each one's agent is doing. It
    borrows the Changes panel's rows wholesale; only the leading icon and
@@ -3890,6 +3928,24 @@ body {
 
 .worktrees__item .changes__file:disabled:hover .changes__filename {
   text-decoration: none;
+}
+
+/* Sized like the panel's rows, not like a form field: it sits inside a
+   sidebar that drags down to 180px. */
+.worktrees__search {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.worktrees__search:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .worktrees__badge {
@@ -5231,6 +5287,11 @@ body {
   color: var(--text-dim);
 }
 
+/* The refresh icon, turning while the extension is being asked. */
+.ext-panel__spin {
+  animation: tool-spin 0.9s linear infinite;
+}
+
 /* An item's right-click menu — placed by the same measure-then-position
    as .tab-menu, so it hangs off the row and never off-screen. */
 .ext-menu {
@@ -5330,6 +5391,21 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  /* The modal itself scrolls, and a close button that scrolls out of
+     reach is no close button. Negative margins let it span the modal's
+     padding so nothing shows through beside it as content passes under. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -16px -20px 0;
+  padding: 16px 20px 8px;
+  background: var(--bg-raised);
+}
+
+.ext-detail__actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
 }
 
 .ext-detail__title {

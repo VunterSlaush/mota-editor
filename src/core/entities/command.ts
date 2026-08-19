@@ -31,6 +31,20 @@ const CREATE_EXTENSION: CommandInfo = {
 };
 
 /**
+ * Start a fresh conversation. Mota's own too, and for the same reason:
+ * clearing is something the app does to itself. Sending it on would ask
+ * the agent to clear a session that is about to be ended anyway, and the
+ * providers that have no such command would take it for a prompt.
+ */
+export const CLEAR_COMMAND = "/clear";
+
+const CLEAR: CommandInfo = {
+  name: CLEAR_COMMAND,
+  description: "Start a new chat — the current one stays in History",
+  source: "builtin",
+};
+
+/**
  * Built-in commands each CLI understands in headless mode (plus Mota's
  * own, above). Custom commands (project/user command folders) are
  * discovered at runtime and merged by the ListCommands use case.
@@ -38,6 +52,7 @@ const CREATE_EXTENSION: CommandInfo = {
 export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[]>> = {
   claude: [
     CREATE_EXTENSION,
+    CLEAR,
     {
       name: "/init",
       description: "Create or refresh CLAUDE.md with project guidance",
@@ -56,6 +71,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
   ],
   codex: [
     CREATE_EXTENSION,
+    CLEAR,
     {
       name: "/init",
       description: "Create AGENTS.md with project guidance",
@@ -63,7 +79,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
-  gemini: [CREATE_EXTENSION],
+  gemini: [CREATE_EXTENSION, CLEAR],
 };
 
 /**

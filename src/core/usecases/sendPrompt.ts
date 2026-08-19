@@ -1,5 +1,5 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
-import { dedupeCommands } from "../entities/command";
+import { CLEAR_COMMAND, dedupeCommands } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
 import {
   CREATE_EXTENSION_COMMAND,
@@ -142,6 +142,20 @@ export class SendPrompt {
     // duration, token delta, stop reason — is patched on at completion.
     const sentAt = Date.now();
     const command = leadingCommand(trimmed);
+
+    // Mota's own, handled here and never sent on. The notice goes in
+    // AFTER the reset for the same reason the auto-compact one does:
+    // starting the new chat clears the messages, so anything said first
+    // is wiped by the very action it was explaining.
+    if (command === CLEAR_COMMAND) {
+      await startNewChat(this.store, this.agentGateway, tabId);
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: infoMessage("New chat. The previous one is saved in History."),
+      });
+      return;
+    }
 
     // A command an EXTENSION contributed never reaches the agent. The
     // typed form stays in the transcript either way; a prompt-template

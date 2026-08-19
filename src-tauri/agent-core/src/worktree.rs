@@ -172,6 +172,27 @@ pub fn remove_args(worktree_path: &str, mode: &str) -> Result<Vec<String>, Strin
     Ok(args)
 }
 
+/// Whether a failed removal deserves another try in a moment.
+///
+/// Windows frees a directory only once every process that had it open
+/// has fully exited, and a virus scanner or the search indexer can hold
+/// a handle for a beat after that. Both report as the folder being busy
+/// or not empty, and both are gone by the next attempt — unlike "you
+/// have uncommitted work", which no amount of waiting fixes and which
+/// must reach the user as the answer rather than as a delay.
+pub fn removal_is_transient(error: &str) -> bool {
+    const TRANSIENT: [&str; 6] = [
+        "directory not empty",
+        "access is denied",
+        "permission denied",
+        "being used by another process",
+        "resource busy",
+        "device or resource busy",
+    ];
+    let lowered = error.to_lowercase();
+    TRANSIENT.iter().any(|needle| lowered.contains(needle))
+}
+
 /// One folder measured by the shell's walk, before roll-up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawEntry {
@@ -252,6 +273,32 @@ mod tests {
 
     fn dir() -> PathKind {
         PathKind::Dir { empty: false }
+    }
+
+    #[test]
+    fn a_busy_folder_is_worth_retrying() {
+        // The exact wording git prints on Windows when a process that
+        // had the worktree open has not finished exiting.
+        assert!(removal_is_transient(
+            "failed to delete 'G:/wks/art-8106': Directory not empty"
+        ));
+        assert!(removal_is_transient("Access is denied. (os error 5)"));
+        assert!(removal_is_transient(
+            "The process cannot access the file because it is being used by another process."
+        ));
+        assert!(removal_is_transient("Resource busy"));
+    }
+
+    #[test]
+    fn a_refusal_to_discard_work_is_not_retried() {
+        // Waiting does not make these true, and retrying only delays the
+        // message the user needs to read.
+        assert!(!removal_is_transient(
+            "'art-8106' contains modified or untracked files, use --force to delete it"
+        ));
+        assert!(!removal_is_transient("is not a working tree"));
+        assert!(!removal_is_transient("is a main working tree"));
+        assert!(!removal_is_transient(""));
     }
 
     #[test]

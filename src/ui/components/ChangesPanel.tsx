@@ -14,6 +14,7 @@ import {
   GitDiff,
   Minus,
   Plus,
+  X,
 } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { commitUrl } from "../../core/entities/gitRemote";
@@ -50,7 +51,7 @@ interface Props {
   onOpenFile: (path: string) => Promise<string | null>;
   /** Show the file's diff in a modal. */
   onShowDiff: (file: GitChange, staged: boolean) => void;
-  /** Show an agent-reported diff (full old/new text) in the modal. */
+  /** Show every edit the agent reported for one file in the modal. */
   onShowAgentDiff: (diff: AgentDiff) => void;
 }
 
@@ -86,6 +87,7 @@ export function ChangesPanel({
 }: Props) {
   // Opening a file is the panel's own business — no git, no tab state.
   const [fileProblem, setFileProblem] = useState<GitActionResult | null>(null);
+  const [dismissed, setDismissed] = useState<GitActionResult | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [open, setOpen] = useState(ALL_OPEN);
 
@@ -130,7 +132,12 @@ export function ChangesPanel({
   const verbIcon = (verb: GitVerb, Idle: Icon) =>
     working === verb ? <CircleNotch className="changes__watching" /> : <Idle />;
 
-  const shown = fileProblem ?? notice;
+  // A notice stays until it is dismissed or replaced. Remembering the
+  // dismissed object rather than a flag is what makes the next notice
+  // appear on its own: a new result is a different object, so nothing
+  // has to reset anything when one arrives.
+  const latest = fileProblem ?? notice;
+  const shown = latest && latest !== dismissed ? latest : null;
 
   // Rendered below "Not staged" (or under the no-repo notice: the agent
   // reports its edits even where git can't).
@@ -151,19 +158,24 @@ export function ChangesPanel({
               type="button"
               className="changes__file"
               title={
-                file.diff
-                  ? `Show the agent's change to ${file.path}`
+                file.edits.length > 0
+                  ? `Show the agent's ${editCount(file.edits.length)} to ${file.path}`
                   : `Open ${file.path}`
               }
               onClick={() =>
-                file.diff
-                  ? onShowAgentDiff({ path: file.path, ...file.diff })
+                file.edits.length > 0
+                  ? onShowAgentDiff({ path: file.path, edits: file.edits })
                   : void onOpenFile(file.path)
               }
             >
               <span className="changes__filename">{fileName(file.path)}</span>
               {parentDir(file.path) && (
                 <span className="changes__dir">{parentDir(file.path)}</span>
+              )}
+              {/* One edit is the unremarkable case and stays quiet; more
+                  than one says so, since the row opens all of them. */}
+              {file.edits.length > 1 && (
+                <span className="changes__edits">×{file.edits.length}</span>
               )}
             </button>
           </li>
@@ -260,7 +272,16 @@ export function ChangesPanel({
 
       {shown && (
         <p className={`changes__notice ${shown.ok ? "" : "changes__notice--error"}`}>
-          {shown.message}
+          <span className="changes__notice-text">{shown.message}</span>
+          <button
+            type="button"
+            className="changes__notice-dismiss"
+            aria-label="Dismiss this message"
+            title="Dismiss"
+            onClick={() => setDismissed(shown)}
+          >
+            <X size={12} />
+          </button>
         </p>
       )}
 
@@ -451,6 +472,11 @@ interface ListProps {
   onAction: (path: string) => void;
   onOpenFile: (path: string) => void;
   onShowDiff: (file: GitChange) => void;
+}
+
+/** "3 changes" / "1 change" — the agent-edits row's tooltip counts them. */
+function editCount(count: number): string {
+  return `${String(count)} ${count === 1 ? "change" : "changes"}`;
 }
 
 /** The path without its file name — the gray VS-style suffix. */

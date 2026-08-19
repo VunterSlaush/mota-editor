@@ -71,7 +71,7 @@ describe("countFileChangingTools", () => {
 });
 
 describe("agentEditedFiles", () => {
-  it("collects reported diffs, newest per path winning", () => {
+  it("keeps every edit of a path, oldest first", () => {
     const first = withContent(toolCallMessage("c1", "edit", "Edit a", "completed"), [
       { type: "diff", path: "/w/a.ts", oldText: "1", newText: "2" },
     ]);
@@ -81,7 +81,34 @@ describe("agentEditedFiles", () => {
     );
     const files = agentEditedFiles([first, second]);
     expect(files).toHaveLength(1);
-    expect(files[0].diff?.newText).toBe("3");
+    expect(files[0].edits).toEqual([
+      { oldText: "1", newText: "2" },
+      { oldText: "2", newText: "3" },
+    ]);
+  });
+
+  it("keeps every hunk one call reported for a path", () => {
+    const message = withContent(toolCallMessage("c1", "edit", "Edit a", "completed"), [
+      { type: "diff", path: "/w/a.ts", oldText: "top", newText: "TOP" },
+      { type: "diff", path: "/w/a.ts", oldText: "end", newText: "END" },
+    ]);
+    expect(agentEditedFiles([message])[0].edits).toHaveLength(2);
+  });
+
+  it("lists each path once, in the order it was first touched", () => {
+    const a = withContent(toolCallMessage("c1", "edit", "Edit a", "completed"), [
+      { type: "diff", path: "/w/a.ts", newText: "a" },
+    ]);
+    const b = withContent(toolCallMessage("c2", "edit", "Edit b", "completed"), [
+      { type: "diff", path: "/w/b.ts", newText: "b" },
+    ]);
+    const againA = withContent(toolCallMessage("c3", "edit", "Edit a", "completed"), [
+      { type: "diff", path: "/w/a.ts", newText: "a2" },
+    ]);
+    expect(agentEditedFiles([a, b, againA]).map((f) => f.path)).toEqual([
+      "/w/a.ts",
+      "/w/b.ts",
+    ]);
   });
 
   it("edit-kind locations count as touched files even without a diff", () => {
@@ -93,7 +120,22 @@ describe("agentEditedFiles", () => {
       },
     };
     const files = agentEditedFiles([message]);
-    expect(files).toEqual([{ path: "/w/b.ts" }]);
+    expect(files).toEqual([{ path: "/w/b.ts", edits: [] }]);
+  });
+
+  it("a location alongside a diff adds no second entry for the path", () => {
+    const base = toolCallMessage("c1", "edit", "Edit a", "completed");
+    const message = {
+      ...base,
+      toolCall: {
+        ...base.toolCall!,
+        content: [{ type: "diff" as const, path: "/w/a.ts", oldText: "1", newText: "2" }],
+        locations: [{ path: "/w/a.ts", line: 1 }],
+      },
+    };
+    expect(agentEditedFiles([message])).toEqual([
+      { path: "/w/a.ts", edits: [{ oldText: "1", newText: "2" }] },
+    ]);
   });
 
   it("legacy tool rows contribute nothing", () => {
