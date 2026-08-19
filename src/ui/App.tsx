@@ -34,10 +34,20 @@ import { useAppState } from "./useAppState";
 export function App({ context }: { context: AppContext }) {
   const state = useAppState(context.store);
   const tab = activeTab(state);
-  const [sidebarView, setSidebarView] = useState<SidebarView | null>("changes");
-  // Above ChatPanel, which is keyed by project id: a terminal must still
-  // be showing when you come back from another project.
-  const [rightPanel, setRightPanel] = useState<RightPanel>(null);
+  // Which panels each project shows. Above ChatPanel, which is keyed by
+  // project id and so remounts with empty state on every tab switch — a
+  // terminal must still be showing when you come back to the project you
+  // left it open on, and must NOT be showing on a project you never
+  // opened one on.
+  //
+  // Not persisted: a panel is where you left it this session, and a
+  // fresh start opens on Changes with nothing on the right.
+  const [sidebarViews, setSidebarViews] = useState<
+    Readonly<Record<string, SidebarView | null>>
+  >({});
+  const [rightPanels, setRightPanels] = useState<Readonly<Record<string, RightPanel>>>(
+    {},
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
   // The tab a close is waiting on an answer about, and the tabs a quit
   // is. Null in both cases means nothing was asked.
@@ -184,6 +194,26 @@ export function App({ context }: { context: AppContext }) {
   // and a document-level keydown effect; fresh arrows every render would
   // defeat the memo / re-register the listener on every streamed token.
   const activeProjectId = tab?.project.id ?? "";
+  // `null` is a real choice for the sidebar (closed), so the project
+  // that has never been touched is the one whose id is ABSENT from the
+  // map — not the one reading null.
+  const sidebarView =
+    activeProjectId in sidebarViews ? sidebarViews[activeProjectId] : "changes";
+  const rightPanel = rightPanels[activeProjectId] ?? null;
+  const selectSidebarView = useCallback(
+    (view: SidebarView | null) => {
+      if (!activeProjectId) return;
+      setSidebarViews((all) => ({ ...all, [activeProjectId]: view }));
+    },
+    [activeProjectId],
+  );
+  const selectRightPanel = useCallback(
+    (panel: RightPanel) => {
+      if (!activeProjectId) return;
+      setRightPanels((all) => ({ ...all, [activeProjectId]: panel }));
+    },
+    [activeProjectId],
+  );
   const respondPermission = useCallback(
     (requestId: string, optionId: string) =>
       void context.respondPermission.execute(activeProjectId, requestId, optionId),
@@ -298,10 +328,10 @@ export function App({ context }: { context: AppContext }) {
             else gitChangesCache.current.delete(projectId);
           }}
           sidebarView={sidebarView}
-          onSelectSidebarView={setSidebarView}
+          onSelectSidebarView={selectSidebarView}
           extensionPanels={extensionPanelsView}
           rightPanel={rightPanel}
-          onSelectRightPanel={setRightPanel}
+          onSelectRightPanel={selectRightPanel}
           shells={shells}
           onOpenSettings={() => setSettingsOpen(true)}
           loadHistory={(onRefresh) =>
@@ -319,7 +349,7 @@ export function App({ context }: { context: AppContext }) {
             // project's own terminal, which is also where its output
             // belongs — so show the panel on the way.
             if (isShellLine(prompt)) {
-              setRightPanel("terminal");
+              selectRightPanel("terminal");
               context.shells.runLine(tab.project.id, shellCommand(prompt));
               return;
             }

@@ -288,11 +288,11 @@ export function ChatPanel({
     : undefined;
 
   // Which right-hand panel this project actually shows. The choice is
-  // app-wide on purpose (a running terminal must survive a tab switch),
-  // but a plan is not: most projects have none, and an empty plan panel
-  // taking a third of the window is noise. So "plan" applies only where
-  // there is a plan — the same rule PlanBar follows — and the panel
-  // comes back on its own when you return to the project that has one.
+  // remembered per project, but a plan can go away underneath it — a new
+  // chat clears one — and an empty plan panel taking a third of the
+  // window is noise. So "plan" applies only where there is a plan (the
+  // same rule PlanBar follows), and the panel comes back on its own when
+  // the project has one again.
   // A build or a server holding one of this project's terminals — worth
   // saying on the button, because the panel it lives behind is closed.
   const shellRunning = tab.shells.some((shell) => shell.running && !shell.exit);
@@ -301,10 +301,9 @@ export function ChatPanel({
 
   // Worktrees are the main checkout's business: a linked worktree has no
   // siblings of its own to list, and "what is running where?" is a
-  // question you ask from the root folder. The sidebar choice is
-  // app-wide (same reason as above), so a view left open on the folder
-  // tab falls back to Changes here rather than to an empty column — and
-  // comes back on its own when you return to the tab that has it.
+  // question you ask from the root folder. A worktree tab that inherited
+  // the Worktrees view — from the default, or from a project that later
+  // became one — falls back to Changes rather than to an empty column.
   const isWorktreeTab = tab.project.worktreeOf !== undefined;
   const sidebarViews = isWorktreeTab ? WORKTREE_TAB_SIDEBAR_VIEWS : ALL_SIDEBAR_VIEWS;
   // Extension views are never in the builtin list — they pass through,
