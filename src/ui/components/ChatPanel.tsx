@@ -160,6 +160,9 @@ interface Props {
   onGitUnstage: (path: string) => Promise<GitActionResult>;
   onGitStageAll: () => Promise<GitActionResult>;
   onGitUnstageAll: () => Promise<GitActionResult>;
+  /** Throw away one file's unstaged changes, or all of them. */
+  onGitDiscard: (path: string) => Promise<GitActionResult>;
+  onGitDiscardAll: () => Promise<GitActionResult>;
   onGitCommitPush: (message: string) => Promise<GitActionResult>;
   onGitCheckout: (branch: string) => Promise<GitActionResult>;
   onGitPush: () => Promise<GitActionResult>;
@@ -250,6 +253,8 @@ export function ChatPanel({
   onGitUnstage,
   onGitStageAll,
   onGitUnstageAll,
+  onGitDiscard,
+  onGitDiscardAll,
   onGitCommitPush,
   onGitCheckout,
   onGitPush,
@@ -601,6 +606,8 @@ export function ChatPanel({
                   onUnstage={onGitUnstage}
                   onStageAll={onGitStageAll}
                   onUnstageAll={onGitUnstageAll}
+                  onDiscard={onGitDiscard}
+                  onDiscardAll={onGitDiscardAll}
                   onCommitPush={onGitCommitPush}
                   onOpenBranchPicker={() => setBranchPickerOpen(true)}
                   onPush={onGitPush}

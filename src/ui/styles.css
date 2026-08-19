@@ -3272,6 +3272,21 @@ body {
   cursor: default;
 }
 
+/* Discard destroys work and sits under the same kebab as "Show diff".
+   Colour is what stops it being picked by muscle memory. */
+.file-menu__option--danger,
+.file-menu__option--danger .file-menu__icon {
+  color: var(--error);
+}
+
+.file-menu__option--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+}
+
+.file-menu__option--danger:hover:not(:disabled) .file-menu__icon {
+  color: var(--error);
+}
+
 .file-menu__icon {
   flex: none;
   display: inline-flex;
@@ -3794,6 +3809,11 @@ body {
 .changes__title-action:hover:not(:disabled) {
   background: var(--border);
   color: var(--text);
+}
+
+.changes__title-action--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 20%, transparent);
+  color: var(--error);
 }
 
 .changes__title-action:disabled {

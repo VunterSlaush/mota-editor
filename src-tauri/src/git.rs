@@ -212,6 +212,52 @@ pub async fn git_unstage_all(project_path: String) -> Result<(), String> {
     run_git(&project_path, &["reset", "--quiet"]).await.map(|_| ())
 }
 
+/// Throw away one file's unstaged changes. Irreversible — there is no
+/// stash and no reflog behind this, which is why the UI asks first.
+#[tauri::command]
+pub async fn git_discard(project_path: String, path: String) -> Result<(), String> {
+    let tracked = is_tracked(&project_path, &path).await;
+    let args = vcs::discard_file_args(&path, tracked);
+    run_git(&project_path, &borrowed(&args)).await.map(|_| ())
+}
+
+/// Does git have this path in its index? Untracked files answer no, and
+/// are removed rather than restored. Asked of git rather than inferred
+/// from the status label the UI happens to be showing: the panel's data
+/// can be seconds stale, and this decides between restoring a file and
+/// deleting it.
+async fn is_tracked(project_path: &str, path: &str) -> bool {
+    run_git(project_path, &["ls-files", "--", path])
+        .await
+        .map(|out| !out.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Throw away every unstaged change: tracked files go back to the index,
+/// untracked ones are removed. Staged work is untouched — the section
+/// this serves says "not staged".
+#[tauri::command]
+pub async fn git_discard_all(project_path: String) -> Result<(), String> {
+    // `restore -- .` fails outright when nothing tracked has changed
+    // ("did not match any file(s) known to git"), which is a normal
+    // state, not an error. Asking first is cheaper than deciding which
+    // failures to swallow.
+    let changed = run_git(&project_path, &["diff", "--name-only"])
+        .await
+        .unwrap_or_default();
+    if !changed.trim().is_empty() {
+        let args = vcs::discard_all_restore_args();
+        run_git(&project_path, &borrowed(&args)).await?;
+    }
+    let args = vcs::discard_all_clean_args();
+    run_git(&project_path, &borrowed(&args)).await.map(|_| ())
+}
+
+/// `run_git` takes `&[&str]`; the pure builders return owned strings.
+fn borrowed(args: &[String]) -> Vec<&str> {
+    args.iter().map(String::as_str).collect()
+}
+
 #[tauri::command]
 pub async fn git_commit(project_path: String, message: String) -> Result<String, String> {
     let trimmed = message.trim();
@@ -455,5 +501,130 @@ fn summary(output: String) -> String {
         "Done.".to_owned()
     } else {
         tail(trimmed, 2)
+    }
+}
+
+/// Discard is the one verb here with no way back — no stash, no reflog,
+/// nothing to undo it with. These run against a real repository, because
+/// the cost of getting the argv subtly wrong is someone's afternoon.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        run_git(&dir.to_string_lossy(), args)
+            .await
+            .unwrap_or_else(|e| panic!("git {args:?} failed: {e}"))
+    }
+
+    /// Every shape the "Not staged" section can hold at once: a file
+    /// that is staged AND dirty, a plain dirty file, an untracked file,
+    /// an untracked directory, and an ignored file that must survive.
+    async fn repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_owned();
+        git(&path, &["init", "--quiet", "."]).await;
+        git(&path, &["config", "user.email", "test@example.com"]).await;
+        git(&path, &["config", "user.name", "Test"]).await;
+        git(&path, &["config", "core.autocrlf", "false"]).await;
+        std::fs::write(path.join("tracked.txt"), "one\n").unwrap();
+        std::fs::write(path.join("both.txt"), "keep\n").unwrap();
+        std::fs::write(path.join(".gitignore"), "ignored/\n").unwrap();
+        std::fs::create_dir(path.join("ignored")).unwrap();
+        std::fs::write(path.join("ignored").join(".env"), "secret\n").unwrap();
+        git(&path, &["add", "-A"]).await;
+        git(&path, &["commit", "--quiet", "-m", "init"]).await;
+
+        std::fs::write(path.join("both.txt"), "STAGED\n").unwrap();
+        git(&path, &["add", "both.txt"]).await;
+        std::fs::write(path.join("both.txt"), "STAGED-then-dirty\n").unwrap();
+        std::fs::write(path.join("tracked.txt"), "DIRTY\n").unwrap();
+        std::fs::write(path.join("untracked.txt"), "new\n").unwrap();
+        std::fs::create_dir(path.join("newdir")).unwrap();
+        std::fs::write(path.join("newdir").join("deep.txt"), "deep\n").unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn discarding_a_tracked_file_restores_it() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard(path, "tracked.txt".to_owned()).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(),
+            "one\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_an_untracked_file_removes_it() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard(path, "untracked.txt".to_owned()).await.unwrap();
+        assert!(!dir.path().join("untracked.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn discarding_one_file_leaves_every_other_alone() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard(path, "tracked.txt".to_owned()).await.unwrap();
+        assert!(dir.path().join("untracked.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("both.txt")).unwrap(),
+            "STAGED-then-dirty\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_keeps_what_was_staged() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path.clone()).await.unwrap();
+
+        // The unstaged half of a staged-and-dirty file goes; the staged
+        // half stays. "Not staged" must mean exactly that.
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("both.txt")).unwrap(),
+            "STAGED\n"
+        );
+        assert_eq!(
+            git(dir.path(), &["status", "--porcelain"]).await.trim(),
+            "M  both.txt"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_removes_untracked_files_and_their_folders() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path).await.unwrap();
+        assert!(!dir.path().join("untracked.txt").exists());
+        assert!(!dir.path().join("newdir").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(),
+            "one\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_never_touches_an_ignored_file() {
+        // `.env`, `node_modules/`, build caches. git was told to leave
+        // them alone and so is this button.
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("ignored").join(".env")).unwrap(),
+            "secret\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_on_a_clean_tree_is_not_an_error() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path.clone()).await.unwrap();
+        git_discard_all(path).await.expect("a second pass should be a no-op");
     }
 }

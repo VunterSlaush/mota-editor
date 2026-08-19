@@ -256,6 +256,47 @@ pub fn parse_ls_files(output: &str) -> Vec<String> {
         .collect()
 }
 
+/// How to throw away one file's unstaged changes.
+///
+/// The two halves of "not staged" need opposite verbs: a tracked file is
+/// *restored* from the index, an untracked one has never been in the
+/// index and can only be *removed*. Getting that backwards would either
+/// do nothing or delete the wrong thing, so it is decided here, in the
+/// open, and tested.
+///
+/// `--` before the path is not optional: a file named like a branch
+/// would otherwise be read as one.
+pub fn discard_file_args(path: &str, tracked: bool) -> Vec<String> {
+    if tracked {
+        vec!["restore".to_owned(), "--".to_owned(), path.to_owned()]
+    } else {
+        vec![
+            "clean".to_owned(),
+            "-f".to_owned(),
+            "--".to_owned(),
+            path.to_owned(),
+        ]
+    }
+}
+
+/// Throw away every unstaged change, in the same two halves.
+///
+/// `restore` takes the work tree back to the INDEX, not to HEAD, so
+/// anything already staged survives — which is what "discard the changes
+/// that are not staged" has to mean.
+///
+/// `clean -fd` removes untracked files and the directories that held
+/// them. Deliberately **no `-x`**: ignored files are `.env`,
+/// `node_modules/`, build output — things git was told to leave alone,
+/// and nothing a "discard my edits" button should be able to destroy.
+pub fn discard_all_restore_args() -> Vec<String> {
+    vec!["restore".to_owned(), "--".to_owned(), ".".to_owned()]
+}
+
+pub fn discard_all_clean_args() -> Vec<String> {
+    vec!["clean".to_owned(), "-f".to_owned(), "-d".to_owned()]
+}
+
 /// Why a git command failed, said first in words the user can act on,
 /// with git's own output kept underneath.
 ///
@@ -381,6 +422,50 @@ fn is_noise(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tracked_file_is_restored_and_an_untracked_one_removed() {
+        assert_eq!(
+            discard_file_args("src/main.rs", true),
+            vec!["restore", "--", "src/main.rs"]
+        );
+        assert_eq!(
+            discard_file_args("src/new.rs", false),
+            vec!["clean", "-f", "--", "src/new.rs"]
+        );
+    }
+
+    #[test]
+    fn a_path_is_always_behind_a_double_dash() {
+        // Otherwise a file named like a branch is read as a revision.
+        for args in [
+            discard_file_args("main", true),
+            discard_file_args("main", false),
+            discard_all_restore_args(),
+        ] {
+            let dashes = args.iter().position(|a| a == "--").expect("no --");
+            assert_eq!(args[dashes + 1], *args.last().unwrap());
+        }
+    }
+
+    #[test]
+    fn discarding_everything_never_reaches_ignored_files() {
+        // `-x` would take .env, node_modules and every build cache with
+        // it. A "discard my edits" button must not be able to do that.
+        let args = discard_all_clean_args();
+        assert!(!args.contains(&"-x".to_owned()), "{args:?}");
+        assert!(!args.contains(&"-X".to_owned()), "{args:?}");
+        assert_eq!(args, vec!["clean", "-f", "-d"]);
+    }
+
+    #[test]
+    fn discarding_everything_restores_to_the_index_not_to_head() {
+        // Staged work must survive: the section says "not staged".
+        let args = discard_all_restore_args();
+        assert!(!args.contains(&"--source".to_owned()), "{args:?}");
+        assert!(!args.iter().any(|a| a.contains("HEAD")), "{args:?}");
+        assert!(!args.contains(&"--staged".to_owned()), "{args:?}");
+    }
 
     /// What git actually prints when a push is behind the remote — the
     /// case that started this: four lines of hints, and the reason above

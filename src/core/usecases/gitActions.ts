@@ -47,6 +47,24 @@ export class GitActions {
     );
   }
 
+  /**
+   * Throw one file's unstaged changes away. The only verb here that
+   * cannot be taken back — no stash, no reflog — so the panel asks
+   * before calling it.
+   */
+  async discard(tabId: string, path: string): Promise<GitActionResult> {
+    return this.run(tabId, "file", (projectPath) =>
+      this.git.discard(projectPath, path).then(() => "Discarded."),
+    );
+  }
+
+  /** The same for every unstaged change at once. */
+  async discardAll(tabId: string): Promise<GitActionResult> {
+    return this.run(tabId, "file", (projectPath) =>
+      this.git.discardAll(projectPath).then(() => "Discarded all unstaged changes."),
+    );
+  }
+
   /** Commit staged changes, then push — one gesture, stops on failure. */
   async commitAndPush(tabId: string, message: string): Promise<GitActionResult> {
     return this.run(tabId, "commit", async (projectPath) => {

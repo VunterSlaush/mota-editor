@@ -68,6 +68,14 @@ class FakeGit implements GitPort {
   async unstageAll(): Promise<void> {
     this.calls.push("unstageAll");
   }
+  async discard(_p: string, path: string): Promise<void> {
+    if (this.failDiscardWith) throw new Error(this.failDiscardWith);
+    this.calls.push(`discard:${path}`);
+  }
+  async discardAll(): Promise<void> {
+    this.calls.push("discardAll");
+  }
+  failDiscardWith: string | null = null;
   async commit(_p: string, message: string): Promise<string> {
     if (this.failCommitWith) throw new Error(this.failCommitWith);
     this.calls.push(`commit:${message}`);
@@ -185,6 +193,32 @@ describe("git use cases", () => {
     await actions.stageAll("t1");
     await actions.unstageAll("t1");
     expect(git.calls).toEqual(["stageAll", "unstageAll"]);
+  });
+
+  it("discards one file, and everything, through the port", async () => {
+    const { git, actions } = setup();
+    await actions.discard("t1", "a.rs");
+    await actions.discardAll("t1");
+    expect(git.calls).toEqual(["discard:a.rs", "discardAll"]);
+  });
+
+  it("says what a discard did, so the panel has something to show", async () => {
+    const { actions } = setup();
+    // Every other file verb resolves with "" and shows no notice. A
+    // discard destroys work, so it says so — the difference between
+    // "nothing happened" and "it happened and you cannot undo it".
+    expect((await actions.discard("t1", "a.rs")).message).toBe("Discarded.");
+    expect((await actions.discardAll("t1")).message).toBe(
+      "Discarded all unstaged changes.",
+    );
+  });
+
+  it("a discard git refuses comes back as a message, not an exception", async () => {
+    const { git, actions } = setup();
+    git.failDiscardWith = "error: pathspec 'gone.rs' did not match any file(s)";
+    const result = await actions.discard("t1", "gone.rs");
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("did not match");
   });
 
   it("the verb in flight is on the tab, so leaving the panel keeps it", async () => {

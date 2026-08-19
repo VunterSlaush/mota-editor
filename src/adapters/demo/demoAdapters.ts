@@ -408,6 +408,15 @@ export class DemoGit implements GitPort {
     for (const path of this.staged) this.unstaged.add(path);
     this.staged.clear();
   }
+  // Discard drops the change without staging it — the demo's whole
+  // model of a file is "which list is it in", and discarding is the one
+  // verb that answers "neither".
+  async discard(_p: string, path: string) {
+    this.unstaged.delete(path);
+  }
+  async discardAll() {
+    this.unstaged.clear();
+  }
   async commit(): Promise<string> {
     this.staged.clear();
     return "1 file changed";

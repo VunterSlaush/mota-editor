@@ -96,6 +96,17 @@ export interface GitPort {
   stageAll(projectPath: string): Promise<void>;
   /** Empty the index, leaving the working tree untouched. */
   unstageAll(projectPath: string): Promise<void>;
+  /**
+   * Throw away one file's unstaged changes: a tracked file goes back to
+   * the index, an untracked one is deleted. Irreversible — nothing
+   * stashes it first.
+   */
+  discard(projectPath: string, path: string): Promise<void>;
+  /**
+   * The same for every unstaged change at once. Staged work survives,
+   * and so do ignored files.
+   */
+  discardAll(projectPath: string): Promise<void>;
   /** Commit staged changes. Resolves with a short summary. */
   commit(projectPath: string, message: string): Promise<string>;
   checkout(projectPath: string, branch: string): Promise<string>;
