@@ -101,6 +101,9 @@ async fn run_headless_analysis(
         attachments: Vec::new(),
         model: None,
         effort: None,
+        // No subtask scope: the analysis run belongs to no tab, and it
+        // reads the command's markdown rather than the project's files.
+        subtask: None,
     };
     let command = provider.build_command(&request);
     let child = runner::spawn(&command, &project)

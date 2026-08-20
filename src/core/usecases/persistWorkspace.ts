@@ -16,6 +16,8 @@ export function toPersisted(state: AppState): PersistedWorkspace {
       permission: t.project.permission,
       model: t.project.model,
       effort: t.project.effort,
+      label: t.project.label,
+      color: t.project.color,
       verbose: t.project.verbose,
       providerSessions: t.project.providerSessions,
       // The claim survives a restart that never reached a prompt, so a
@@ -24,6 +26,8 @@ export function toPersisted(state: AppState): PersistedWorkspace {
       mcpOverrides: t.project.mcpOverrides,
       provisioningOverride: t.project.provisioningOverride,
       worktreeOf: t.project.worktreeOf,
+      subtask: t.project.subtask,
+      boundaryPresets: t.project.boundaryPresets,
     })),
     activeTabId: state.activeTabId,
     settings: state.settings,

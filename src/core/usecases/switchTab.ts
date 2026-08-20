@@ -18,6 +18,21 @@ export class SwitchTab {
     this.store.dispatch({ type: "tab/activated", tabId });
     await persistWorkspace(this.store.getState(), this.workspaceStore);
   }
+
+  /**
+   * Activate the tab at a position on the strip, counting from zero —
+   * what the Ctrl+<digit> shortcuts ask for.
+   *
+   * A position past the end does nothing. Ctrl+5 with four tabs open is
+   * a miss, and landing on the last tab instead would make the shortcut
+   * mean something different depending on how many tabs happen to be
+   * open — which is the one thing a positional binding must never do.
+   */
+  async byIndex(index: number): Promise<void> {
+    const tab = this.store.getState().tabs[index];
+    if (!tab) return;
+    await this.execute(tab.project.id);
+  }
 }
 
 /** Use case — choose which AI provider drives a project's chat. */
@@ -35,7 +50,7 @@ export class SelectProvider {
   }
 }
 
-/** Use case — choose the agent's mode for a tab (agent / plan / debug). */
+/** Use case — choose the agent's mode for a tab (agent / plan / ask / debug). */
 export class SelectMode {
   constructor(
     private readonly store: Store,

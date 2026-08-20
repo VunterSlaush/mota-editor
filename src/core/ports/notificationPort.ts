@@ -15,4 +15,8 @@ export interface NotificationPort {
     providerName: string,
     tabActive: boolean,
   ): Promise<void>;
+
+  /** A plain notification with caller-supplied text (extensions use
+   *  this); same best-effort contract as `turnCompleted`. */
+  show(title: string, body: string): Promise<void>;
 }

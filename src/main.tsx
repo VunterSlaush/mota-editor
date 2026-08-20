@@ -2,8 +2,12 @@ import { IconContext } from "@phosphor-icons/react";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./ui/App";
+import { blockReloadShortcuts } from "./ui/blockReload";
 import { createAppContext } from "./wiring/context";
 import "./ui/styles.css";
+
+// Before anything else can register a key handler — see blockReload.ts.
+blockReloadShortcuts();
 
 const context = createAppContext();
 void context.restoreWorkspace.execute();

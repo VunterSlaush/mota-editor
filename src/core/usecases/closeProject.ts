@@ -1,6 +1,8 @@
+import { tabIsWorking } from "../entities/tabStatus";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { ShellPort } from "../ports/shellPort";
 import type { WorkspaceStore } from "../ports/workspacePort";
+import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import { persistWorkspace } from "./persistWorkspace";
 
@@ -16,6 +18,17 @@ export class CloseProject {
     private readonly workspaceStore: WorkspaceStore,
     private readonly shells: ShellPort,
   ) {}
+
+  /**
+   * Whether closing this tab would throw work away — a turn running, or
+   * prompts queued behind it. A query, so the view can ask before it
+   * commits; `execute` still closes whatever the answer was, because by
+   * then the decision has been made.
+   */
+  needsConfirmation(tabId: string): boolean {
+    const tab = tabById(this.store.getState(), tabId);
+    return tab !== null && tabIsWorking(tab);
+  }
 
   async execute(tabId: string): Promise<void> {
     // Terminals first: on Windows a live shell holds a handle on its

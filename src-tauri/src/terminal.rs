@@ -94,13 +94,16 @@ impl TerminalHandle {
                 use std::os::windows::process::CommandExt;
                 command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
             }
-            let _ = command.spawn();
+            // Waited on, like shell_session's: an agent terminal is
+            // cwd'd into the project too, and a worktree cannot be
+            // deleted out from under a process that is still running.
+            let _ = command.status();
         }
         #[cfg(not(windows))]
         {
             let _ = std::process::Command::new("kill")
                 .args(["-9", &pid.to_string()])
-                .spawn();
+                .status();
         }
     }
 }

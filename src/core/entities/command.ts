@@ -1,11 +1,15 @@
+import {
+  CREATE_EXTENSION_COMMAND,
+  CREATE_EXTENSION_DESCRIPTION,
+} from "./createExtensionGuide";
 import type { ProviderId } from "./provider";
 
 /**
  * Entities layer — a slash command the user can send to an agent.
  */
 /** Where a command comes from: the CLI itself, the project's command
- *  folder, or the user's home command folder. */
-export type CommandSource = "builtin" | "project" | "user";
+ *  folder, the user's home command folder, or an installed extension. */
+export type CommandSource = "builtin" | "project" | "user" | "extension";
 
 export interface CommandInfo {
   readonly name: string;
@@ -17,15 +21,44 @@ export interface CommandInfo {
    * script whose markdown has since changed.
    */
   readonly contentHash?: string;
+  /** Which extension contributed it, for `source: "extension"`. */
+  readonly extensionId?: string;
 }
 
 /**
- * Built-in commands each CLI understands in headless mode. Custom
- * commands (project/user command folders) are discovered at runtime and
- * merged by the ListCommands use case.
+ * Mota's own command, available with every provider: it never reaches
+ * the agent as a slash command — SendPrompt expands it into the full
+ * scaffolding brief (`createExtensionPrompt`) client-side.
+ */
+const CREATE_EXTENSION: CommandInfo = {
+  name: CREATE_EXTENSION_COMMAND,
+  description: CREATE_EXTENSION_DESCRIPTION,
+  source: "builtin",
+};
+
+/**
+ * Start a fresh conversation. Mota's own too, and for the same reason:
+ * clearing is something the app does to itself. Sending it on would ask
+ * the agent to clear a session that is about to be ended anyway, and the
+ * providers that have no such command would take it for a prompt.
+ */
+export const CLEAR_COMMAND = "/clear";
+
+const CLEAR: CommandInfo = {
+  name: CLEAR_COMMAND,
+  description: "Start a new chat — the current one stays in History",
+  source: "builtin",
+};
+
+/**
+ * Built-in commands each CLI understands in headless mode (plus Mota's
+ * own, above). Custom commands (project/user command folders) are
+ * discovered at runtime and merged by the ListCommands use case.
  */
 export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[]>> = {
   claude: [
+    CREATE_EXTENSION,
+    CLEAR,
     {
       name: "/init",
       description: "Create or refresh CLAUDE.md with project guidance",
@@ -43,6 +76,8 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
   ],
   codex: [
+    CREATE_EXTENSION,
+    CLEAR,
     {
       name: "/init",
       description: "Create AGENTS.md with project guidance",
@@ -50,7 +85,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
-  gemini: [],
+  gemini: [CREATE_EXTENSION, CLEAR],
 };
 
 /**

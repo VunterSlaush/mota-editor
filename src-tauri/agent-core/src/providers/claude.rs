@@ -2,12 +2,14 @@ use serde_json::Value;
 
 use crate::event::AgentEvent;
 use crate::provider::{summarize_tool_input, Provider, TurnCommand};
+use crate::scope::effective_permission;
 use crate::turn::{effective_prompt, external_attachment_dirs, Mode, Permission, TurnRequest};
 
 /// Adapter for Anthropic's Claude Code CLI in headless mode:
 /// `claude -p <prompt> --output-format stream-json --verbose [--resume <id>]`
 ///
-/// Mode mapping: plan is native (`--permission-mode plan`); debug is a
+/// Mode mapping: plan is native (`--permission-mode plan`); ask borrows
+/// that same read-only tier and adds its own preamble; debug is a
 /// prompt preamble. Permission bypass maps to
 /// `--dangerously-skip-permissions`, auto to `--permission-mode auto` —
 /// the CLI's own permission system approves safe actions and asks about
@@ -32,8 +34,15 @@ impl Provider for Claude {
             "stream-json".to_owned(),
             "--verbose".to_owned(),
         ];
-        match (request.mode, request.permission) {
-            (Mode::Plan, _) => {
+        // The scope caps the permission first (read-only forces manual,
+        // boundary strips bypass), so a scoped tab never reaches the
+        // skip-permissions flag. Deliberately NOT mapped to plan mode:
+        // plan changes what the agent does, not just what it may touch.
+        match (request.mode, effective_permission(request.permission, request.subtask.as_ref())) {
+            // Ask is read-only too, and plan is the only read-only
+            // permission mode the CLI has — the preamble is what keeps
+            // the two apart. See `turn::mode_preamble`.
+            (Mode::Plan | Mode::Ask, _) => {
                 args.push("--permission-mode".to_owned());
                 args.push("plan".to_owned());
             }
@@ -164,6 +173,22 @@ mod tests {
     }
 
     #[test]
+    fn ask_mode_is_read_only_too_and_still_carries_its_preamble() {
+        let request = TurnRequest {
+            mode: Mode::Ask,
+            permission: Permission::Bypass,
+            ..test_request("where is auth handled?")
+        };
+        let args = Claude.build_command(&request).args;
+        assert!(args.contains(&"--permission-mode".to_owned()));
+        assert!(args.contains(&"plan".to_owned()));
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+        // Unlike plan, the preamble stays: the flag is plan's, and only
+        // the wording tells the agent to answer instead of planning.
+        assert!(args[1].starts_with("You are in ASK MODE."));
+    }
+
+    #[test]
     fn bypass_permission_adds_the_skip_flag() {
         let request = TurnRequest { permission: Permission::Bypass, ..test_request("go") };
         assert!(Claude
@@ -191,6 +216,36 @@ mod tests {
         let args = Claude.build_command(&request).args;
         assert!(args.contains(&"plan".to_owned()));
         assert!(!args.contains(&"auto".to_owned()));
+    }
+
+    #[test]
+    fn a_read_only_subtask_suppresses_bypass_and_states_the_scope() {
+        let request = TurnRequest {
+            permission: Permission::Bypass,
+            subtask: Some(crate::scope::SubtaskScope::ReadOnly),
+            ..test_request("look around")
+        };
+        let args = Claude.build_command(&request).args;
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+        // Not plan mode: the scope restricts writes, not the behavior.
+        assert!(!args.contains(&"plan".to_owned()));
+        assert!(args[1].contains("READ-ONLY"));
+        assert!(args[1].ends_with("look around"));
+    }
+
+    #[test]
+    fn a_boundary_subtask_lists_its_folders_and_caps_bypass_to_auto() {
+        let request = TurnRequest {
+            permission: Permission::Bypass,
+            subtask: Some(crate::scope::SubtaskScope::Boundary {
+                boundaries: vec!["apps/web".to_owned()],
+            }),
+            ..test_request("edit the web app")
+        };
+        let args = Claude.build_command(&request).args;
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+        assert!(args.contains(&"auto".to_owned()));
+        assert!(args[1].contains("- apps/web"));
     }
 
     #[test]

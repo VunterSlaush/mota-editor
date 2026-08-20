@@ -196,13 +196,17 @@ pub fn native_mode_id(
     permission: Permission,
 ) -> Option<&'static str> {
     match (provider_id, mode) {
-        ("claude", Mode::Plan) => Some("plan"),
+        // Ask rides plan mode's enforcement: what both need from the CLI
+        // is "read anything, write nothing", and that is the only
+        // read-only tier either vendor exposes. What separates them is
+        // `turn::mode_preamble`, which Ask keeps even here.
+        ("claude", Mode::Plan | Mode::Ask) => Some("plan"),
         // Claude's native `auto`: its own permission system approves what
         // it calls safe and asks about the rest — exactly the app's Auto
         // policy, judged by the CLI instead of approximated here.
         ("claude", _) if permission == Permission::Auto => Some("auto"),
         ("claude", _) => Some("default"),
-        ("codex", Mode::Plan) => Some("read-only"),
+        ("codex", Mode::Plan | Mode::Ask) => Some("read-only"),
         ("codex", _) => Some("agent"),
         _ => None,
     }
@@ -596,16 +600,30 @@ pub fn slice_lines(text: &str, line: Option<u64>, limit: Option<u64>) -> String 
 
 /// The prompt request for one turn: mode preamble folded into the text
 /// block (skipped when the mode is enforced natively via
-/// `session/set_mode`); attachments as baseline `resource_link` blocks.
+/// `session/set_mode`), then the subtask scope, then the user's prompt;
+/// attachments as baseline `resource_link` blocks.
+///
+/// The scope preamble is NOT skipped for a native mode. It is the only
+/// layer every provider gets (ADR-0014), and this is the transport real
+/// turns actually take — leaving it to `turn::effective_prompt` would
+/// have stated the scope on the headless fallback alone.
 pub fn prompt_request_for_provider(
     id: i64,
     session_id: &str,
     provider_id: &str,
     request: &TurnRequest,
 ) -> Value {
-    let text = match mode_preamble(request.mode, plan_is_native(provider_id)) {
-        Some(preamble) => format!("{preamble}\n\n{}", request.prompt),
-        None => request.prompt.clone(),
+    let mut preambles: Vec<String> = Vec::new();
+    if let Some(preamble) = mode_preamble(request.mode, plan_is_native(provider_id)) {
+        preambles.push(preamble.to_owned());
+    }
+    if let Some(scope) = crate::scope::scope_preamble(request.subtask.as_ref()) {
+        preambles.push(scope);
+    }
+    let text = if preambles.is_empty() {
+        request.prompt.clone()
+    } else {
+        format!("{}\n\n{}", preambles.join("\n\n"), request.prompt)
     };
     let mut blocks = vec![json!({ "type": "text", "text": text })];
     for path in &request.attachments {
@@ -1811,6 +1829,31 @@ mod tests {
     }
 
     #[test]
+    fn the_scope_reaches_the_wire_even_when_the_mode_is_native() {
+        // This is the transport real turns take. The mode preamble stands
+        // down for Claude's native plan mode; the scope never does, or
+        // the advisory layer would exist only on the headless fallback.
+        let request = TurnRequest {
+            mode: Mode::Plan,
+            subtask: Some(crate::scope::SubtaskScope::Boundary {
+                boundaries: vec!["apps/web".to_owned()],
+            }),
+            ..test_request("ship it")
+        };
+        let claude = prompt_request_for_provider(3, "s", "claude", &request);
+        let text = claude["params"]["prompt"][0]["text"].as_str().unwrap();
+        assert!(text.contains("- apps/web"));
+        assert!(text.ends_with("ship it"));
+    }
+
+    #[test]
+    fn an_unscoped_turn_still_sends_the_bare_prompt() {
+        let request = test_request("hello");
+        let claude = prompt_request_for_provider(3, "s", "claude", &request);
+        assert_eq!(claude["params"]["prompt"][0]["text"], "hello");
+    }
+
+    #[test]
     fn native_mode_ids_match_the_adapters() {
         let manual = Permission::Manual;
         assert_eq!(native_mode_id("claude", Mode::Plan, manual), Some("plan"));
@@ -1823,6 +1866,25 @@ mod tests {
         assert_eq!(native_mode_id("claude", Mode::Agent, Permission::Auto), Some("auto"));
         assert_eq!(native_mode_id("claude", Mode::Plan, Permission::Auto), Some("plan"));
         assert_eq!(native_mode_id("codex", Mode::Agent, Permission::Auto), Some("agent"));
+        // Ask borrows the read-only tier, and must keep it even under a
+        // permission policy that would otherwise hand it write access.
+        assert_eq!(native_mode_id("claude", Mode::Ask, manual), Some("plan"));
+        assert_eq!(native_mode_id("claude", Mode::Ask, Permission::Auto), Some("plan"));
+        assert_eq!(native_mode_id("claude", Mode::Ask, Permission::Bypass), Some("plan"));
+        assert_eq!(native_mode_id("codex", Mode::Ask, manual), Some("read-only"));
+        assert_eq!(native_mode_id("codex", Mode::Ask, Permission::Bypass), Some("read-only"));
+    }
+
+    #[test]
+    fn ask_mode_keeps_its_preamble_on_a_native_provider() {
+        // Plan mode's preamble is dropped for Claude because the session
+        // mode enforces it. Ask's must not be: the enforcement it
+        // borrows is plan's, and the wording is all that says otherwise.
+        let request = TurnRequest { mode: Mode::Ask, ..test_request("why is this slow?") };
+        let claude = prompt_request_for_provider(3, "s", "claude", &request);
+        let text = claude["params"]["prompt"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("You are in ASK MODE."));
+        assert!(text.ends_with("why is this slow?"));
     }
 
     #[test]

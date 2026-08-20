@@ -5,8 +5,12 @@
 mod acp_session;
 mod app_badge;
 mod billing_log;
+mod boundary_suggest;
 mod command_discovery;
 mod commands;
+mod extension_discovery;
+mod extension_host;
+mod fs_confine;
 mod mcp_probe;
 mod git;
 mod optimize;
@@ -24,6 +28,7 @@ mod worktree;
 
 use acp_session::AcpSessions;
 use commands::RunningTurns;
+use extension_host::ExtensionHost;
 use shell_session::ShellSessions;
 
 pub fn run() {
@@ -58,6 +63,7 @@ pub fn run() {
         .manage(AcpSessions::default())
         .manage(worktree::Provisioning::default())
         .manage(ShellSessions::default())
+        .manage(ExtensionHost::default())
         .invoke_handler(tauri::generate_handler![
             commands::start_turn,
             commands::warm_session,
@@ -72,9 +78,11 @@ pub fn run() {
             commands::list_custom_commands,
             app_badge::set_app_badge,
             commands::open_external,
+            commands::open_extensions_dir,
             commands::open_path,
             commands::save_pasted_image,
             provider_probe::probe_provider,
+            boundary_suggest::suggest_boundaries,
             sign_in::open_provider_login,
             git::git_status,
             git::git_log,
@@ -84,6 +92,10 @@ pub fn run() {
             git::git_diff,
             git::git_stage,
             git::git_unstage,
+            git::git_stage_all,
+            git::git_unstage_all,
+            git::git_discard,
+            git::git_discard_all,
             git::git_commit,
             git::git_branches,
             git::git_upstream,
@@ -111,6 +123,7 @@ pub fn run() {
             commands::save_workspace,
             history_file::save_session,
             history_file::list_sessions,
+            history_file::session_keywords,
             history_file::load_session,
             history_file::delete_session,
             history_file::list_session_stats,
@@ -120,6 +133,15 @@ pub fn run() {
             optimize::optimize_command,
             optimize::rewrite_command,
             optimize::save_command_copy,
+            extension_host::extensions_list,
+            extension_host::extension_enable,
+            extension_host::extension_disable,
+            extension_host::extension_invoke_command,
+            extension_host::extension_panel_load,
+            extension_host::extension_panel_action,
+            extension_host::extension_publish_event,
+            extension_host::extension_respond,
+            extension_host::extension_read_log,
         ])
         .build(tauri::generate_context!())
         .expect("error while running mota-editor")
@@ -133,6 +155,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 use tauri::Manager;
                 app.state::<AcpSessions>().shutdown_all();
+                app.state::<ExtensionHost>().shutdown_all();
                 // The user's terminals too — a shell tree survives the
                 // window closing unless it is felled deliberately.
                 app.state::<ShellSessions>().kill_all();

@@ -92,6 +92,21 @@ export interface GitPort {
   ): Promise<string>;
   stage(projectPath: string, path: string): Promise<void>;
   unstage(projectPath: string, path: string): Promise<void>;
+  /** Stage every change in the working tree, deletions included. */
+  stageAll(projectPath: string): Promise<void>;
+  /** Empty the index, leaving the working tree untouched. */
+  unstageAll(projectPath: string): Promise<void>;
+  /**
+   * Throw away one file's unstaged changes: a tracked file goes back to
+   * the index, an untracked one is deleted. Irreversible — nothing
+   * stashes it first.
+   */
+  discard(projectPath: string, path: string): Promise<void>;
+  /**
+   * The same for every unstaged change at once. Staged work survives,
+   * and so do ignored files.
+   */
+  discardAll(projectPath: string): Promise<void>;
   /** Commit staged changes. Resolves with a short summary. */
   commit(projectPath: string, message: string): Promise<string>;
   checkout(projectPath: string, branch: string): Promise<string>;
@@ -105,7 +120,8 @@ export interface GitPort {
   worktrees(projectPath: string): Promise<GitWorktree[]>;
   /**
    * Create a worktree at an absolute path. Resolves with a summary.
-   * `remote` is only consulted by the "remote" mode.
+   * `remote` is only consulted by the "remote" mode, `base` only by
+   * "new" — each mode's start point, named where it means something.
    */
   worktreeAdd(
     projectPath: string,
@@ -113,6 +129,12 @@ export interface GitPort {
     branch: string,
     mode: WorktreeAddMode,
     remote: string,
+    /**
+     * Where a "new" branch starts: a branch name, or "" for the asking
+     * checkout's HEAD — git's own default, and the only thing this could
+     * mean before the picker let anyone say otherwise.
+     */
+    base: string,
   ): Promise<string>;
   /**
    * Delete a linked worktree and its folder. "force" is what git needs

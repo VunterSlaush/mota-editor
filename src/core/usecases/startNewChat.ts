@@ -1,7 +1,7 @@
-import { serversForProvider } from "../entities/mcpServer";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { agentServers } from "./agentServers";
 
 /**
  * Use case (shared step) — a new conversation means a NEW AGENT CONTEXT,
@@ -37,7 +37,7 @@ export async function startNewChat(
   const state = store.getState();
   const tab = tabById(state, tabId);
   if (!tab) return;
-  const { path, model, effort, mcpOverrides } = tab.project;
+  const { path, model, effort, mcpOverrides, subtask } = tab.project;
   void agentGateway
     .warmSession(
       tabId,
@@ -45,7 +45,8 @@ export async function startNewChat(
       path,
       model,
       effort,
-      serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
+      agentServers(state, provider, mcpOverrides),
+      subtask,
     )
     .catch(() => undefined); // warm-up is best-effort
 }

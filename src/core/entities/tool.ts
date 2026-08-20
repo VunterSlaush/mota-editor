@@ -1,9 +1,17 @@
 import type { ChatMessage } from "./message";
 
-/** One file the agent reported editing, with its diff when it sent one. */
+/** One diff the agent reported: a whole file, or a single hunk of one —
+ *  the ACP adapters send a `diff` content item per hunk of a patch. */
+export interface AgentEdit {
+  readonly oldText?: string;
+  readonly newText: string;
+}
+
+/** One file the agent reported editing, with every diff it sent for that
+ *  file this session, oldest first. */
 export interface AgentEditedFile {
   readonly path: string;
-  readonly diff?: { readonly oldText?: string; readonly newText: string };
+  readonly edits: readonly AgentEdit[];
 }
 
 /**
@@ -72,32 +80,40 @@ export function countFileChangingTools(messages: readonly ChatMessage[]): number
 }
 
 /**
- * The files the agent itself reported editing this session, newest diff
- * per path winning. First-hand knowledge for the Changes panel — unlike
- * git, this survives the file being reverted-and-re-edited and needs no
- * guessing about which tool touched what.
+ * The files the agent itself reported editing this session, in the order
+ * they were first touched, each carrying every diff reported for it.
+ * First-hand knowledge for the Changes panel — unlike git, this survives
+ * the file being reverted-and-re-edited and needs no guessing about
+ * which tool touched what.
+ *
+ * Every diff is kept, not just the newest: an `Edit` reports one `diff`
+ * item per hunk of its patch, and a file is usually edited more than
+ * once, so keeping only the last would show a sliver of the change.
  */
 export function agentEditedFiles(
   messages: readonly ChatMessage[],
 ): readonly AgentEditedFile[] {
-  const byPath = new Map<string, AgentEditedFile>();
+  const byPath = new Map<string, AgentEdit[]>();
+  const editsFor = (path: string): AgentEdit[] => {
+    const existing = byPath.get(path);
+    if (existing) return existing;
+    const edits: AgentEdit[] = [];
+    byPath.set(path, edits);
+    return edits;
+  };
   for (const message of messages) {
     const call = message.toolCall;
     if (!call) continue;
     for (const item of call.content) {
       if (item.type === "diff") {
-        byPath.set(item.path, {
-          path: item.path,
-          diff: { oldText: item.oldText, newText: item.newText },
-        });
+        editsFor(item.path).push({ oldText: item.oldText, newText: item.newText });
       }
     }
+    // A file the agent says it edited but sent no diff for still belongs
+    // in the list — the row opens it instead of showing a diff.
     if (call.toolKind === "edit") {
-      for (const location of call.locations) {
-        if (!byPath.has(location.path))
-          byPath.set(location.path, { path: location.path });
-      }
+      for (const location of call.locations) editsFor(location.path);
     }
   }
-  return [...byPath.values()];
+  return [...byPath].map(([path, edits]) => ({ path, edits }));
 }

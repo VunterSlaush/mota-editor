@@ -370,12 +370,40 @@ interface TurnTokens {
 }
 
 /**
+ * When a turn stopped being able to spend anything.
+ *
+ * `durationMs` is stamped at completion as `now - sentAt`, so it bounds
+ * the turn exactly: every request the turn made happened inside it. When
+ * a transcript predates that stamp, the next turn bounds it instead, and
+ * the last turn is bounded by the transcript's own last save — nothing
+ * we recorded happened after it.
+ */
+function turnEnd(ordered: readonly TurnStat[], i: number, savedAt: number): number {
+  const turn = ordered[i];
+  const bound = Math.min(
+    ordered[i + 1]?.sentAt ?? Number.POSITIVE_INFINITY,
+    turn.durationMs !== undefined
+      ? turn.sentAt + turn.durationMs
+      : Number.POSITIVE_INFINITY,
+  );
+  return Number.isFinite(bound) ? bound : savedAt;
+}
+
+/**
  * Tokens each of a session's turns actually cost, keyed by turn.
  *
  * Billed requests carry a timestamp but no turn, so each is credited to
  * the most recent turn already under way when it was made — within a
  * session turns run one at a time, which makes that exact. Requests
  * predating the first turn are credited to it: they ARE the startup.
+ *
+ * A request made outside every turn's own window is credited to NONE of
+ * them. One provider session can outlive the transcript that recorded
+ * part of it — resumed from the vendor's own CLI, split across chats,
+ * continued after we stopped writing turns — and letting the last turn
+ * absorb the remainder is what made a one-line local command like
+ * `/usage` claim a whole conversation's spend. The exact total is not
+ * lost: `buildBilledSpend` counts every request in range on its own.
  *
  * Falls back to the per-turn context delta when the session has no
  * vendor log, or no usable turn clock to line one up against — a
@@ -399,6 +427,7 @@ function tokensPerTurn(
   // onto its last turn.
   if (mine.length === 0 || ordered.some((t) => t.sentAt <= 0)) return estimate();
 
+  const ends = ordered.map((_, i) => turnEnd(ordered, i, session.savedAt));
   const totals = ordered.map(() => 0);
   let index = 0;
   for (const request of [...mine].sort((a, b) => a.timestampMs - b.timestampMs)) {
@@ -408,6 +437,10 @@ function tokensPerTurn(
     ) {
       index += 1;
     }
+    // Only the END is bounded: a request predating the first turn is
+    // still that turn's startup, but one made after a turn finished
+    // belongs to work this transcript never saw.
+    if (request.timestampMs > ends[index]) continue;
     totals[index] += totalBilledTokens(request);
   }
   return new Map(ordered.map((t, i) => [t, { tokens: totals[i], estimated: false }]));

@@ -7,6 +7,7 @@ import {
   Paperclip,
   PencilSimple,
   Plus,
+  Question,
   Robot,
   ShieldCheck,
   Stop,
@@ -28,6 +29,7 @@ import {
 } from "../../core/entities/fileMention";
 import type { ProviderId } from "../../core/entities/provider";
 import { EFFORT_OPTIONS } from "../../core/entities/provider";
+import { isShellLine, shellPrefix } from "../../core/entities/shellLine";
 import type { TabState } from "../../core/state/appState";
 import { fileName } from "../fileName";
 import { CommandPalette } from "./CommandPalette";
@@ -60,6 +62,7 @@ const maxInputHeight = () => Math.round(window.innerHeight * 0.5);
 const MODE_ICONS: Record<AgentMode, ReactNode> = {
   agent: <Robot />,
   plan: <ClipboardText />,
+  ask: <Question />,
   debug: <Bug />,
 };
 
@@ -108,6 +111,9 @@ interface Props {
   onPasteImage: (bytes: Uint8Array, mimeType: string) => Promise<string>;
   /** The project's files, for the "@" menu. Empty outside a repository. */
   loadProjectFiles: () => Promise<string[]>;
+  /** What to grey in after a half-typed "!" line, from the same history
+   *  the terminals suggest from. "" for nothing. */
+  suggestShellLine: (prefix: string) => string;
   onSelectMode: (mode: AgentMode) => void;
   onSelectPermission: (permission: PermissionPolicy) => void;
   onSelectModel: (model: string) => void;
@@ -148,6 +154,7 @@ export function Composer({
   onPickFiles,
   onPasteImage,
   loadProjectFiles,
+  suggestShellLine,
   onSelectMode,
   onSelectPermission,
   onSelectModel,
@@ -198,6 +205,11 @@ export function Composer({
     !menuDismissed && commandToken !== null
       ? filterCommands(commands, commandToken ?? "")
       : [];
+
+  // A "!" line goes to the user's shell, not to the agent. Said in the
+  // colour tool output is written in, so which of the two is about to
+  // read this is visible before Enter rather than after it.
+  const shellMode = isShellLine(draft);
 
   // The "@..." word being typed, if any — the file menu's trigger.
   const mention = useMemo(() => mentionToken(draft), [draft]);
@@ -338,6 +350,31 @@ export function Composer({
         ? { count: mentionFiles.length, pick: (i: number) => pickFile(mentionFiles[i]) }
         : null;
 
+  // The rest of the command this "!" line most likely becomes, greyed in
+  // after the caret. Hidden while a menu is open: that menu is already a
+  // suggestion, and two of them at once is a guess about which key the
+  // user means. See `accept` for why Tab is safe to take here.
+  const shellSuggestion =
+    shellMode && !openMenu ? suggestShellLine(shellPrefix(draft)) : "";
+
+  /** Type the rest of the suggestion in, as accepting it in the terminal
+   *  does — the draft becomes what was on screen. */
+  const acceptSuggestion = () => {
+    onDraftChange(draft + shellSuggestion, attachments);
+  };
+
+  /** Whether the caret sits at the very end, where a suggestion is the
+   *  only thing Right arrow could reach. Anywhere else it must move the
+   *  caret, exactly as it does in the terminal. */
+  const caretAtEnd = () => {
+    const input = inputRef.current;
+    return (
+      input !== null &&
+      input.selectionStart === draft.length &&
+      input.selectionEnd === draft.length
+    );
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (openMenu) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -354,6 +391,16 @@ export function Composer({
       if (e.key === "Escape") {
         e.preventDefault();
         setMenuDismissed(true);
+        return;
+      }
+    }
+    // Only while something is greyed in, and Right arrow only from the
+    // end of the line: both keys go straight through otherwise, so Tab
+    // still leaves the composer and Right arrow still moves the caret.
+    if (shellSuggestion) {
+      if (e.key === "Tab" || (e.key === "ArrowRight" && caretAtEnd())) {
+        e.preventDefault();
+        acceptSuggestion();
         return;
       }
     }
@@ -440,8 +487,17 @@ export function Composer({
               is drawn again underneath and the textarea made
               transparent. The two layers share every metric that affects
               wrapping (see styles.css) and scroll together. */}
-          <div className="composer-card__highlight" ref={highlightRef} aria-hidden="true">
+          <div
+            className={`composer-card__highlight ${
+              shellMode ? "composer-card__highlight--shell" : ""
+            }`}
+            ref={highlightRef}
+            aria-hidden="true"
+          >
             <CommandText text={draft} commands={commandNameSet} />
+            {shellSuggestion && (
+              <span className="composer-card__ghost">{shellSuggestion}</span>
+            )}
             {"\n"}
           </div>
           <textarea
@@ -526,8 +582,8 @@ export function Composer({
               <button
                 type="button"
                 className="send-button"
-                title="Send"
-                aria-label="Send"
+                title={shellMode ? "Run in terminal" : "Send"}
+                aria-label={shellMode ? "Run in terminal" : "Send"}
                 disabled={draft.trim() === "" && attachments.length === 0}
                 onClick={send}
               >

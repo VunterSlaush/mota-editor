@@ -1,4 +1,4 @@
-# ADR-0012 — Optimized commands: prompt rewrite, not tool exposure
+# ADR-0016 — Optimized commands: prompt rewrite, not tool exposure
 
 - Status: accepted
 - Date: 2026-08-12

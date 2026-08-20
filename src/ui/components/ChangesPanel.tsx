@@ -14,25 +14,39 @@ import {
   GitDiff,
   Minus,
   Plus,
+  Trash,
+  X,
 } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { commitUrl } from "../../core/entities/gitRemote";
 import type { AgentEditedFile } from "../../core/entities/tool";
 import type { GitChange } from "../../core/ports/gitPort";
-import type { GitActionResult } from "../../core/usecases/gitActions";
+import type { GitActionResult, GitVerb } from "../../core/usecases/gitActions";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import { openExternalLink } from "../externalLink";
 import { fileName } from "../fileName";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type { AgentDiff } from "./ToolCallContentView";
 
 interface Props {
   changes: GitChanges | null;
   busy: boolean;
+  /** The git verb running against this project, from the tab's state —
+   *  the panel is remounted on every tab switch and cannot hold it. */
+  working: GitVerb | null;
+  /** What the last verb said, from the same place and for the reason. */
+  notice: GitActionResult | null;
   /** Files the agent itself reported editing this session (first-hand,
    *  unlike the git sections below). */
   agentEdits: readonly AgentEditedFile[];
   onStage: (path: string) => Promise<GitActionResult>;
   onUnstage: (path: string) => Promise<GitActionResult>;
+  onStageAll: () => Promise<GitActionResult>;
+  onUnstageAll: () => Promise<GitActionResult>;
+  /** Throw one file's unstaged changes away. Cannot be undone. */
+  onDiscard: (path: string) => Promise<GitActionResult>;
+  /** The same for every unstaged change at once. */
+  onDiscardAll: () => Promise<GitActionResult>;
   onCommitPush: (message: string) => Promise<GitActionResult>;
   onOpenBranchPicker: () => void;
   onPush: () => Promise<GitActionResult>;
@@ -43,13 +57,18 @@ interface Props {
   onOpenFile: (path: string) => Promise<string | null>;
   /** Show the file's diff in a modal. */
   onShowDiff: (file: GitChange, staged: boolean) => void;
-  /** Show an agent-reported diff (full old/new text) in the modal. */
+  /** Show every edit the agent reported for one file in the modal. */
   onShowAgentDiff: (diff: AgentDiff) => void;
 }
 
 /** Which sections start open — the git ones; agent edits is a review
  *  extra (it survives commits), so it starts folded out of the way. */
 const ALL_OPEN = { agent: false, staged: true, unstaged: true, commits: true };
+
+/** Stands in for a path in `confirming` when the whole section is meant.
+ *  A path, so it cannot collide with a real one: git has no file at "."
+ *  and would refuse to name one. */
+const DISCARD_ALL = ".";
 
 /**
  * UI — the project's source control, VS-style: fetch/pull/push, staged
@@ -60,9 +79,15 @@ const ALL_OPEN = { agent: false, staged: true, unstaged: true, commits: true };
 export function ChangesPanel({
   changes,
   busy,
+  working,
+  notice,
   agentEdits,
   onStage,
   onUnstage,
+  onStageAll,
+  onUnstageAll,
+  onDiscard,
+  onDiscardAll,
   onCommitPush,
   onOpenBranchPicker,
   onPush,
@@ -73,36 +98,34 @@ export function ChangesPanel({
   onShowDiff,
   onShowAgentDiff,
 }: Props) {
-  // Which verb is in flight — its button shows a spinner while the
-  // remote round-trip (fetch/pull/push can take seconds) runs.
-  const [working, setWorking] = useState<
-    "fetch" | "pull" | "push" | "commit" | "file" | null
-  >(null);
-  const [notice, setNotice] = useState<GitActionResult | null>(null);
+  // Opening a file is the panel's own business — no git, no tab state.
+  const [fileProblem, setFileProblem] = useState<GitActionResult | null>(null);
+  const [dismissed, setDismissed] = useState<GitActionResult | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [open, setOpen] = useState(ALL_OPEN);
+  // The discard waiting on an answer: a path, or "all". Discarding is
+  // the only thing this panel does that git cannot undo — there is no
+  // stash and no reflog behind it — so it is the only thing it asks
+  // about first.
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const toggle = (section: keyof typeof ALL_OPEN) =>
     setOpen((current) => ({ ...current, [section]: !current[section] }));
 
+  // The verb, its outcome and the reread it earns all hang off the tab's
+  // state now — a verb outliving this panel still finishes properly.
   const run = async (
-    verb: NonNullable<typeof working>,
     action: () => Promise<GitActionResult>,
   ): Promise<GitActionResult> => {
-    setWorking(verb);
-    setNotice(null);
-    const result = await action();
-    setNotice(result.message ? result : null);
-    setWorking(null);
-    onRefresh();
-    return result;
+    setFileProblem(null);
+    return action();
   };
 
   // Opening a file changes nothing in the repo, so it neither disables
   // the panel nor triggers a refresh — but a failure must still be said.
   const openFile = async (path: string) => {
     const error = await onOpenFile(path);
-    setNotice(error ? { ok: false, message: error } : null);
+    setFileProblem(error ? { ok: false, message: error } : null);
   };
 
   // Reading git is safe while the agent works; moving the index under it
@@ -119,13 +142,20 @@ export function ChangesPanel({
     commitMessage.trim() !== "";
 
   const commitPush = async () => {
-    const result = await run("commit", () => onCommitPush(commitMessage));
+    const result = await run(() => onCommitPush(commitMessage));
     if (result.ok) setCommitMessage("");
   };
 
   /** The verb's icon, swapped for a spinner while that verb runs. */
-  const verbIcon = (verb: NonNullable<typeof working>, Idle: Icon) =>
+  const verbIcon = (verb: GitVerb, Idle: Icon) =>
     working === verb ? <CircleNotch className="changes__watching" /> : <Idle />;
+
+  // A notice stays until it is dismissed or replaced. Remembering the
+  // dismissed object rather than a flag is what makes the next notice
+  // appear on its own: a new result is a different object, so nothing
+  // has to reset anything when one arrives.
+  const latest = fileProblem ?? notice;
+  const shown = latest && latest !== dismissed ? latest : null;
 
   // Rendered below "Not staged" (or under the no-repo notice: the agent
   // reports its edits even where git can't).
@@ -146,19 +176,24 @@ export function ChangesPanel({
               type="button"
               className="changes__file"
               title={
-                file.diff
-                  ? `Show the agent's change to ${file.path}`
+                file.edits.length > 0
+                  ? `Show the agent's ${editCount(file.edits.length)} to ${file.path}`
                   : `Open ${file.path}`
               }
               onClick={() =>
-                file.diff
-                  ? onShowAgentDiff({ path: file.path, ...file.diff })
+                file.edits.length > 0
+                  ? onShowAgentDiff({ path: file.path, edits: file.edits })
                   : void onOpenFile(file.path)
               }
             >
               <span className="changes__filename">{fileName(file.path)}</span>
               {parentDir(file.path) && (
                 <span className="changes__dir">{parentDir(file.path)}</span>
+              )}
+              {/* One edit is the unremarkable case and stays quiet; more
+                  than one says so, since the row opens all of them. */}
+              {file.edits.length > 1 && (
+                <span className="changes__edits">×{file.edits.length}</span>
               )}
             </button>
           </li>
@@ -191,7 +226,7 @@ export function ChangesPanel({
           disabled={working !== null}
           aria-label="Fetch"
           title="Fetch and prune remote-tracking branches"
-          onClick={() => void run("fetch", onFetch)}
+          onClick={() => void run(onFetch)}
         >
           {verbIcon("fetch", ArrowsClockwise)}
         </button>
@@ -201,7 +236,7 @@ export function ChangesPanel({
           disabled={mutationsDisabled}
           aria-label="Pull"
           title={pendingTitle("pull", behind)}
-          onClick={() => void run("pull", onPull)}
+          onClick={() => void run(onPull)}
         >
           {verbIcon("pull", ArrowLineDown)}
           <PendingCount count={behind} />
@@ -212,7 +247,7 @@ export function ChangesPanel({
           disabled={mutationsDisabled}
           aria-label="Push"
           title={pendingTitle("push", ahead)}
-          onClick={() => void run("push", onPush)}
+          onClick={() => void run(onPush)}
         >
           {verbIcon("push", ArrowLineUp)}
           <PendingCount count={ahead} />
@@ -253,9 +288,18 @@ export function ChangesPanel({
         </button>
       </div>
 
-      {notice && (
-        <p className={`changes__notice ${notice.ok ? "" : "changes__notice--error"}`}>
-          {notice.message}
+      {shown && (
+        <p className={`changes__notice ${shown.ok ? "" : "changes__notice--error"}`}>
+          <span className="changes__notice-text">{shown.message}</span>
+          <button
+            type="button"
+            className="changes__notice-dismiss"
+            aria-label="Dismiss this message"
+            title="Dismiss"
+            onClick={() => setDismissed(shown)}
+          >
+            <X size={12} />
+          </button>
         </p>
       )}
 
@@ -274,13 +318,21 @@ export function ChangesPanel({
             count={changes.staged.length}
             open={open.staged}
             onToggle={() => toggle("staged")}
+            action={
+              <SectionAction
+                label="Unstage all"
+                Icon={Minus}
+                disabled={mutationsDisabled}
+                onClick={() => void run(onUnstageAll)}
+              />
+            }
           >
             <ChangeList
               files={changes.staged}
               ActionIcon={Minus}
               actionTitle="Unstage"
               disabled={mutationsDisabled}
-              onAction={(path) => void run("file", () => onUnstage(path))}
+              onAction={(path) => void run(() => onUnstage(path))}
               onOpenFile={(path) => void openFile(path)}
               onShowDiff={(file) => onShowDiff(file, true)}
             />
@@ -290,13 +342,31 @@ export function ChangesPanel({
             count={changes.unstaged.length}
             open={open.unstaged}
             onToggle={() => toggle("unstaged")}
+            action={
+              <>
+                <SectionAction
+                  label="Discard all"
+                  Icon={Trash}
+                  danger
+                  disabled={mutationsDisabled || changes.unstaged.length === 0}
+                  onClick={() => setConfirming(DISCARD_ALL)}
+                />
+                <SectionAction
+                  label="Stage all"
+                  Icon={Plus}
+                  disabled={mutationsDisabled}
+                  onClick={() => void run(onStageAll)}
+                />
+              </>
+            }
           >
             <ChangeList
               files={changes.unstaged}
               ActionIcon={Plus}
               actionTitle="Stage"
               disabled={mutationsDisabled}
-              onAction={(path) => void run("file", () => onStage(path))}
+              onAction={(path) => void run(() => onStage(path))}
+              onDiscard={(path) => setConfirming(path)}
               onOpenFile={(path) => void openFile(path)}
               onShowDiff={(file) => onShowDiff(file, false)}
             />
@@ -332,8 +402,67 @@ export function ChangesPanel({
           </Section>
         </>
       )}
+      {confirming !== null && (
+        <ConfirmDialog
+          title={confirming === DISCARD_ALL ? "Discard all changes?" : "Discard changes?"}
+          message={
+            confirming === DISCARD_ALL
+              ? discardAllMessage(changes?.unstaged ?? [])
+              : discardFileMessage(confirming, changes?.unstaged ?? [])
+          }
+          detail={
+            confirming === DISCARD_ALL
+              ? (changes?.unstaged ?? []).map((file) => ({
+                  id: file.path,
+                  label: `${file.path} — ${file.label}`,
+                }))
+              : undefined
+          }
+          confirmLabel="Discard"
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            const target = confirming;
+            setConfirming(null);
+            void run(() => (target === DISCARD_ALL ? onDiscardAll() : onDiscard(target)));
+          }}
+        />
+      )}
     </aside>
   );
+}
+
+/**
+ * What discarding this one file does — which is not one thing.
+ *
+ * An untracked file has no earlier version to go back to, so discarding
+ * it deletes it. Saying "goes back to its last staged state" there would
+ * describe the opposite of what happens.
+ */
+function discardFileMessage(path: string, unstaged: readonly GitChange[]): string {
+  const untracked = unstaged.find((file) => file.path === path)?.label === "untracked";
+  return untracked
+    ? `${path} is new — discarding deletes it. This cannot be undone.`
+    : `${path} goes back to its last staged state. This cannot be undone.`;
+}
+
+/**
+ * What "discard all" is about to cost, counted rather than implied.
+ *
+ * Untracked files are named separately because their fate is different
+ * in kind: a modified file goes back to what it was, an untracked one
+ * stops existing. Nobody should learn that distinction afterwards.
+ */
+function discardAllMessage(unstaged: readonly GitChange[]): string {
+  const untracked = unstaged.filter((file) => file.label === "untracked").length;
+  const edited = unstaged.length - untracked;
+  const parts: string[] = [];
+  if (edited > 0) {
+    parts.push(`${edited} edited ${edited === 1 ? "file goes" : "files go"} back`);
+  }
+  if (untracked > 0) {
+    parts.push(`${untracked} new ${untracked === 1 ? "file is" : "files are"} deleted`);
+  }
+  return `${parts.join(", ")}. Staged changes and ignored files are left alone. This cannot be undone.`;
 }
 
 /** The commits a verb has waiting, on its button; nothing at zero, so a
@@ -358,18 +487,21 @@ function pendingTitle(verb: "pull" | "push", count: number): string {
     : `Push ${commits} to the upstream`;
 }
 
-/** A titled, collapsible group with its item count in the header. */
+/** A titled, collapsible group with its item count in the header, and
+ *  optionally one button acting on the whole group. */
 function Section({
   title,
   count,
   open,
   onToggle,
+  action,
   children,
 }: {
   title: string;
   count: number;
   open: boolean;
   onToggle: () => void;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -385,9 +517,40 @@ function Section({
           {title}
           <span className="changes__count">{count}</span>
         </button>
+        {/* An empty group has nothing to act on, open or closed. */}
+        {count > 0 && action}
       </h3>
       {open && count > 0 && children}
     </div>
+  );
+}
+
+/** The whole-group button — stage, unstage or discard everything in one
+ *  call. `danger` colours the one that destroys work. */
+function SectionAction({
+  label,
+  Icon,
+  disabled,
+  danger,
+  onClick,
+}: {
+  label: string;
+  Icon: Icon;
+  disabled: boolean;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`changes__title-action ${danger ? "changes__title-action--danger" : ""}`}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon size={14} />
+    </button>
   );
 }
 
@@ -395,10 +558,19 @@ interface ListProps {
   files: readonly GitChange[];
   ActionIcon: Icon;
   actionTitle: string;
+  /** Offered only where discarding means something: the unstaged list.
+   *  A staged change is not lost by discarding, so the staged list does
+   *  not carry it. */
+  onDiscard?: (path: string) => void;
   disabled: boolean;
   onAction: (path: string) => void;
   onOpenFile: (path: string) => void;
   onShowDiff: (file: GitChange) => void;
+}
+
+/** "3 changes" / "1 change" — the agent-edits row's tooltip counts them. */
+function editCount(count: number): string {
+  return `${String(count)} ${count === 1 ? "change" : "changes"}`;
 }
 
 /** The path without its file name — the gray VS-style suffix. */
@@ -413,6 +585,7 @@ function ChangeList({
   actionTitle,
   disabled,
   onAction,
+  onDiscard,
   onOpenFile,
   onShowDiff,
 }: ListProps) {
@@ -461,6 +634,17 @@ function ChangeList({
                   disabled,
                   onSelect: () => onAction(file.path),
                 },
+                ...(onDiscard
+                  ? [
+                      {
+                        label: "Discard changes",
+                        icon: <Trash size={14} />,
+                        disabled,
+                        danger: true,
+                        onSelect: () => onDiscard(file.path),
+                      },
+                    ]
+                  : []),
               ]}
             />
           </li>
@@ -474,6 +658,8 @@ interface FileMenuItem {
   label: string;
   icon: ReactNode;
   disabled?: boolean;
+  /** Destructive: coloured apart so it is not picked by muscle memory. */
+  danger?: boolean;
   onSelect: () => void;
 }
 
@@ -537,7 +723,9 @@ function FileMenu({ label, items }: { label: string; items: FileMenuItem[] }) {
               key={item.label}
               type="button"
               role="menuitem"
-              className="file-menu__option"
+              className={`file-menu__option ${
+                item.danger ? "file-menu__option--danger" : ""
+              }`}
               disabled={item.disabled}
               onClick={() => {
                 setOpen(false);

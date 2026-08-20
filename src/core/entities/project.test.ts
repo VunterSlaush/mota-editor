@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { newProject, type ProjectDefaults, projectNameFromPath } from "./project";
+import {
+  defaultsFromProject,
+  MAX_TAB_LABEL_LENGTH,
+  newProject,
+  normalizedTabLabel,
+  type ProjectDefaults,
+  projectNameFromPath,
+  tabLabel,
+} from "./project";
 
 const defaults: ProjectDefaults = {
   provider: "codex",
@@ -32,5 +40,35 @@ describe("project entity", () => {
     });
     expect(project.model).toBeUndefined();
     expect(project.effort).toBeUndefined();
+  });
+
+  it("calls a tab by the user's name when it has one, and its folder's when not", () => {
+    const project = newProject("t1", "/work/alpha", defaults);
+    expect(tabLabel(project)).toBe("alpha");
+    expect(tabLabel({ ...project, label: "auth rewrite" })).toBe("auth rewrite");
+  });
+
+  it("stores a name trimmed, and nothing at all when there is nothing left", () => {
+    expect(normalizedTabLabel("  auth rewrite  ")).toBe("auth rewrite");
+    expect(normalizedTabLabel("   ")).toBeUndefined();
+    expect(normalizedTabLabel("")).toBeUndefined();
+  });
+
+  it("caps a name at a length the strip could never show anyway", () => {
+    const long = "x".repeat(MAX_TAB_LABEL_LENGTH + 20);
+    expect(normalizedTabLabel(long)).toHaveLength(MAX_TAB_LABEL_LENGTH);
+  });
+
+  it("seeds a new project with the colour it was given, and no key without one", () => {
+    expect(newProject("t1", "/a", { ...defaults, color: "teal" }).color).toBe("teal");
+    // Absent, not undefined: a key that exists reads as a decision made.
+    expect("color" in newProject("t1", "/a", defaults)).toBe(false);
+  });
+
+  it("passes a tab's colour to what it seeds, but never its name", () => {
+    const source = newProject("t1", "/work/alpha", defaults);
+    const seeded = defaultsFromProject({ ...source, color: "violet", label: "auth" });
+    expect(seeded.color).toBe("violet");
+    expect("label" in seeded).toBe(false);
   });
 });

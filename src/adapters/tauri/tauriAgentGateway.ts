@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
+import type { SubtaskScope } from "../../core/entities/subtask";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -171,6 +172,7 @@ export class TauriAgentGateway implements AgentGateway {
           attachments: [...request.attachments],
           resumeSessionId: request.resumeSessionId ?? null,
           mcpServers: toWireServers(request.mcpServers),
+          subtask: request.subtask ?? null,
         },
       });
     } catch (e) {
@@ -228,6 +230,7 @@ export class TauriAgentGateway implements AgentGateway {
     model?: string,
     effort?: string,
     mcpServers?: readonly McpServerSpec[],
+    subtask?: SubtaskScope,
   ): Promise<void> {
     await invoke("warm_session", {
       args: {
@@ -237,6 +240,7 @@ export class TauriAgentGateway implements AgentGateway {
         model: model ?? null,
         effort: effort ?? null,
         mcpServers: toWireServers(mcpServers),
+        subtask: subtask ?? null,
       },
     });
   }
@@ -248,6 +252,7 @@ export class TauriAgentGateway implements AgentGateway {
     model?: string,
     effort?: string,
     mcpServers?: readonly McpServerSpec[],
+    subtask?: SubtaskScope,
   ): Promise<{ sessionId: string; title?: string; updatedAt?: string }[] | null> {
     // Null when no live session exists — the shell never boots an
     // agent process just to answer the History panel.
@@ -259,6 +264,7 @@ export class TauriAgentGateway implements AgentGateway {
         model: model ?? null,
         effort: effort ?? null,
         mcpServers: toWireServers(mcpServers),
+        subtask: subtask ?? null,
       },
     });
   }
@@ -272,6 +278,7 @@ export class TauriAgentGateway implements AgentGateway {
       effort?: string;
       sessionId: string;
       mcpServers?: readonly McpServerSpec[];
+      subtask?: SubtaskScope;
       preferResume?: boolean;
     },
     onEvent: (event: AgentTurnEvent) => void,
@@ -297,6 +304,7 @@ export class TauriAgentGateway implements AgentGateway {
           effort: request.effort ?? null,
           sessionId: request.sessionId,
           mcpServers: toWireServers(request.mcpServers),
+          subtask: request.subtask ?? null,
           preferResume: request.preferResume ?? false,
         },
       });

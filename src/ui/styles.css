@@ -10,6 +10,17 @@
   --warning: #f0b429;
   --success: #7ee2a8;
   --tool: #b58cff;
+  /* Tab grouping colours. One set for every theme on purpose: the wash
+     mixes a hue into the tab's own background, so the theme supplies the
+     lightness and only the hue has to be chosen here. A theme that needs
+     a different hue can override the one variable. */
+  --tab-color-red: oklch(65% 0.19 25);
+  --tab-color-amber: oklch(75% 0.15 75);
+  --tab-color-green: oklch(72% 0.17 145);
+  --tab-color-teal: oklch(72% 0.11 195);
+  --tab-color-blue: oklch(65% 0.17 255);
+  --tab-color-violet: oklch(65% 0.19 300);
+  --tab-color-grey: oklch(65% 0.02 260);
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   font-size: 14px;
   color-scheme: dark;
@@ -186,7 +197,16 @@ body {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 8px 8px 0 0;
-  color: var(--text-dim);
+  /* Outlined, not merely dimmed. A row of unbordered labels on one
+     surface gives no answer to "where does this tab end and the next
+     begin?" — the 2px gap between them is not one. The bottom edge is
+     left open so the strip's own line is the base every tab stands on,
+     the way a browser's do. */
+  border: 1px solid var(--border);
+  border-bottom-color: transparent;
+  /* Full contrast: which tab you are IN is said by the surface below and
+     the accent above, so the others have no reason to be hard to read. */
+  color: var(--text);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -194,6 +214,11 @@ body {
   min-width: 0;
   max-width: 220px;
   overflow: hidden;
+}
+
+.tab:hover:not(.tab--active) {
+  border-color: var(--text-dim);
+  border-bottom-color: transparent;
 }
 
 .tab__name {
@@ -246,9 +271,46 @@ body {
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
 }
 
+/* The tab you are in: the editor's own surface, carried up out of the
+   strip, and an accent edge on top. Both are needed now that every tab
+   is outlined — a border alone no longer singles one out. */
 .tab--active {
   background: var(--bg);
   color: var(--text);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* One assignment per colour, on any element that carries the attribute —
+   so the tab wearing a colour and the swatch offering it both read from
+   the same variable and can never drift apart. */
+[data-color="red"] { --tab-wash: var(--tab-color-red); }
+[data-color="amber"] { --tab-wash: var(--tab-color-amber); }
+[data-color="green"] { --tab-wash: var(--tab-color-green); }
+[data-color="teal"] { --tab-wash: var(--tab-color-teal); }
+[data-color="blue"] { --tab-wash: var(--tab-color-blue); }
+[data-color="violet"] { --tab-wash: var(--tab-color-violet); }
+[data-color="grey"] { --tab-wash: var(--tab-color-grey); }
+
+/* A tab's grouping colour is a wash, never a block. Saturated-and-small
+   is status (the dot); faded-and-large is identity, so neither has to
+   shout over the other.
+
+   Mixed INTO the background the tab already had rather than replacing
+   it: the active tab is told apart by its background too, and a colour
+   must not cost you the sense of where you are. */
+.tab[data-color] {
+  background: color-mix(in oklab, var(--tab-wash) 12%, var(--bg-raised));
+}
+
+.tab--active[data-color] {
+  background: color-mix(in oklab, var(--tab-wash) 22%, var(--bg));
+}
+
+/* A dragged tab is lifted off the strip, and stays lifted when coloured —
+   the attribute selector would otherwise outrank .tab--dragging's plain
+   background and drop it back into the row. */
+.tab--dragging[data-color] {
+  background: color-mix(in oklab, var(--tab-wash) 22%, var(--bg));
 }
 
 /* Folder or worktree — the one glance that tells tabs of a repo apart. */
@@ -341,6 +403,60 @@ body {
 .tab-bar__add:hover {
   background: var(--border);
   color: var(--text);
+}
+
+/* ---- Tab menu ---- */
+/* Fixed and hidden until measured: where it goes depends on how big it
+   turned out, so it is drawn once before it is placed. */
+.tab-menu {
+  position: fixed;
+  visibility: hidden;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+}
+
+.tab-menu__name {
+  width: 200px;
+  padding: 5px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.tab-menu__colors {
+  display: flex;
+  gap: 6px;
+}
+
+.tab-menu__color {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--tab-wash);
+}
+
+/* The one swatch with no colour of its own: an empty ring, so "none"
+   reads as a choice rather than a missing swatch. */
+.tab-menu__color--none {
+  background: transparent;
+}
+
+.tab-menu__color--on {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }
 
 /* ---- Chat panel ---- */
@@ -1463,6 +1579,38 @@ body {
   padding: 0;
 }
 
+/* The copy button rides on the wrapper, not the <pre>, so it stays put
+   while a long line scrolls under it. */
+.md__block {
+  position: relative;
+}
+
+.md__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.md__block:hover .md__copy,
+.md__copy:focus-visible {
+  opacity: 1;
+}
+
+.md__copy:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .md blockquote {
   margin: 8px 0;
   padding: 2px 12px;
@@ -1671,6 +1819,98 @@ body {
   margin: 8px 0 0;
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* The list runs to every checkout of the repository, so it needs both a
+   text search and a way to say "only these". */
+.history__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+}
+
+.history__search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 0;
+  outline: none;
+}
+
+.history__scopes {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.history__scope {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 4px;
+  cursor: pointer;
+}
+
+.history__scope:hover {
+  color: var(--text);
+}
+
+.history__scope--on {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.history__scope-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* The word a row matched on when its title does not contain it —
+   without this, searching "reducer" returns rows that look unrelated. */
+.history__theme {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* Which checkout a conversation was had in — only ever on rows the main
+   checkout borrowed from a worktree. */
+.history__worktree {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--accent);
 }
 
 .history__list {
@@ -2066,6 +2306,128 @@ body {
   border-color: var(--accent);
 }
 
+/* ---- Settings → Extensions ---- */
+.settings-section__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extension-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.extension-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.extension-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.extension-row__version {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.extension-row__status {
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  color: var(--text-dim);
+}
+
+.extension-row__status--running,
+.extension-row__status--enabled {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.extension-row__status--crashed,
+.extension-row__status--invalid {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.extension-row__status--needs-approval,
+.extension-row__status--incompatible {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.extension-row__description {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.extension-row__permissions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.extension-row__permission {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  color: var(--text-dim);
+}
+
+.extension-row__permission--dangerous {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.extension-row__error {
+  font-size: 12px;
+  color: var(--error);
+  white-space: pre-wrap;
+}
+
+.extension-row__actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
+.extension-row__action {
+  margin-top: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.extension-row__log {
+  flex-basis: 100%;
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+
 /* Removing a worktree: the trash on the row, then the confirm beneath. */
 .worktree-picker__remove {
   border: none;
@@ -2078,6 +2440,30 @@ body {
 
 .worktree-picker__remove:hover {
   color: var(--error);
+}
+
+/* Opens the "start the branch at…" step. Quiet until the row is where
+   the eye already is: the fast path is Enter, and this must not read as
+   something you have to answer first. */
+.worktree-picker__base {
+  flex: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.branch-picker__item--selected .worktree-picker__base {
+  border-color: var(--border);
+}
+
+.worktree-picker__base:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .worktree-picker__confirm {
@@ -2415,6 +2801,65 @@ body {
   padding-top: 0;
 }
 
+/* The app's one "are you sure?" — see ConfirmDialog.tsx. */
+.confirm-dialog {
+  width: 420px;
+  max-width: 90vw;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  padding: 18px 20px 14px;
+}
+
+.confirm-dialog__title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.confirm-dialog__message {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.confirm-dialog__detail {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.confirm-dialog__cancel,
+.confirm-dialog__confirm {
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+.confirm-dialog__confirm {
+  border-color: var(--error);
+  color: var(--error);
+}
+
 .branch-picker {
   width: 420px;
   max-width: 90vw;
@@ -2696,6 +3141,9 @@ body {
 }
 
 .changes__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-dim);
   background: var(--bg-raised);
@@ -2704,6 +3152,31 @@ body {
   padding: 6px 8px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.changes__notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Dimmer than the message it sits beside — a git error is the thing to
+   read; the way to get rid of it is not. */
+.changes__notice-dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.changes__notice-dismiss:hover {
+  opacity: 1;
+  background: var(--border);
 }
 
 .changes__notice--error {
@@ -2797,6 +3270,21 @@ body {
 .file-menu__option:disabled {
   opacity: 0.3;
   cursor: default;
+}
+
+/* Discard destroys work and sits under the same kebab as "Show diff".
+   Colour is what stops it being picked by muscle memory. */
+.file-menu__option--danger,
+.file-menu__option--danger .file-menu__icon {
+  color: var(--error);
+}
+
+.file-menu__option--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+}
+
+.file-menu__option--danger:hover:not(:disabled) .file-menu__icon {
+  color: var(--error);
 }
 
 .file-menu__icon {
@@ -3262,6 +3750,9 @@ body {
 
 .changes__title {
   margin: 10px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -3269,7 +3760,8 @@ body {
 }
 
 .changes__title-toggle {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -3291,6 +3783,42 @@ body {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
   letter-spacing: normal;
+}
+
+/* Stage/unstage everything. Always there — it is the only way to move
+   the whole group — but dim until the group is hovered, since it acts
+   on every file at once and should not invite an idle click. */
+.changes__title-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.changes__group:hover .changes__title-action:not(:disabled),
+.changes__title-action:focus-visible {
+  opacity: 1;
+}
+
+.changes__title-action:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text);
+}
+
+.changes__title-action--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 20%, transparent);
+  color: var(--error);
+}
+
+.changes__title-action:disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 
 .changes__list {
@@ -3370,6 +3898,111 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* How many edits a file collected — only shown past one, where the row
+   stands for a run of changes rather than a single one. */
+.changes__edits {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Worktrees panel ----
+   The repository's checkouts and what each one's agent is doing. It
+   borrows the Changes panel's rows wholesale; only the leading icon and
+   the trailing state word are its own. */
+.worktrees {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.worktrees__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+}
+
+/* Out of the way until the row is hovered, like the changed-file kebab:
+   deleting a worktree is not what the row is mostly for. */
+.worktrees__remove {
+  flex: none;
+  visibility: hidden;
+}
+
+.worktrees__item:hover .worktrees__remove,
+.worktrees__remove:focus-visible {
+  visibility: visible;
+}
+
+/* A worktree whose folder git has yet to prune: nothing to open. */
+.worktrees__item .changes__file:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.worktrees__item .changes__file:disabled:hover .changes__filename {
+  text-decoration: none;
+}
+
+/* Sized like the panel's rows, not like a form field: it sits inside a
+   sidebar that drags down to 180px. */
+.worktrees__search {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.worktrees__search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.worktrees__badge {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* The worktrees' last conversations, in brief. Separated by a rule
+   rather than a heading alone: it is a different question from the one
+   the rows above answer. */
+.worktrees__sessions {
+  margin-top: 14px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.worktrees__session {
+  display: flex;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.worktrees__more {
+  margin-top: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.worktrees__more:hover {
+  color: var(--accent);
 }
 
 /* ---- Thought bubbles ---- */
@@ -3697,6 +4330,13 @@ body {
   flex: 1;
   min-width: 0;
   resize: none;
+  /* Never sideways. The text soft-wraps, so there is nothing out to the
+     right to reach, and the highlight layer underneath only follows
+     scrollTop — a horizontal scroll would slide the two apart. Left to
+     the UA's `overflow-x: auto` it does not stay theoretical: interface
+     zoom measures the inner text block wider than the box it sits in,
+     and a scrollbar appears across an empty composer. */
+  overflow-x: hidden;
   background: transparent;
   border: none;
   /* The text is drawn by the highlight layer underneath; only the caret
@@ -3728,6 +4368,19 @@ body {
 .cmd-token {
   color: var(--accent);
   font-weight: 600;
+}
+
+/* A "!" line is bound for the shell, not the agent — said in the colour
+   tool output already uses. Colour only, for the reason below. */
+.composer-card__highlight--shell {
+  color: var(--tool);
+}
+
+/* The guessed rest of a "!" line. Dimmer than the line itself, and past
+   the caret rather than under it — so unlike the text before it, this is
+   the one part of the layer the textarea is not drawing over. */
+.composer-card__ghost {
+  color: var(--text-dim);
 }
 
 /* In the composer the token must NOT change text metrics: the caret is
@@ -4523,6 +5176,457 @@ body {
   line-height: 1.4;
   white-space: pre-wrap;
   pointer-events: none;
+}
+
+/* ---- Extension panel (sidebar, ADR-0013) ---- */
+
+.ext-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.ext-panel__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 4px;
+}
+
+.ext-panel__title {
+  font-weight: 600;
+}
+
+.ext-panel__group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 10px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.ext-panel__count {
+  font-weight: 400;
+}
+
+.ext-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ext-panel__item {
+  padding: 4px 10px 6px;
+  border-left: 2px solid transparent;
+}
+
+.ext-panel__item:hover {
+  background: var(--bg-input);
+  border-left-color: var(--accent);
+}
+
+.ext-panel__item-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ext-panel__item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ext-panel__check {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.ext-panel__remove {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.ext-panel__item:hover .ext-panel__remove,
+.ext-panel__remove:focus-visible {
+  opacity: 1;
+}
+
+.ext-panel__remove:hover {
+  color: var(--error);
+}
+
+.ext-panel__item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ext-panel__item-title {
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+
+.ext-panel__item-title--checked {
+  text-decoration: line-through;
+  color: var(--text-dim);
+}
+
+.ext-panel__badge {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* The refresh icon, turning while the extension is being asked. */
+.ext-panel__spin {
+  animation: tool-spin 0.9s linear infinite;
+}
+
+/* An item's right-click menu — placed by the same measure-then-position
+   as .tab-menu, so it hangs off the row and never off-screen. */
+.ext-menu {
+  position: fixed;
+  visibility: hidden;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+}
+
+.ext-menu__entry {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ext-menu__entry:hover,
+.ext-menu__entry:focus-visible {
+  background: var(--bg-input);
+}
+
+/* Badge tones (ADR-0013's view model): the extension names a meaning,
+   the theme supplies the colour. Mixed from the palette rather than
+   hardcoded so every theme — including light ones — stays legible. */
+.ext-panel__badge--success {
+  border-color: color-mix(in oklab, var(--success) 45%, transparent);
+  background: color-mix(in oklab, var(--success) 14%, transparent);
+  color: var(--success);
+}
+
+.ext-panel__badge--warning {
+  border-color: color-mix(in oklab, var(--warning) 45%, transparent);
+  background: color-mix(in oklab, var(--warning) 14%, transparent);
+  color: var(--warning);
+}
+
+.ext-panel__badge--danger {
+  border-color: color-mix(in oklab, var(--error) 45%, transparent);
+  background: color-mix(in oklab, var(--error) 14%, transparent);
+  color: var(--error);
+}
+
+.ext-panel__badge--info {
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.ext-panel__badge--neutral {
+  background: color-mix(in oklab, var(--text-dim) 10%, transparent);
+}
+
+.ext-panel__item-subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ext-panel__select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 11px;
+}
+
+/* ---- Extension panel detail modal ---- */
+
+.ext-detail {
+  width: min(560px, 92vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+
+.ext-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  /* The modal itself scrolls, and a close button that scrolls out of
+     reach is no close button. Negative margins let it span the modal's
+     padding so nothing shows through beside it as content passes under. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -16px -20px 0;
+  padding: 16px 20px 8px;
+  background: var(--bg-raised);
+}
+
+.ext-detail__actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+.ext-detail__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.ext-detail__subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.ext-detail__fields {
+  margin: 12px 0 0;
+}
+
+.ext-detail__field {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.ext-detail__field dt {
+  flex: none;
+  width: 90px;
+  color: var(--text-dim);
+}
+
+.ext-detail__field dd {
+  margin: 0;
+}
+
+.ext-detail__body {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  font-size: 12px;
+}
+
+.ext-panel__buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 10px 8px;
+}
+
+.ext-panel__input {
+  padding: 4px 10px;
+}
+
+.ext-panel__input-field {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ext-panel__input-field:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ---- Subtask picker ---- */
+
+.subtask-picker {
+  background: var(--panel, #1e1e1e);
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  padding: 16px;
+  width: 420px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.subtask-picker__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.subtask-picker__hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.subtask-picker__option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subtask-picker__option input {
+  margin-top: 2px;
+}
+
+.subtask-picker__folders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.subtask-picker__folder {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subtask-picker__typed {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.subtask-picker__typed .settings-input {
+  flex: 1;
+}
+
+.subtask-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- Subtask areas (settings) ---- */
+
+.subtask-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.subtask-preset__folders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.subtask-preset__folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--border, #333);
+  border-radius: 10px;
+}
+
+.subtask-preset__folder button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0;
+  line-height: 1;
+}
+
+.subtask-preset__folder button:hover {
+  opacity: 1;
+}
+
+.subtask-preset__proposed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.subtask-picker__presets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subtask-picker__preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* ---- Settings: Optimization section ---- */

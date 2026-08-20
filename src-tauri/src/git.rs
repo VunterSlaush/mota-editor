@@ -29,7 +29,7 @@ async fn run_git(project_path: &str, args: &[&str]) -> Result<String, String> {
 }
 
 /// Like `run_git`, but a diff that found differences (exit code 1) is a
-/// success, not a failure. Only `git diff --no-index` reports that way.
+/// success, not a failure — which is how `git diff --no-index` reports.
 async fn run_git_diff(project_path: &str, args: &[&str]) -> Result<String, String> {
     let mut full_args = vec!["-C".to_owned(), project_path.to_owned()];
     full_args.extend(args.iter().map(|a| (*a).to_owned()));
@@ -125,6 +125,11 @@ pub async fn git_list_files(project_path: String) -> Result<Vec<String>, String>
 /// A unified diff for one file. Untracked files have nothing to diff
 /// against, so they are compared with the null device instead, which
 /// renders the whole file as added.
+///
+/// A file git calls binary is asked for a second time with `--text`:
+/// git decides that on a NUL byte in the first 8000, which a source
+/// file holding a `"\0"` literal has and its author still wants to
+/// read. The forced diff is only kept if it is text after all.
 #[tauri::command]
 pub async fn git_diff(
     project_path: String,
@@ -132,18 +137,37 @@ pub async fn git_diff(
     staged: bool,
     untracked: bool,
 ) -> Result<String, String> {
-    let out = if untracked {
-        run_git_diff(
-            &project_path,
-            &["diff", "--no-index", "--no-color", "--", NULL_DEVICE, &path],
-        )
-        .await?
+    let out = run_diff(&project_path, &diff_args(&path, staged, untracked, &[])).await?;
+    if !vcs::reported_as_binary(&out) {
+        return Ok(head(&out, MAX_DIFF_LINES));
+    }
+    let forced =
+        run_diff(&project_path, &diff_args(&path, staged, untracked, &["--text"])).await?;
+    let readable = if vcs::is_displayable_text(&forced) { &forced } else { &out };
+    Ok(head(readable, MAX_DIFF_LINES))
+}
+
+/// The git arguments for one file's diff: which side of the change is
+/// wanted, plus whatever the reading needs (`--text` for the retry).
+fn diff_args(path: &str, staged: bool, untracked: bool, extra: &[&str]) -> Vec<String> {
+    let mut args = vec!["diff".to_owned(), "--no-color".to_owned()];
+    if untracked {
+        args.push("--no-index".to_owned());
     } else if staged {
-        run_git(&project_path, &["diff", "--cached", "--no-color", "--", &path]).await?
-    } else {
-        run_git(&project_path, &["diff", "--no-color", "--", &path]).await?
-    };
-    Ok(head(&out, MAX_DIFF_LINES))
+        args.push("--cached".to_owned());
+    }
+    args.extend(extra.iter().map(|flag| (*flag).to_owned()));
+    args.push("--".to_owned());
+    if untracked {
+        args.push(NULL_DEVICE.to_owned());
+    }
+    args.push(path.to_owned());
+    args
+}
+
+async fn run_diff(project_path: &str, args: &[String]) -> Result<String, String> {
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git_diff(project_path, &borrowed).await
 }
 
 /// A generated file can be millions of lines; the modal renders every
@@ -173,6 +197,65 @@ pub async fn git_unstage(project_path: String, path: String) -> Result<(), Strin
     run_git(&project_path, &["restore", "--staged", "--", &path])
         .await
         .map(|_| ())
+}
+
+/// Stage every change in the working tree, deletions included — the
+/// whole repository, not just the folder git happens to be run from.
+#[tauri::command]
+pub async fn git_stage_all(project_path: String) -> Result<(), String> {
+    run_git(&project_path, &["add", "--all"]).await.map(|_| ())
+}
+
+/// Empty the index back to HEAD, leaving the working tree alone.
+#[tauri::command]
+pub async fn git_unstage_all(project_path: String) -> Result<(), String> {
+    run_git(&project_path, &["reset", "--quiet"]).await.map(|_| ())
+}
+
+/// Throw away one file's unstaged changes. Irreversible — there is no
+/// stash and no reflog behind this, which is why the UI asks first.
+#[tauri::command]
+pub async fn git_discard(project_path: String, path: String) -> Result<(), String> {
+    let tracked = is_tracked(&project_path, &path).await;
+    let args = vcs::discard_file_args(&path, tracked);
+    run_git(&project_path, &borrowed(&args)).await.map(|_| ())
+}
+
+/// Does git have this path in its index? Untracked files answer no, and
+/// are removed rather than restored. Asked of git rather than inferred
+/// from the status label the UI happens to be showing: the panel's data
+/// can be seconds stale, and this decides between restoring a file and
+/// deleting it.
+async fn is_tracked(project_path: &str, path: &str) -> bool {
+    run_git(project_path, &["ls-files", "--", path])
+        .await
+        .map(|out| !out.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Throw away every unstaged change: tracked files go back to the index,
+/// untracked ones are removed. Staged work is untouched — the section
+/// this serves says "not staged".
+#[tauri::command]
+pub async fn git_discard_all(project_path: String) -> Result<(), String> {
+    // `restore -- .` fails outright when nothing tracked has changed
+    // ("did not match any file(s) known to git"), which is a normal
+    // state, not an error. Asking first is cheaper than deciding which
+    // failures to swallow.
+    let changed = run_git(&project_path, &["diff", "--name-only"])
+        .await
+        .unwrap_or_default();
+    if !changed.trim().is_empty() {
+        let args = vcs::discard_all_restore_args();
+        run_git(&project_path, &borrowed(&args)).await?;
+    }
+    let args = vcs::discard_all_clean_args();
+    run_git(&project_path, &borrowed(&args)).await.map(|_| ())
+}
+
+/// `run_git` takes `&[&str]`; the pure builders return owned strings.
+fn borrowed(args: &[String]) -> Vec<&str> {
+    args.iter().map(String::as_str).collect()
 }
 
 #[tauri::command]
@@ -278,6 +361,7 @@ pub async fn git_worktree_add(
     branch: String,
     mode: String,
     remote: String,
+    base: String,
 ) -> Result<String, String> {
     // Same reasoning as git_checkout: refs and paths that start with `-`
     // would be parsed as option flags. Legitimate branch and remote names
@@ -288,18 +372,37 @@ pub async fn git_worktree_add(
     if remote.starts_with('-') || remote.is_empty() {
         return Err(format!("Refusing to use suspicious remote name: {remote}"));
     }
+    if base.starts_with('-') {
+        return Err(format!("Refusing to use suspicious ref name: {base}"));
+    }
     if worktree_path.starts_with('-') || !std::path::Path::new(&worktree_path).is_absolute() {
         return Err(format!("Worktree path must be absolute: {worktree_path}"));
     }
     let remote_branch = format!("{remote}/{branch}");
     let args: &[&str] = match mode.as_str() {
         "existing" => &["worktree", "add", "--", &worktree_path, &branch],
-        "new" => &["worktree", "add", "-b", &branch, &worktree_path],
+        // No base is not the same as a base of "HEAD": git resolves the
+        // omitted start point itself, and saying HEAD out loud would
+        // pin the new branch to this worktree's HEAD even where git
+        // would have done something smarter.
+        "new" if base.is_empty() => &["worktree", "add", "-b", &branch, &worktree_path],
+        "new" => &["worktree", "add", "-b", &branch, &worktree_path, &base],
         "remote" => &["worktree", "add", "--track", "-b", &branch, &worktree_path, &remote_branch],
         other => return Err(format!("Unknown worktree mode: {other}")),
     };
-    run_git(&project_path, args).await.map(summary)
+    let mut full = vec!["-c", PARALLEL_CHECKOUT];
+    full.extend_from_slice(args);
+    run_git(&project_path, &full).await.map(summary)
 }
+
+/// One checkout worker per core instead of git's default of one in
+/// total. A worktree is a whole working tree written out file by file,
+/// and that is where the wait is: measured on an 18,200-file repository
+/// here, 20s serial against 8s parallel. Git applies it only past
+/// `checkout.thresholdForParallelism` (100 files), so a small repository
+/// never pays for threads it does not need, and a git too old to know
+/// the setting ignores it like any other unknown config.
+const PARALLEL_CHECKOUT: &str = "checkout.workers=0";
 
 /// Remove a linked worktree, deleting its folder. `mode` is "safe" or
 /// "force"; forcing is what git demands when the worktree holds work.
@@ -327,7 +430,37 @@ pub async fn git_worktree_remove(
         return Err("This worktree is locked. Unlock it in git first.".to_owned());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    run_git(&project_path, &borrowed).await.map(summary)
+    remove_with_retries(&project_path, &borrowed).await.map(summary)
+}
+
+/// How many times a busy folder is given another moment. Four attempts
+/// spans about 1.5s, which covers a process finishing its exit and a
+/// scanner letting go, without leaving a stuck delete spinning for long.
+const REMOVAL_ATTEMPTS: u32 = 4;
+
+/// `git worktree remove`, retried while the folder is merely busy.
+///
+/// The app kills a project's terminals before it gets here, and waits
+/// for them, so this is the second line rather than the first: what is
+/// left is the gap between a process being terminated and Windows
+/// releasing what it held, plus whatever a virus scanner is doing. A
+/// refusal that will not change — uncommitted work, not a worktree — is
+/// returned on the first attempt, unretried.
+async fn remove_with_retries(project_path: &str, args: &[&str]) -> Result<String, String> {
+    let mut wait = std::time::Duration::from_millis(120);
+    for attempt in 1..=REMOVAL_ATTEMPTS {
+        match run_git(project_path, args).await {
+            Ok(output) => return Ok(output),
+            Err(error) => {
+                if attempt == REMOVAL_ATTEMPTS || !worktree::removal_is_transient(&error) {
+                    return Err(error);
+                }
+                tokio::time::sleep(wait).await;
+                wait *= 2;
+            }
+        }
+    }
+    unreachable!("the loop returns on the last attempt")
 }
 
 /// Drop the bookkeeping for worktrees whose folders are already gone.
@@ -368,5 +501,130 @@ fn summary(output: String) -> String {
         "Done.".to_owned()
     } else {
         tail(trimmed, 2)
+    }
+}
+
+/// Discard is the one verb here with no way back — no stash, no reflog,
+/// nothing to undo it with. These run against a real repository, because
+/// the cost of getting the argv subtly wrong is someone's afternoon.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        run_git(&dir.to_string_lossy(), args)
+            .await
+            .unwrap_or_else(|e| panic!("git {args:?} failed: {e}"))
+    }
+
+    /// Every shape the "Not staged" section can hold at once: a file
+    /// that is staged AND dirty, a plain dirty file, an untracked file,
+    /// an untracked directory, and an ignored file that must survive.
+    async fn repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_owned();
+        git(&path, &["init", "--quiet", "."]).await;
+        git(&path, &["config", "user.email", "test@example.com"]).await;
+        git(&path, &["config", "user.name", "Test"]).await;
+        git(&path, &["config", "core.autocrlf", "false"]).await;
+        std::fs::write(path.join("tracked.txt"), "one\n").unwrap();
+        std::fs::write(path.join("both.txt"), "keep\n").unwrap();
+        std::fs::write(path.join(".gitignore"), "ignored/\n").unwrap();
+        std::fs::create_dir(path.join("ignored")).unwrap();
+        std::fs::write(path.join("ignored").join(".env"), "secret\n").unwrap();
+        git(&path, &["add", "-A"]).await;
+        git(&path, &["commit", "--quiet", "-m", "init"]).await;
+
+        std::fs::write(path.join("both.txt"), "STAGED\n").unwrap();
+        git(&path, &["add", "both.txt"]).await;
+        std::fs::write(path.join("both.txt"), "STAGED-then-dirty\n").unwrap();
+        std::fs::write(path.join("tracked.txt"), "DIRTY\n").unwrap();
+        std::fs::write(path.join("untracked.txt"), "new\n").unwrap();
+        std::fs::create_dir(path.join("newdir")).unwrap();
+        std::fs::write(path.join("newdir").join("deep.txt"), "deep\n").unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn discarding_a_tracked_file_restores_it() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard(path, "tracked.txt".to_owned()).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(),
+            "one\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_an_untracked_file_removes_it() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard(path, "untracked.txt".to_owned()).await.unwrap();
+        assert!(!dir.path().join("untracked.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn discarding_one_file_leaves_every_other_alone() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard(path, "tracked.txt".to_owned()).await.unwrap();
+        assert!(dir.path().join("untracked.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("both.txt")).unwrap(),
+            "STAGED-then-dirty\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_keeps_what_was_staged() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path.clone()).await.unwrap();
+
+        // The unstaged half of a staged-and-dirty file goes; the staged
+        // half stays. "Not staged" must mean exactly that.
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("both.txt")).unwrap(),
+            "STAGED\n"
+        );
+        assert_eq!(
+            git(dir.path(), &["status", "--porcelain"]).await.trim(),
+            "M  both.txt"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_removes_untracked_files_and_their_folders() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path).await.unwrap();
+        assert!(!dir.path().join("untracked.txt").exists());
+        assert!(!dir.path().join("newdir").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(),
+            "one\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_never_touches_an_ignored_file() {
+        // `.env`, `node_modules/`, build caches. git was told to leave
+        // them alone and so is this button.
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("ignored").join(".env")).unwrap(),
+            "secret\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_everything_on_a_clean_tree_is_not_an_error() {
+        let dir = repo().await;
+        let path = dir.path().to_string_lossy().into_owned();
+        git_discard_all(path.clone()).await.unwrap();
+        git_discard_all(path).await.expect("a second pass should be a no-op");
     }
 }

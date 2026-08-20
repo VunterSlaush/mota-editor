@@ -23,6 +23,14 @@ export interface PersistedProject {
   readonly permission?: PermissionPolicy;
   readonly model?: string;
   readonly effort?: string;
+  /** The name the user gave this tab, if any. */
+  readonly label?: string;
+  /**
+   * Grouping colour id. A plain string, not `TabColorId`: this comes out
+   * of a file, so whether it still names a colour is decided by the guard
+   * at restore rather than asserted by the type.
+   */
+  readonly color?: string;
   readonly verbose?: boolean;
   readonly providerSessions: Readonly<Partial<Record<ProviderId, string>>>;
   /**
@@ -37,6 +45,22 @@ export interface PersistedProject {
   readonly provisioningOverride?: readonly ProvisionEntry[];
   /** Main-checkout path when this project is a linked git worktree. */
   readonly worktreeOf?: string;
+  /**
+   * The subtask scope, when this tab is one. Plain strings, not
+   * `SubtaskScope`: it comes out of a file, so the guard at restore
+   * decides what it still means — and fails closed to read-only.
+   */
+  readonly subtask?: {
+    readonly access: string;
+    readonly boundaries?: readonly string[];
+  };
+  /** This project's named boundary areas; unusable entries are dropped
+   *  at restore rather than trusted by the type. */
+  readonly boundaryPresets?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly boundaries: readonly string[];
+  }[];
 }
 
 /**

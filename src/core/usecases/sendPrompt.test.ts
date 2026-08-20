@@ -95,6 +95,7 @@ class FakeNotifications {
   async turnCompleted(projectName: string, providerName: string, tabActive: boolean) {
     this.calls.push({ projectName, providerName, tabActive });
   }
+  async show() {}
 }
 
 class FakeTranscriptStore implements TranscriptStore {
@@ -106,6 +107,9 @@ class FakeTranscriptStore implements TranscriptStore {
     this.stored.set(transcript.id, transcript);
   }
   async list(): Promise<TranscriptMeta[]> {
+    return [];
+  }
+  async keywords() {
     return [];
   }
   async listExternal() {
@@ -1029,6 +1033,28 @@ describe("SendPrompt", () => {
     expect(store.getState().tabs[0].attention).toBe(false);
   });
 
+  it("names the tab the way the user did when telling them a turn finished", async () => {
+    const { store, notifications, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
+    store.dispatch({
+      type: "tab/labelChanged",
+      tabId: "t1",
+      label: "auth rewrite",
+    });
+    store.dispatch({
+      type: "tab/opened",
+      project: newProject("t2", "/work/beta", DEFAULTS),
+    });
+    // t2 is now active; run the turn in t1 (background).
+
+    await useCase.execute("t1", "long refactor");
+
+    expect(notifications.calls).toEqual([
+      { projectName: "auth rewrite", providerName: "Claude", tabActive: false },
+    ]);
+  });
+
   it("does not flag the active tab, and reports it as watched", async () => {
     const { store, notifications, useCase } = setup([
       { kind: "completed", isError: false },
@@ -1566,5 +1592,59 @@ describe("an optimized command rewrites what the agent receives", () => {
     await flush();
 
     expect(gateway.requests.at(-1)?.prompt).toContain("npm test && git push");
+  });
+});
+
+describe("/clear", () => {
+  it("never reaches the agent", async () => {
+    // The whole point of handling it here: a provider that has no such
+    // command would take the slash text for an ordinary prompt.
+    const { gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["Hello"]);
+  });
+
+  it("empties the transcript and drops the resumable session", async () => {
+    const { store, useCase } = setup([{ kind: "completed", isError: false }]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    const tab = store.getState().tabs[0];
+    expect(tab.messages.some((m) => m.text === "Hello")).toBe(false);
+    // Left behind, the old session id would resume the chat just cleared.
+    expect(tab.project.providerSessions.claude).toBeUndefined();
+  });
+
+  it("says so IN the new chat, where the message survives the reset", async () => {
+    const { store, useCase } = setup([{ kind: "completed", isError: false }]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    const tab = store.getState().tabs[0];
+    expect(tab.messages.every((m) => m.role === "info")).toBe(true);
+    expect(tab.messages.at(-1)?.text).toContain("History");
+  });
+
+  it("saves the conversation before wiping it from the screen", async () => {
+    // Same safety property the newChat policy has: the action that
+    // empties the screen must never be the one that loses the work.
+    const { store, transcripts, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
+
+    await useCase.execute("t1", "Hello");
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    expect(transcripts.saved.at(-1)?.messages.some((m) => m.text === "Hello")).toBe(true);
+    expect(store.getState().tabs[0].messages.some((m) => m.text === "Hello")).toBe(false);
   });
 });

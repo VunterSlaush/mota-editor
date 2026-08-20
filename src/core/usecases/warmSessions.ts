@@ -1,7 +1,7 @@
-import { serversForProvider } from "../entities/mcpServer";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { agentServers } from "./agentServers";
 
 /**
  * Use case (shared step) — pre-start a tab's agent session with its
@@ -13,7 +13,7 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
   const state = store.getState();
   const tab = tabById(state, tabId);
   if (!tab) return;
-  const { provider, path, model, effort, mcpOverrides } = tab.project;
+  const { provider, path, model, effort, mcpOverrides, subtask } = tab.project;
   void agentGateway
     .warmSession(
       tabId,
@@ -21,14 +21,8 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
       path,
       model,
       effort,
-      serversForProvider(state.settings.mcpServers, provider, mcpOverrides),
+      agentServers(state, provider, mcpOverrides),
+      subtask,
     )
     .catch(() => undefined);
-}
-
-/** Warm every open tab (app start). */
-export function warmAllTabs(store: Store, agentGateway: AgentGateway): void {
-  for (const tab of store.getState().tabs) {
-    warmTab(store, agentGateway, tab.project.id);
-  }
 }

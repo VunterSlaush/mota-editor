@@ -5,7 +5,9 @@ import {
   DEFAULT_AUTO_COMPACT_THRESHOLD,
   MAX_AUTO_COMPACT_THRESHOLD,
   MIN_AUTO_COMPACT_THRESHOLD,
+  MODES,
   matchingCostPreset,
+  modeFromAgentModeId,
 } from "./agentSettings";
 import { EFFORT_OPTIONS, MODEL_SUGGESTIONS, PROVIDERS } from "./provider";
 
@@ -85,5 +87,49 @@ describe("matchingCostPreset", () => {
     expect(matchingCostPreset("gemini", undefined, undefined)).toBeNull();
     const economy = COST_PRESETS[0];
     expect(matchingCostPreset("gemini", economy.model.gemini, undefined)).toBe("economy");
+  });
+});
+
+describe("modeFromAgentModeId", () => {
+  it("follows the agent when it genuinely changes what it enforces", () => {
+    // The everyday case: the agent leaves plan mode after an approved
+    // plan, and the composer's picker has to stop saying "Plan".
+    expect(modeFromAgentModeId("default", "plan")).toBe("agent");
+    expect(modeFromAgentModeId("plan", "agent")).toBe("plan");
+    expect(modeFromAgentModeId("read-only", "agent")).toBe("plan");
+  });
+
+  it("leaves Ask alone when the agent confirms the read-only session", () => {
+    // Ask rides plan mode's enforcement, so the agent reports "plan" for
+    // both. Reading that as a mode CHANGE would drag every Ask tab into
+    // Plan the moment its session announced itself.
+    expect(modeFromAgentModeId("plan", "ask")).toBe("ask");
+    expect(modeFromAgentModeId("read-only", "ask")).toBe("ask");
+  });
+
+  it("leaves Debug alone when the agent confirms a writable session", () => {
+    // Same shape, the other side of the line: Debug is Agent's
+    // enforcement with different instructions.
+    expect(modeFromAgentModeId("default", "debug")).toBe("debug");
+    expect(modeFromAgentModeId("agent", "debug")).toBe("debug");
+    expect(modeFromAgentModeId("bypassPermissions", "debug")).toBe("debug");
+  });
+
+  it("still moves Ask and Debug when the enforcement really flips", () => {
+    expect(modeFromAgentModeId("default", "ask")).toBe("agent");
+    expect(modeFromAgentModeId("plan", "debug")).toBe("plan");
+  });
+
+  it("is null for an id this build has never heard of", () => {
+    // Guessing a mode the user never chose is worse than doing nothing.
+    expect(modeFromAgentModeId("architect", "agent")).toBeNull();
+  });
+});
+
+describe("MODES", () => {
+  it("offers every mode the type allows, so none is unreachable", () => {
+    // The picker is built from this list alone: a mode added to the
+    // union and forgotten here can be persisted but never chosen.
+    expect(MODES.map((m) => m.id)).toEqual(["agent", "plan", "ask", "debug"]);
   });
 });

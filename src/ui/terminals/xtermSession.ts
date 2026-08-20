@@ -1,7 +1,11 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import { terminalClipboardIntent } from "../../core/entities/terminalClipboard";
 import type { ShellSize } from "../../core/ports/shellPort";
 import "@xterm/xterm/css/xterm.css";
+
+/** Cmd is the clipboard modifier there; Ctrl stays the shell's. */
+const IS_MAC = navigator.userAgent.includes("Mac");
 
 /**
  * UI — one xterm.js instance and the DOM plumbing around it.
@@ -74,7 +78,23 @@ export function createXtermSession(
   // and the shell's completion is exactly as it was.
   const ACCEPT_KEYS = ["ArrowRight", "Tab"];
   term.attachCustomKeyEventHandler((e) => {
-    if (e.type !== "keydown" || !ACCEPT_KEYS.includes(e.key)) return true;
+    if (e.type !== "keydown") return true;
+
+    // Clipboard first: left to xterm, Ctrl+C is only ever the interrupt
+    // and Ctrl+V becomes a control character that also cancels the
+    // webview's own paste. Taken here, both are decided in one place.
+    const clipboard = terminalClipboardIntent(e, {
+      hasSelection: term.hasSelection(),
+      isMac: IS_MAC,
+    });
+    if (clipboard) {
+      e.preventDefault();
+      if (clipboard === "copy") copySelection();
+      else void pasteFromClipboard();
+      return false;
+    }
+
+    if (!ACCEPT_KEYS.includes(e.key)) return true;
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return true;
     if (!ghost.showing()) return true;
     // Tab is focus traversal to the browser; nothing else stops it from
@@ -83,6 +103,36 @@ export function createXtermSession(
     handlers.onAcceptSuggestion();
     return false;
   });
+
+  /** Copy, then drop the selection — so pressing Ctrl+C again is the
+   *  interrupt, and nothing is left holding the key hostage. */
+  function copySelection() {
+    const text = term.getSelection();
+    if (!text) return;
+    navigator.clipboard
+      .writeText(text)
+      .then(() => term.clearSelection())
+      .catch((e) => clipboardFailed("copy to", e));
+  }
+
+  /** `term.paste`, not a raw write: it wraps the text in the bracketed
+   *  paste markers when the program asked for them, which is what stops
+   *  a pasted block of lines from running itself one line at a time. */
+  async function pasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) term.paste(text);
+    } catch (e) {
+      clipboardFailed("read", e);
+    }
+  }
+
+  /** Said in the terminal rather than swallowed: a clipboard the webview
+   *  refuses is a real condition, and silence would look like a dead key. */
+  function clipboardFailed(what: string, cause: unknown) {
+    console.error(`terminal clipboard: could not ${what} the clipboard`, cause);
+    term.write(`\r\n\x1b[2m[could not ${what} the clipboard]\x1b[0m\r\n`);
+  }
 
   return {
     attach(host) {

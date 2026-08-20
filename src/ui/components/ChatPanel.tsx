@@ -4,7 +4,12 @@ import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSetti
 import { type CommandInfo, commandNames } from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
-import { agentEditedFiles, countFileChangingTools } from "../../core/entities/tool";
+import type { SubtaskScope } from "../../core/entities/subtask";
+import {
+  type AgentEdit,
+  agentEditedFiles,
+  countFileChangingTools,
+} from "../../core/entities/tool";
 import type { RemovalCheck } from "../../core/entities/worktree";
 import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
 import type { ShellSize } from "../../core/ports/shellPort";
@@ -15,19 +20,29 @@ import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
 import { useDragWidth } from "../useDragWidth";
-import { ActivityBar, type SidebarView } from "./ActivityBar";
+import {
+  ActivityBar,
+  ALL_SIDEBAR_VIEWS,
+  panelSidebarView,
+  type SidebarView,
+} from "./ActivityBar";
 import { BranchPicker } from "./BranchPicker";
 import { ChangesPanel } from "./ChangesPanel";
 import { Composer } from "./Composer";
 import { ContextFullBar } from "./ContextFullBar";
 import { DiffModal } from "./DiffModal";
+import { ExtensionPanel, type ExtensionPanelsView } from "./ExtensionPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
 import { PlanBar, PlanModal, PlanSidePanel } from "./PlanPanel";
 import { ProviderPicker } from "./ProviderPicker";
+import { SubtaskPicker } from "./SubtaskPicker";
+import { SubtasksPanel } from "./SubtasksPanel";
 import { TerminalPanel } from "./TerminalPanel";
+import type { AgentDiff } from "./ToolCallContentView";
 import { WorktreePicker } from "./WorktreePicker";
+import { WorktreesPanel } from "./WorktreesPanel";
 
 /**
  * Which panel occupies the right-hand column. One at a time: two
@@ -48,6 +63,10 @@ export interface ShellsView {
   readonly resize: (sessionId: string, size: ShellSize) => void;
   readonly select: (sessionId: string) => void;
   readonly close: (sessionId: string) => void;
+  /** The greyed-in rest of a "!" line in the composer — the terminals'
+   *  own history, asked rather than pushed (there is no session to push
+   *  to before one is open). */
+  readonly suggestLine: (prefix: string) => string;
 }
 
 /** A burst of agent edits should cost one `git status`, not twenty. */
@@ -67,12 +86,19 @@ type DiffTarget =
   | {
       readonly kind: "agent";
       readonly path: string;
-      readonly oldText?: string;
-      readonly newText: string;
+      /** Every edit the agent reported for it, oldest first. */
+      readonly edits: readonly AgentEdit[];
     };
+
+/** The views a linked worktree's tab offers — every one but its own. */
+const WORKTREE_TAB_SIDEBAR_VIEWS: readonly SidebarView[] = ALL_SIDEBAR_VIEWS.filter(
+  (view) => view !== "worktrees",
+);
 
 interface Props {
   tab: TabState;
+  /** Every open tab — the worktree panel reads its rows' status here. */
+  tabs: readonly TabState[];
   /** Fraction of the context window at which auto-compact kicks in. */
   autoCompactThreshold: number;
   /** The app's default model/effort for this tab's provider, so the
@@ -87,17 +113,25 @@ interface Props {
   onChangesLoaded: (projectId: string, changes: GitChanges | null) => void;
   sidebarView: SidebarView | null;
   onSelectSidebarView: (view: SidebarView | null) => void;
+  /** Extension sidebar panels, bundled like `shells` (ADR-0013). */
+  extensionPanels: ExtensionPanelsView;
   /** Which right-hand panel is showing. Lifted for the same reason
    *  `sidebarView` is: this component remounts on every project switch. */
   rightPanel: RightPanel;
   onSelectRightPanel: (panel: RightPanel) => void;
   shells: ShellsView;
   onOpenSettings: () => void;
-  /** Resolves with the instant local listing; `onRefresh` delivers the
-   *  merged native listing later, when a live agent could be asked. */
-  loadHistory: (onRefresh: (listing: HistoryListing) => void) => Promise<HistoryListing>;
+  /** Resolves with the instant local listing; `onRefresh`, when given,
+   *  delivers the merged native listing later. Omit it to read the local
+   *  store alone — the only half that is safe to ask mid-turn. */
+  loadHistory: (onRefresh?: (listing: HistoryListing) => void) => Promise<HistoryListing>;
+  /** Just the sessions had in this repo's other checkouts, for the
+   *  worktrees panel's short list. */
+  loadWorktreeSessions: () => Promise<readonly HistoryItem[]>;
+  /** What each session was about, for History's search. Read on demand. */
+  loadSessionKeywords: () => Promise<Map<string, readonly string[]>>;
   onOpenSession: (item: HistoryItem) => Promise<void>;
-  onDeleteSession: (sessionId: string) => Promise<void>;
+  onDeleteSession: (item: HistoryItem) => Promise<void>;
   onNewChat: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
   onDraftChange: (draft: string, attachments: readonly string[]) => void;
@@ -124,6 +158,11 @@ interface Props {
   loadGitChanges: () => Promise<GitChanges | null>;
   onGitStage: (path: string) => Promise<GitActionResult>;
   onGitUnstage: (path: string) => Promise<GitActionResult>;
+  onGitStageAll: () => Promise<GitActionResult>;
+  onGitUnstageAll: () => Promise<GitActionResult>;
+  /** Throw away one file's unstaged changes, or all of them. */
+  onGitDiscard: (path: string) => Promise<GitActionResult>;
+  onGitDiscardAll: () => Promise<GitActionResult>;
   onGitCommitPush: (message: string) => Promise<GitActionResult>;
   onGitCheckout: (branch: string) => Promise<GitActionResult>;
   onGitPush: () => Promise<GitActionResult>;
@@ -137,11 +176,25 @@ interface Props {
   /** The repo's checkouts, for the worktree picker. */
   loadWorktrees: () => Promise<WorktreeItem[]>;
   onOpenWorktree: (path: string, mainPath: string) => void;
-  onCreateWorktree: (branch: string, mode: WorktreeAddMode) => Promise<GitActionResult>;
+  onCreateWorktree: (
+    branch: string,
+    mode: WorktreeAddMode,
+    base: string,
+  ) => Promise<GitActionResult>;
   /** Try the heavy-folder copy again after it failed. */
   onRetryPreparing: () => void;
+  /** Acknowledge a worktree that git refused to create. */
+  onDismissWorktreeProblem: () => void;
   onCheckWorktreeRemoval: (path: string) => Promise<RemovalCheck>;
   onRemoveWorktree: (path: string, mode: WorktreeRemoveMode) => Promise<GitActionResult>;
+  /** The project's folders, candidates for a subtask's write boundary. */
+  loadFolderCandidates: () => Promise<string[]>;
+  /** Open a scoped tab on this folder; resolves with a problem, or not. */
+  onNewSubtask: (scope: SubtaskScope) => Promise<string | undefined>;
+  /** Re-scope this tab (a subtask only); the agent session respawns. */
+  onChangeSubtaskScope: (scope: SubtaskScope) => Promise<string | undefined>;
+  /** Go to another open tab (a subtask row was clicked). */
+  onActivateTab: (tabId: string) => void;
   onOpenFile: (path: string) => Promise<string | null>;
   onPickFiles: () => Promise<string[]>;
   /** Save an image pasted into the composer; returns its file path. */
@@ -157,6 +210,7 @@ interface Props {
 /** UI — the chat for one project: header, transcript, plan, composer. */
 export function ChatPanel({
   tab,
+  tabs,
   autoCompactThreshold,
   defaultModel,
   defaultEffort,
@@ -166,9 +220,12 @@ export function ChatPanel({
   onSelectRightPanel,
   rightPanel,
   shells,
+  extensionPanels,
   onSelectSidebarView,
   onOpenSettings,
   loadHistory,
+  loadWorktreeSessions,
+  loadSessionKeywords,
   onOpenSession,
   onDeleteSession,
   onNewChat,
@@ -194,6 +251,10 @@ export function ChatPanel({
   loadGitChanges,
   onGitStage,
   onGitUnstage,
+  onGitStageAll,
+  onGitUnstageAll,
+  onGitDiscard,
+  onGitDiscardAll,
   onGitCommitPush,
   onGitCheckout,
   onGitPush,
@@ -204,8 +265,13 @@ export function ChatPanel({
   onOpenWorktree,
   onCreateWorktree,
   onRetryPreparing,
+  onDismissWorktreeProblem,
   onCheckWorktreeRemoval,
   onRemoveWorktree,
+  loadFolderCandidates,
+  onNewSubtask,
+  onChangeSubtaskScope,
+  onActivateTab,
   onOpenFile,
   onPickFiles,
   onPasteImage,
@@ -230,22 +296,44 @@ export function ChatPanel({
   const terminalPanel = useDragWidth(520, 320, 900, "left");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [worktreePickerOpen, setWorktreePickerOpen] = useState(false);
+  // "edit" reopens the picker on this tab's own scope; "new" makes one.
+  const [subtaskPicker, setSubtaskPicker] = useState<"new" | "edit" | null>(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
 
   const currentBranch = changes?.branches.find((b) => b.current)?.name;
 
+  // A disabled extension takes its sidebar view with it — the column
+  // simply shows nothing until another view is picked.
+  const activeExtensionPanel = sidebarView?.startsWith("ext:")
+    ? extensionPanels.panels.find((panel) => panelSidebarView(panel) === sidebarView)
+    : undefined;
+
   // Which right-hand panel this project actually shows. The choice is
-  // app-wide on purpose (a running terminal must survive a tab switch),
-  // but a plan is not: most projects have none, and an empty plan panel
-  // taking a third of the window is noise. So "plan" applies only where
-  // there is a plan — the same rule PlanBar follows — and the panel
-  // comes back on its own when you return to the project that has one.
+  // remembered per project, but a plan can go away underneath it — a new
+  // chat clears one — and an empty plan panel taking a third of the
+  // window is noise. So "plan" applies only where there is a plan (the
+  // same rule PlanBar follows), and the panel comes back on its own when
+  // the project has one again.
   // A build or a server holding one of this project's terminals — worth
   // saying on the button, because the panel it lives behind is closed.
   const shellRunning = tab.shells.some((shell) => shell.running && !shell.exit);
   const hasPlan = tab.plan.length > 0 || tab.planMarkdown !== undefined;
   const shownRightPanel = rightPanel === "plan" && !hasPlan ? null : rightPanel;
+
+  // Worktrees are the main checkout's business: a linked worktree has no
+  // siblings of its own to list, and "what is running where?" is a
+  // question you ask from the root folder. A worktree tab that inherited
+  // the Worktrees view — from the default, or from a project that later
+  // became one — falls back to Changes rather than to an empty column.
+  const isWorktreeTab = tab.project.worktreeOf !== undefined;
+  const sidebarViews = isWorktreeTab ? WORKTREE_TAB_SIDEBAR_VIEWS : ALL_SIDEBAR_VIEWS;
+  // Extension views are never in the builtin list — they pass through,
+  // and a disabled extension's view shows an empty column instead.
+  const shownSidebarView =
+    sidebarView && !sidebarView.startsWith("ext:") && !sidebarViews.includes(sidebarView)
+      ? "changes"
+      : sidebarView;
 
   // Reaches memoized transcript rows — must not be a fresh arrow per render.
   const showPlan = useCallback(() => onSelectRightPanel("plan"), [onSelectRightPanel]);
@@ -258,8 +346,7 @@ export function ChatPanel({
     [onSelectRightPanel, rightPanel],
   );
   const showAgentDiff = useCallback(
-    (diff: { path: string; oldText?: string; newText: string }) =>
-      setDiffTarget({ kind: "agent", ...diff }),
+    (diff: AgentDiff) => setDiffTarget({ kind: "agent", ...diff }),
     [],
   );
   const openTouchedFile = useCallback(
@@ -307,7 +394,8 @@ export function ChatPanel({
   }, [tab.project.provider, tab.project.id]);
 
   // Reload git whenever the working tree may have moved: a turn starting
-  // or ending, the running agent touching files, or the user asking.
+  // or ending, the running agent touching files, a git verb of our own
+  // starting or finishing, or the user asking.
   // Reading git is safe mid-turn, so this stays live while the agent
   // works. Debounced, so a burst of edits costs one `git status`.
   // Loaded even with the panel closed, so the header branch stays live.
@@ -323,24 +411,32 @@ export function ChatPanel({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.busy, tab.project.id, changesRefreshKey, fileChangingTools]);
+  }, [tab.busy, tab.project.id, tab.gitVerb, changesRefreshKey, fileChangingTools]);
 
-  // Refresh the session list when the history view is open and the tab
-  // is idle (a finished turn may have added or updated a session), or
-  // whenever the user asks for it with the refresh button. The
-  // local listing paints first; the agent's native listing, when a live
-  // session can be asked, lands as a second update.
+  // Refresh the session list whenever the history view is open: on the
+  // tab going idle (a finished turn may have added or updated a
+  // session), and whenever the user asks with the refresh button.
+  //
+  // The local listing paints first and needs no agent, so it runs even
+  // mid-turn — gating the whole read on `busy` left the panel showing
+  // "no saved sessions" for as long as a session took to start, which is
+  // exactly when you go looking for one. Only the agent's native listing
+  // waits: asking it means talking to a process already mid-prompt, and
+  // it lands as a second update once the tab is idle.
   useEffect(() => {
-    if (sidebarView !== "history" || tab.busy) return;
+    if (shownSidebarView !== "history") return;
     let cancelled = false;
     let refreshed = false;
     setHistoryLoading(true);
-    loadHistory((merged) => {
-      if (cancelled) return;
-      refreshed = true;
-      setHistory(merged);
-      setHistoryLoading(false);
-    }).then((loaded) => {
+    const askAgent = tab.busy
+      ? undefined
+      : (merged: HistoryListing) => {
+          if (cancelled) return;
+          refreshed = true;
+          setHistory(merged);
+          setHistoryLoading(false);
+        };
+    loadHistory(askAgent).then((loaded) => {
       // The merged listing may already have landed — a stale local
       // paint must not overwrite it.
       if (cancelled || refreshed) return;
@@ -351,7 +447,7 @@ export function ChatPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarView, tab.busy, tab.project.id, historyRefreshKey]);
+  }, [shownSidebarView, tab.busy, tab.project.id, historyRefreshKey]);
 
   // Ctrl+` — the binding every editor uses for this. Registered here
   // rather than in a global map because the app has no shortcut registry
@@ -401,8 +497,34 @@ export function ChatPanel({
             Not prepared
           </button>
         )}
+        {/* The new worktree has no tab to say this on yet: git is still
+            checking it out, and its folder is half-written until then. */}
+        {tab.creatingWorktrees && tab.creatingWorktrees.length > 0 && (
+          <span
+            className="worktree-preparing"
+            title={`Git is checking out a worktree for ${tab.creatingWorktrees.join(
+              ", ",
+            )}. Its tab opens when the checkout finishes.`}
+          >
+            Creating…
+          </span>
+        )}
+        {tab.worktreeProblem && (
+          <button
+            type="button"
+            className="worktree-preparing worktree-preparing--failed"
+            title={`${tab.worktreeProblem} — click to dismiss.`}
+            onClick={onDismissWorktreeProblem}
+          >
+            Worktree failed
+          </button>
+        )}
         <div className="chat-panel__controls">
-          {currentBranch && (
+          {/* Only where the sidebar has no worktrees section to hold it.
+              A folder tab reaches them from there instead, which keeps a
+              header that shows nothing out of a crowded row — unlike the
+              branch chip beside it, this button names no state. */}
+          {currentBranch && isWorktreeTab && (
             <button
               type="button"
               className="branch-chip"
@@ -463,21 +585,29 @@ export function ChatPanel({
       </div>
       <div className="chat-panel__body">
         <ActivityBar
-          active={sidebarView}
+          active={shownSidebarView}
+          available={sidebarViews}
+          panels={extensionPanels.panels}
           onSelect={onSelectSidebarView}
           onOpenSettings={onOpenSettings}
         />
-        {sidebarView && (
+        {shownSidebarView && (
           <>
             <div style={{ width: sidebar.width }} className="changes-container">
-              {sidebarView === "changes" && (
+              {shownSidebarView === "changes" && (
                 <ChangesPanel
                   changes={changes}
                   busy={tab.busy}
+                  working={tab.gitVerb ?? null}
+                  notice={tab.gitNotice ?? null}
                   agentEdits={agentEdits}
                   onShowAgentDiff={showAgentDiff}
                   onStage={onGitStage}
                   onUnstage={onGitUnstage}
+                  onStageAll={onGitStageAll}
+                  onUnstageAll={onGitUnstageAll}
+                  onDiscard={onGitDiscard}
+                  onDiscardAll={onGitDiscardAll}
                   onCommitPush={onGitCommitPush}
                   onOpenBranchPicker={() => setBranchPickerOpen(true)}
                   onPush={onGitPush}
@@ -495,25 +625,56 @@ export function ChatPanel({
                   }
                 />
               )}
-              {sidebarView === "history" && (
+              {shownSidebarView === "worktrees" && (
+                <WorktreesPanel
+                  loadWorktrees={loadWorktrees}
+                  loadWorktreeSessions={loadWorktreeSessions}
+                  tabs={tabs}
+                  currentPath={tab.project.path}
+                  onOpen={onOpenWorktree}
+                  onNewWorktree={() => setWorktreePickerOpen(true)}
+                  onCheckRemoval={onCheckWorktreeRemoval}
+                  onRemove={onRemoveWorktree}
+                  onOpenSession={(item) => void onOpenSession(item)}
+                  onShowAllSessions={() => onSelectSidebarView("history")}
+                />
+              )}
+              {shownSidebarView === "subtasks" && (
+                <SubtasksPanel
+                  tabs={tabs}
+                  currentTab={tab}
+                  onActivate={onActivateTab}
+                  onNewSubtask={() => setSubtaskPicker("new")}
+                  onEditScope={() => setSubtaskPicker("edit")}
+                />
+              )}
+              {shownSidebarView === "history" && (
                 <HistoryPanel
                   sessions={history.sessions}
+                  loadKeywords={loadSessionKeywords}
                   native={history.native}
                   loading={historyLoading}
                   error={history.error}
                   activeSessionId={tab.historySessionId}
                   busy={tab.busy}
                   onOpen={(item) => void onOpenSession(item)}
-                  onDelete={(id) =>
-                    void onDeleteSession(id).then(() =>
+                  onDelete={(item) =>
+                    void onDeleteSession(item).then(() =>
                       setHistory({
                         ...history,
-                        sessions: history.sessions.filter((s) => s.id !== id),
+                        sessions: history.sessions.filter((s) => s.id !== item.id),
                       }),
                     )
                   }
                   onNewChat={onNewChat}
                   onRefresh={() => setHistoryRefreshKey((k) => k + 1)}
+                />
+              )}
+              {activeExtensionPanel && (
+                <ExtensionPanel
+                  key={panelSidebarView(activeExtensionPanel)}
+                  panel={activeExtensionPanel}
+                  panels={extensionPanels}
                 />
               )}
             </div>
@@ -568,7 +729,7 @@ export function ChatPanel({
             onDraftChange={onDraftChange}
             queued={tab.queued}
             onRemoveQueued={onRemoveQueued}
-            placeholder={`Ask ${providerName} about ${tab.project.name}… (/ for commands, @ for files)`}
+            placeholder={`Ask ${providerName} about ${tab.project.name}… (/ commands, @ files, ! terminal)`}
             commands={commands}
             provider={tab.project.provider}
             mode={tab.project.mode}
@@ -584,6 +745,7 @@ export function ChatPanel({
             onPickFiles={onPickFiles}
             onPasteImage={onPasteImage}
             loadProjectFiles={loadProjectFiles}
+            suggestShellLine={shells.suggestLine}
             onSelectMode={onSelectMode}
             onSelectPermission={onSelectPermission}
             onSelectModel={onSelectModel}
@@ -617,6 +779,7 @@ export function ChatPanel({
           <TerminalPanel
             sessions={tab.shells}
             activeShellId={tab.activeShellId}
+            awaitingLine={tab.pendingShellLine !== undefined}
             width={terminalPanel.width}
             fontSize={shells.fontSize}
             theme={shells.theme}
@@ -653,11 +816,7 @@ export function ChatPanel({
                   load: () =>
                     onGitDiff(diffTarget.path, diffTarget.staged, diffTarget.untracked),
                 }
-              : {
-                  kind: "agent",
-                  oldText: diffTarget.oldText,
-                  newText: diffTarget.newText,
-                }
+              : { kind: "agent", edits: diffTarget.edits }
           }
           onClose={() => setDiffTarget(null)}
         />
@@ -687,6 +846,15 @@ export function ChatPanel({
           onCheckRemoval={onCheckWorktreeRemoval}
           onRemove={onRemoveWorktree}
           onClose={() => setWorktreePickerOpen(false)}
+        />
+      )}
+      {subtaskPicker && (
+        <SubtaskPicker
+          loadFolders={loadFolderCandidates}
+          presets={tab.project.boundaryPresets ?? []}
+          initialScope={subtaskPicker === "edit" ? tab.project.subtask : undefined}
+          onSubmit={subtaskPicker === "edit" ? onChangeSubtaskScope : onNewSubtask}
+          onClose={() => setSubtaskPicker(null)}
         />
       )}
     </main>

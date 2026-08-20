@@ -2,7 +2,8 @@ import type { InputLine } from "../entities/inputLine";
 import { EMPTY_LINE, typeInto } from "../entities/inputLine";
 import type { CommandHistory } from "../entities/shellHistory";
 import { historyFrom, remember, suggestionSuffix } from "../entities/shellHistory";
-import { nextShellTitle, shellRunningAfter } from "../entities/shellSession";
+import { shellKeystrokes } from "../entities/shellLine";
+import { idleShell, nextShellTitle, shellRunningAfter } from "../entities/shellSession";
 import type { ShellHistorySource } from "../ports/shellHistorySource";
 import type { ShellPort, ShellSize } from "../ports/shellPort";
 import { tabById } from "../state/appState";
@@ -89,7 +90,72 @@ export class Shells {
       session: { id: sessionId, title },
     });
     if (exitedEarly) markExited(exitedEarly.code);
+    // A shell that was already dead is no place to run the waiting line;
+    // it stays parked for a terminal that lives.
+    else this.runParkedLine(tabId, sessionId);
     return { ok: true, sessionId };
+  }
+
+  /**
+   * Run a command the user typed at the prompt, not in the terminal —
+   * the composer's "!". It goes in as keystrokes, so the shell echoes
+   * it, remembers it in its own history, and reports it running exactly
+   * as if it had been typed there.
+   *
+   * A terminal that is busy is not a terminal to type into (see
+   * `idleShell`), so with nothing free the line is parked for the next
+   * one to open. Whoever asked for this is expected to show the terminal
+   * panel: a command that runs where nobody is looking is a command
+   * whose output is lost.
+   */
+  runLine(tabId: string, command: string): void {
+    const tab = tabById(this.store.getState(), tabId);
+    if (!tab || command === "") return;
+    const target = idleShell(tab.shells, tab.activeShellId);
+    if (!target) {
+      this.store.dispatch({ type: "shell/lineParked", tabId, line: command });
+      return;
+    }
+    // Bring it forward: the output is the whole point of running this.
+    this.store.dispatch({ type: "shell/selected", tabId, sessionId: target.id });
+    this.write(target.id, shellKeystrokes(command));
+  }
+
+  /**
+   * What the composer should grey in after a half-typed "!" line, or ""
+   * for nothing — the same ranked history the terminals suggest from, so
+   * a command learned in one place is offered in the other.
+   *
+   * A query rather than the `onSuggest` callback a terminal gets: the
+   * composer has no session to attach one to, and it re-renders on the
+   * keystroke anyway. The history stays private for the reason ADR-0009
+   * gives — through the reducer it would re-render the workbench once
+   * per keystroke.
+   *
+   * `prefix` must be `shellPrefix(draft)`, whose trailing space is
+   * load-bearing; the suffix is what to draw past the caret.
+   */
+  suggestFor(prefix: string): string {
+    if (!this.suggestionsWanted()) return "";
+    // Nothing has needed the history yet if no terminal has opened, and
+    // the first "!" line is exactly when it starts to matter.
+    this.warmHistory();
+    return suggestionSuffix(this.history, prefix);
+  }
+
+  /**
+   * The parked "!" line, now that this project has a terminal again.
+   *
+   * Typed ahead of the shell's first prompt on purpose: a pty buffers
+   * what arrives while the shell is still starting, so the command runs
+   * once it is ready — the same thing that happens to anyone who types
+   * faster than their shell starts.
+   */
+  private runParkedLine(tabId: string, sessionId: string): void {
+    const parked = tabById(this.store.getState(), tabId)?.pendingShellLine;
+    if (!parked) return;
+    this.store.dispatch({ type: "shell/lineRan", tabId });
+    this.write(sessionId, shellKeystrokes(parked));
   }
 
   /**

@@ -94,14 +94,24 @@ export class Worktrees {
         : projectDefaults(state.settings);
 
     const worktreeOf = samePath(worktreePath, mainPath) ? undefined : mainPath;
-    // The provisioning list travels regardless of inheritFromSourceTab:
-    // that toggle is a preference, this is correctness — removal must
-    // take back exactly the list this worktree was stocked with, even
-    // after a restart, so the worktree's own project carries it.
     const project = newProject(
       this.newId(),
       worktreePath,
-      { ...defaults, provisioningOverride: source?.project.provisioningOverride },
+      {
+        ...defaults,
+        // Travels regardless of inheritFromSourceTab: that toggle is a
+        // preference, this is correctness — removal must take back
+        // exactly the list this worktree was stocked with, even after a
+        // restart, so the worktree's own project carries it.
+        provisioningOverride: source?.project.provisioningOverride,
+        // Also travels regardless of the toggle, but for its own reason:
+        // inheritFromSourceTab governs what the AGENT runs (provider,
+        // model, permission), and a grouping colour is not that. A
+        // worktree forked from a task's tab is that task. The label
+        // deliberately stays behind — two tabs with one name are worse
+        // than one with none.
+        color: source?.project.color,
+      },
       worktreeOf,
     );
     this.store.dispatch({ type: "tab/opened", project });
@@ -112,42 +122,89 @@ export class Worktrees {
 
   /**
    * Create a worktree for `branch` at the derived sibling location and
-   * open it. Failures come back as messages for the picker to show.
+   * open it when git has finished writing it.
+   *
+   * Returns once git has been *asked*, not once it is done. A worktree
+   * is a whole working tree written out file by file — measured on an
+   * 18,200-file repository here, 8 seconds on a warm cache and minutes
+   * on a cold one — and awaiting that held the picker, and with it the
+   * app, for the whole checkout. The wait shows as a chip on this tab
+   * instead, and the new tab opens when there is something in it.
+   *
+   * Only what has to be decided before the wait is decided here: a
+   * failure the user could still act on (unknown tab, no repository)
+   * comes back for the picker to show, and everything after it is
+   * reported on the tab.
+   *
+   * `base` is where a brand-new branch starts, and only "new" mode reads
+   * it: empty leaves the start point to git, which is this tab's HEAD.
    */
   async create(
     tabId: string,
     branch: string,
     mode: WorktreeAddMode,
+    base = "",
   ): Promise<GitActionResult> {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
     if (!tab) return { ok: false, message: "Unknown tab." };
     const { container, remote } = state.settings.worktrees;
+    let mainPath: string;
+    let target: string;
     try {
       const worktrees = await this.git.worktrees(tab.project.path);
-      const mainPath = worktrees.find((w) => w.main)?.path ?? tab.project.path;
-      const target = deriveWorktreePath(
+      mainPath = worktrees.find((w) => w.main)?.path ?? tab.project.path;
+      target = deriveWorktreePath(
         mainPath,
         branch,
         worktrees.map((w) => w.path),
         container,
       );
-      const message = await this.git.worktreeAdd(
-        tab.project.path,
-        target,
-        branch,
-        mode,
-        remote,
-      );
-      await this.open(target, mainPath, tabId);
-      // Stocking the worktree is not part of creating it: the tab is
-      // already usable, and a folder that failed to copy must never make
-      // the picker claim the worktree was not made.
-      void this.provision(target, mainPath);
-      return { ok: true, message };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
+    void this.checkOutAndOpen(
+      { tabId, projectPath: tab.project.path, target, mainPath },
+      branch,
+      mode,
+      remote,
+      base,
+    );
+    return { ok: true, message: `Creating a worktree for ${branch}…` };
+  }
+
+  /** Clear the failure the chip is showing; the user has read it. */
+  dismissProblem(tabId: string): void {
+    this.store.dispatch({ type: "worktree/problemDismissed", tabId });
+  }
+
+  /** The slow half of `create`, reported on the tab that asked for it. */
+  private async checkOutAndOpen(
+    where: { tabId: string; projectPath: string; target: string; mainPath: string },
+    branch: string,
+    mode: WorktreeAddMode,
+    remote: string,
+    base: string,
+  ): Promise<void> {
+    const { tabId, projectPath, target, mainPath } = where;
+    this.store.dispatch({ type: "worktree/creating", tabId, branch });
+    try {
+      await this.git.worktreeAdd(projectPath, target, branch, mode, remote, base);
+    } catch (e) {
+      this.store.dispatch({
+        type: "worktree/created",
+        tabId,
+        branch,
+        problem: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    this.store.dispatch({ type: "worktree/created", tabId, branch });
+    await this.open(target, mainPath, tabId);
+    // Stocking the worktree is not part of creating it: the tab is
+    // already usable, and a folder that failed to copy must never make
+    // the tab claim the worktree was not made.
+    void this.provision(target, mainPath);
   }
 
   /**
@@ -223,7 +280,12 @@ export class RemoveWorktree {
   async check(tabId: string, worktreePath: string): Promise<RemovalCheck> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab)
-      return { needsForce: false, blockers: ["Unknown tab."], reclaimable: false };
+      return {
+        needsForce: false,
+        blockers: ["Unknown tab."],
+        blocked: true,
+        reclaimable: false,
+      };
 
     const worktrees = await this.git.worktrees(tab.project.path).catch(() => []);
     const target = worktrees.find((w) => samePath(w.path, worktreePath));
@@ -231,6 +293,7 @@ export class RemoveWorktree {
       return {
         needsForce: false,
         blockers: ["Not a worktree of this repository."],
+        blocked: true,
         reclaimable: false,
       };
     }

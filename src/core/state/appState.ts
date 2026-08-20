@@ -11,6 +11,8 @@ import {
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { CommandOptimization } from "../entities/commandOptimization";
+import type { ExtensionDescriptor, ExtensionStatus } from "../entities/extension";
+import type { GitActionResult, GitVerb } from "../entities/gitAction";
 import type { McpServerConfig } from "../entities/mcpServer";
 import type {
   ChatMessage,
@@ -21,6 +23,7 @@ import type {
 import { mergeToolCall } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
+import { normalizedTabLabel } from "../entities/project";
 import type { ProviderId } from "../entities/provider";
 import {
   contextWindowFor,
@@ -29,8 +32,11 @@ import {
 } from "../entities/provider";
 import type { ShellSession } from "../entities/shellSession";
 import { shellAfterClosing } from "../entities/shellSession";
+import type { BoundaryPreset, SubtaskScope } from "../entities/subtask";
+import type { TabColorId } from "../entities/tabColor";
+import { tabIsWorking } from "../entities/tabStatus";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
-import { defaultWorktreeSettings } from "../entities/worktree";
+import { defaultWorktreeSettings, samePath } from "../entities/worktree";
 import { DEFAULT_ZOOM_LEVEL } from "../entities/zoom";
 
 /**
@@ -83,6 +89,16 @@ export interface TabState {
   readonly preparing?: boolean;
   /** What went wrong preparing them, once, until dismissed. */
   readonly preparingProblem?: string;
+  /**
+   * Branches whose worktree git is checking out for this tab right now.
+   *
+   * A list rather than a flag because nothing stops a second creation
+   * being started while the first is still writing files — which is the
+   * whole point of not blocking on it (see `Worktrees.create`).
+   */
+  readonly creatingWorktrees?: readonly string[];
+  /** Why the last creation from this tab failed, until dismissed. */
+  readonly worktreeProblem?: string;
   /** Context-window usage of the tab's agent session. `estimated` marks
    *  a client-side approximation (no `usage_update` from the agent);
    *  `provisional` marks an agent report whose `size` is the adapter's
@@ -126,6 +142,14 @@ export interface TabState {
    *  tooltips read this instead of asking git on every hover. */
   readonly branch?: string;
   /**
+   * The git verb running against this project, and what the last one
+   * said. Here rather than in the Changes panel because switching tabs
+   * remounts it: a push mid-flight has to still look like one on the way
+   * back, and its outcome has to survive being away for it.
+   */
+  readonly gitVerb?: GitVerb;
+  readonly gitNotice?: GitActionResult;
+  /**
    * The terminals open in this project.
    *
    * Here rather than in the panel's own React state because switching
@@ -136,6 +160,14 @@ export interface TabState {
    */
   readonly shells: readonly ShellSession[];
   readonly activeShellId?: string;
+  /**
+   * A "!" line from the composer that had no free terminal to run in —
+   * either this project has none open, or a build is holding every one
+   * of them. Kept so the next terminal to open runs it, and so the
+   * panel knows to open one: the alternative is a command that
+   * disappears because a dev server happened to own the only shell.
+   */
+  readonly pendingShellLine?: string;
 }
 
 /**
@@ -187,6 +219,8 @@ export interface AppState {
   readonly tabs: readonly TabState[];
   readonly activeTabId: string | null;
   readonly settings: AppSettings;
+  /** Installed extensions, as the host last described them. */
+  readonly extensions: readonly ExtensionDescriptor[];
 }
 
 export const defaultSettings: AppSettings = {
@@ -212,6 +246,7 @@ export const initialState: AppState = {
   tabs: [],
   activeTabId: null,
   settings: defaultSettings,
+  extensions: [],
 };
 
 export type Action =
@@ -227,6 +262,17 @@ export type Action =
   | { type: "worktree/preparing"; tabId: string }
   /** `problem` is absent when everything landed. */
   | { type: "worktree/prepared"; tabId: string; problem?: string }
+  | { type: "worktree/creating"; tabId: string; branch: string }
+  /** `problem` is absent when git made the worktree. */
+  | { type: "worktree/created"; tabId: string; branch: string; problem?: string }
+  | { type: "worktree/problemDismissed"; tabId: string }
+  | { type: "subtask/scopeChanged"; tabId: string; scope: SubtaskScope }
+  | {
+      type: "subtask/presetsChanged";
+      tabId: string;
+      /** Empty clears the field — the project names no areas. */
+      presets: readonly BoundaryPreset[];
+    }
   | { type: "tab/activated"; tabId: string }
   | { type: "tab/moved"; tabId: string; toIndex: number }
   | { type: "tab/attentionRequested"; tabId: string }
@@ -253,6 +299,8 @@ export type Action =
       provisioning: readonly ProvisionEntry[] | undefined;
     }
   | { type: "tab/verboseChanged"; tabId: string; verbose: boolean }
+  | { type: "tab/labelChanged"; tabId: string; label: string }
+  | { type: "tab/colorChanged"; tabId: string; color: TabColorId | undefined }
   | { type: "tab/commandsUpdated"; tabId: string; commands: readonly CommandInfo[] }
   | { type: "tab/planUpdated"; tabId: string; plan: readonly PlanEntry[] }
   | {
@@ -270,6 +318,8 @@ export type Action =
     }
   | { type: "tab/sessionStageChanged"; tabId: string; stage: string | undefined }
   | { type: "tab/branchUpdated"; tabId: string; branch: string | undefined }
+  | { type: "git/started"; tabId: string; verb: GitVerb }
+  | { type: "git/finished"; tabId: string; result: GitActionResult }
   /** The backend agent session was ended on purpose: forget everything
    *  tied to it (resume id, usage, advertised commands). */
   | { type: "chat/sessionReset"; tabId: string; provider: ProviderId }
@@ -345,6 +395,13 @@ export type Action =
       provider: ProviderId;
       sessionId: string;
     }
+  | { type: "extensions/loaded"; extensions: readonly ExtensionDescriptor[] }
+  | {
+      type: "extensions/statusChanged";
+      extensionId: string;
+      status: ExtensionStatus;
+      error?: string;
+    }
   | { type: "shell/opened"; tabId: string; session: ShellSession }
   | { type: "shell/selected"; tabId: string; sessionId: string }
   /** A command took the shell, or gave it back. Dispatched only when the
@@ -353,22 +410,48 @@ export type Action =
   /** The shell died on its own — a `exit` typed, or a crash. */
   | { type: "shell/exited"; tabId: string; sessionId: string; code: number | null }
   /** The user dismissed the terminal; the pty is killed either way. */
-  | { type: "shell/closed"; tabId: string; sessionId: string };
+  | { type: "shell/closed"; tabId: string; sessionId: string }
+  /** A "!" line is waiting for a terminal with a free prompt. */
+  | { type: "shell/lineParked"; tabId: string; line: string }
+  /** It found one and was typed into it. */
+  | { type: "shell/lineRan"; tabId: string };
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "workspace/restored":
       return {
+        ...state,
         tabs: action.tabs,
         activeTabId: action.activeTabId,
         settings: action.settings ?? state.settings,
+      };
+
+    case "extensions/loaded":
+      return { ...state, extensions: action.extensions };
+
+    case "extensions/statusChanged":
+      return {
+        ...state,
+        extensions: state.extensions.map((e) =>
+          e.id === action.extensionId
+            ? { ...e, status: action.status, error: action.error }
+            : e,
+        ),
       };
 
     case "settings/changed":
       return { ...state, settings: { ...state.settings, ...action.patch } };
 
     case "tab/opened": {
-      const existing = state.tabs.find((t) => t.project.path === action.project.path);
+      // Re-activate rather than duplicate — but only among plain tabs.
+      // Subtasks exist to put several agents on one folder, so a subtask
+      // never absorbs another tab and is never absorbed by one.
+      const existing = state.tabs.find(
+        (t) =>
+          t.project.path === action.project.path &&
+          !t.project.subtask &&
+          !action.project.subtask,
+      );
       if (existing) return { ...state, activeTabId: existing.project.id };
       const tab: TabState = {
         project: action.project,
@@ -411,6 +494,61 @@ export function reduce(state: AppState, action: Action): AppState {
         preparing: false,
         preparingProblem: action.problem,
       }));
+
+    case "worktree/creating":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        creatingWorktrees: [...(tab.creatingWorktrees ?? []), action.branch],
+        worktreeProblem: undefined,
+      }));
+
+    case "worktree/created":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        // One occurrence, not every match: two creations of the same
+        // name can overlap, and the second is still running.
+        creatingWorktrees: dropFirst(tab.creatingWorktrees ?? [], action.branch),
+        worktreeProblem: action.problem,
+      }));
+
+    case "worktree/problemDismissed":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        worktreeProblem: undefined,
+      }));
+
+    // Only a tab that already is a subtask can change scope: converting
+    // a plain tab would silently rescope a conversation the user started
+    // under full authority — closing it is the honest way out.
+    case "subtask/scopeChanged":
+      return mapTab(state, action.tabId, (tab) =>
+        tab.project.subtask
+          ? { ...tab, project: { ...tab.project, subtask: action.scope } }
+          : tab,
+      );
+
+    // Every tab on this folder shares its areas — they describe the
+    // repository, not the tab that happened to be open when they were
+    // written. An empty list deletes the key rather than storing [],
+    // the same tri-state the other per-project fields keep.
+    case "subtask/presetsChanged": {
+      const edited = tabById(state, action.tabId);
+      if (!edited) return state;
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) => {
+          if (!samePath(tab.project.path, edited.project.path)) return tab;
+          const { boundaryPresets: _, ...project } = tab.project;
+          return {
+            ...tab,
+            project:
+              action.presets.length > 0
+                ? { ...project, boundaryPresets: action.presets }
+                : project,
+          };
+        }),
+      };
+    }
 
     case "tab/moved": {
       // Reordering is purely cosmetic: which tab you are looking at never
@@ -517,6 +655,26 @@ export function reduce(state: AppState, action: Action): AppState {
         project: { ...tab.project, verbose: action.verbose },
       }));
 
+    // Both delete their key when cleared rather than storing a blank, the
+    // same tri-state mcpOverrides and provisioningOverride already keep:
+    // absent means "the user never named one", and an empty string or an
+    // explicit undefined would read as a choice that was made.
+    case "tab/labelChanged":
+      return mapTab(state, action.tabId, (tab) => {
+        const { label: _, ...project } = tab.project;
+        const label = normalizedTabLabel(action.label);
+        return { ...tab, project: label ? { ...project, label } : project };
+      });
+
+    case "tab/colorChanged":
+      return mapTab(state, action.tabId, (tab) => {
+        const { color: _, ...project } = tab.project;
+        return {
+          ...tab,
+          project: action.color ? { ...project, color: action.color } : project,
+        };
+      });
+
     case "tab/commandsUpdated":
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
@@ -579,6 +737,22 @@ export function reduce(state: AppState, action: Action): AppState {
 
     case "tab/branchUpdated":
       return mapTab(state, action.tabId, (tab) => ({ ...tab, branch: action.branch }));
+
+    case "git/started":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        gitVerb: action.verb,
+        gitNotice: undefined,
+      }));
+
+    // A verb that said nothing succeeded quietly — staging a file, most
+    // often — and the panel showing the change is the whole report.
+    case "git/finished":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        gitVerb: undefined,
+        gitNotice: action.result.message ? action.result : undefined,
+      }));
 
     case "chat/messageAppended":
       return mapTab(state, action.tabId, (tab) => ({
@@ -815,6 +989,15 @@ export function reduce(state: AppState, action: Action): AppState {
           ...(selected === undefined ? {} : { activeShellId: selected }),
         };
       });
+
+    case "shell/lineParked":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        pendingShellLine: action.line,
+      }));
+
+    case "shell/lineRan":
+      return mapTab(state, action.tabId, ({ pendingShellLine: _, ...tab }) => tab);
   }
 }
 
@@ -831,6 +1014,12 @@ function appendDelta(
   const last = messages[messages.length - 1];
   if (!last || last.role !== role) return messages;
   return [...messages.slice(0, -1), { ...last, text: last.text + text }];
+}
+
+/** The list without its first `value` — the rest, duplicates included. */
+function dropFirst(list: readonly string[], value: string): readonly string[] {
+  const at = list.indexOf(value);
+  return at === -1 ? list : [...list.slice(0, at), ...list.slice(at + 1)];
 }
 
 function mapTab(
@@ -925,4 +1114,14 @@ export function activeTab(state: AppState): TabState | null {
 
 export function tabById(state: AppState, tabId: string): TabState | null {
   return state.tabs.find((t) => t.project.id === tabId) ?? null;
+}
+
+/** The open subtask tabs working this folder, in tab order. */
+export function subtaskTabsOn(state: AppState, path: string): TabState[] {
+  return state.tabs.filter((t) => t.project.subtask && samePath(t.project.path, path));
+}
+
+/** Every tab with agent work in flight — what a close has to ask about. */
+export function workingTabs(state: AppState): readonly TabState[] {
+  return state.tabs.filter(tabIsWorking);
 }

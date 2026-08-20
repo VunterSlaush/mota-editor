@@ -1,8 +1,13 @@
-import { FolderSimple, GitFork } from "@phosphor-icons/react";
+import { FolderSimple, GitFork, TreeStructure } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { tabLabel } from "../../core/entities/project";
+import { describeScope } from "../../core/entities/subtask";
+import type { TabColorId } from "../../core/entities/tabColor";
+import { MAX_TAB_SHORTCUT } from "../../core/entities/tabShortcut";
 import { TAB_STATUS_LABELS, tabStatus } from "../../core/entities/tabStatus";
 import type { TabState } from "../../core/state/appState";
-import { useDragReorder } from "../useDragReorder";
+import { CTRL_IS_SECONDARY_CLICK, useDragReorder } from "../useDragReorder";
+import { TabMenu } from "./TabMenu";
 import { tabDensity } from "./tabDensity";
 
 interface Props {
@@ -12,6 +17,8 @@ interface Props {
   onClose: (tabId: string) => void;
   onReorder: (tabId: string, toIndex: number) => void;
   onOpenProject: () => void;
+  onRename: (tabId: string, label: string) => void;
+  onRecolor: (tabId: string, color: TabColorId | undefined) => void;
 }
 
 /** UI — one tab per project, plus the "open project" affordance. */
@@ -22,40 +29,73 @@ export function TabBar({
   onClose,
   onReorder,
   onOpenProject,
+  onRename,
+  onRecolor,
 }: Props) {
   const drag = useDragReorder(onReorder, ".tab");
   const strip = useRef<HTMLElement>(null);
   const density = tabDensity(useWidthOf(strip), tabs.length);
+  const [menu, setMenu] = useState<{ tabId: string; anchor: DOMRect } | null>(null);
+  // Undefined once the tab is gone, so closing a tab with its menu open
+  // takes the menu with it.
+  const menuTab = menu ? tabs.find((t) => t.project.id === menu.tabId) : undefined;
 
   return (
     // The header itself drags the window; the tabs on it drag each other.
     <header className={`tab-bar tab-bar--${density}`} data-tauri-drag-region ref={strip}>
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const id = tab.project.id;
         const isActive = id === activeTabId;
         const status = tabStatus(tab);
-        const label = TAB_STATUS_LABELS[status];
+        const statusLabel = TAB_STATUS_LABELS[status];
         // The branch comes from the tab's cached git read, never a live call.
         const at = tab.branch ? `${tab.project.path} (${tab.branch})` : tab.project.path;
-        const where = tab.project.worktreeOf
+        const checkout = tab.project.worktreeOf
           ? `${at} — worktree of ${tab.project.worktreeOf}`
           : at;
+        const where = tab.project.subtask
+          ? `${checkout} — subtask, ${describeScope(tab.project.subtask)}`
+          : checkout;
+        const name = tabLabel(tab.project);
+        // A named tab still has to say where it points: the name took the
+        // folder's place in the strip, so the tooltip is where that goes.
+        const named = tab.project.label ? `${tab.project.label} — ${where}` : where;
+        // The only place the tab shortcuts are written down, the way the
+        // terminal's Ctrl+` lives on its own button.
+        const shortcut = index < MAX_TAB_SHORTCUT ? ` — Ctrl+${index + 1}` : "";
         return (
           <div
             key={id}
             className={`tab ${isActive ? "tab--active" : ""} tab--${status} ${
               drag.draggingId === id ? "tab--dragging" : ""
             }`}
-            title={label ? `${where} — ${label}` : where}
+            title={
+              statusLabel ? `${named} — ${statusLabel}${shortcut}` : `${named}${shortcut}`
+            }
+            data-color={tab.project.color}
             onPointerDown={(e) => drag.startDrag(id, e)}
-            // The click that ends a drop is the drop, not a tab switch.
-            onClick={() => {
-              if (!drag.wasDragged()) onSelect(id);
+            // The click that ends a drop is the drop, not a tab switch. On
+            // macOS a Control-click is the right-click, and must not select
+            // the tab it opened the menu for either — elsewhere Ctrl+click
+            // is an ordinary click and still should.
+            onClick={(e) => {
+              if (!drag.wasDragged() && !(CTRL_IS_SECONDARY_CLICK && e.ctrlKey)) {
+                onSelect(id);
+              }
+            }}
+            // preventDefault, or the webview draws its own menu on top.
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ tabId: id, anchor: e.currentTarget.getBoundingClientRect() });
             }}
           >
-            {/* Folder vs worktree at a glance; the tooltip says which repo. */}
+            {/* Folder, worktree or subtask at a glance; the tooltip says
+                which repo and which scope. The subtask icon wins — the
+                restriction matters more than the checkout it sits on. */}
             <span className="tab__icon">
-              {tab.project.worktreeOf ? (
+              {tab.project.subtask ? (
+                <TreeStructure size={13} aria-hidden="true" />
+              ) : tab.project.worktreeOf ? (
                 <GitFork size={13} aria-hidden="true" />
               ) : (
                 <FolderSimple size={13} aria-hidden="true" />
@@ -65,10 +105,10 @@ export function TabBar({
               <span
                 className={`tab__dot tab__dot--${status}`}
                 role="img"
-                aria-label={label}
+                aria-label={statusLabel}
               />
             )}
-            <span className="tab__name">{tab.project.name}</span>
+            <span className="tab__name">{name}</span>
             {/* Which checkout this is. With worktrees two tabs of one
                 repository differ by nothing else, so it earns its width
                 — and gives it back first when the strip runs short. */}
@@ -76,7 +116,7 @@ export function TabBar({
             <button
               type="button"
               className="tab__close"
-              aria-label={`Close ${tab.project.name}`}
+              aria-label={`Close ${name}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(id);
@@ -95,6 +135,18 @@ export function TabBar({
       >
         +
       </button>
+      {menuTab && menu && (
+        <TabMenu
+          key={menu.tabId}
+          anchor={menu.anchor}
+          label={menuTab.project.label ?? ""}
+          color={menuTab.project.color}
+          folderName={menuTab.project.name}
+          onRename={(label) => onRename(menuTab.project.id, label)}
+          onRecolor={(color) => onRecolor(menuTab.project.id, color)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </header>
   );
 }

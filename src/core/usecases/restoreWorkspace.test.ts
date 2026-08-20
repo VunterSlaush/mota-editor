@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentGateway } from "../ports/agentGateway";
+import type { TranscriptStore } from "../ports/transcriptStore";
 import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
 import { type AppSettings, defaultSettings } from "../state/appState";
 import { Store } from "../state/store";
@@ -18,12 +19,20 @@ class FakeAgentGateway {
   async warmSession(): Promise<void> {}
 }
 
+/** Nothing was ever saved — restore has only the workspace file to go on. */
+class EmptyTranscriptStore {
+  async load(): Promise<null> {
+    return null;
+  }
+}
+
 async function restore(workspace: PersistedWorkspace | null) {
   const store = new Store();
   await new RestoreWorkspace(
     store,
     new FakeWorkspaceStore(workspace),
     new FakeAgentGateway() as unknown as AgentGateway,
+    new EmptyTranscriptStore() as unknown as TranscriptStore,
   ).execute();
   return store.getState();
 }
@@ -240,5 +249,153 @@ describe("RestoreWorkspace projects", () => {
     expect(toPersisted(state).projects[0].provisioningOverride).toEqual(
       provisioningOverride,
     );
+  });
+});
+
+describe("RestoreWorkspace subtasks", () => {
+  it("brings a subtask scope back, and it survives a round-trip", async () => {
+    const subtask = { access: "boundary", boundaries: ["apps/web"] };
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          subtask,
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.subtask).toEqual(subtask);
+    expect(toPersisted(state).projects[0].subtask).toEqual(subtask);
+  });
+
+  it("leaves an ordinary tab ordinary", async () => {
+    const state = await restore({
+      projects: [
+        { id: "t1", path: "/work/alpha", provider: "claude", providerSessions: {} },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.subtask).toBeUndefined();
+  });
+
+  it("degrades a mangled scope to read-only rather than dropping it", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          subtask: { access: "everything" },
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    // A restriction that no longer parses is still a restriction.
+    expect(state.tabs[0].project.subtask).toEqual({ access: "read-only" });
+  });
+});
+
+describe("RestoreWorkspace tab names and colours", () => {
+  it("brings a tab's name and colour back, still naming the folder from the path", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          label: "auth rewrite",
+          color: "teal",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.label).toBe("auth rewrite");
+    expect(state.tabs[0].project.color).toBe("teal");
+    // The whole reason `label` is its own field: `name` is recomputed
+    // from the path on every restore and would have eaten it.
+    expect(state.tabs[0].project.name).toBe("alpha");
+  });
+
+  it("leaves a tab uncoloured when the file names a colour this build lost", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          color: "chartreuse",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.color).toBeUndefined();
+  });
+
+  it("falls back to the folder name when the file has an empty label", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          providerSessions: {},
+          label: "",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.label).toBeUndefined();
+    expect(state.tabs[0].project.name).toBe("alpha");
+  });
+
+  it("loads a workspace written before tabs could be named", async () => {
+    const state = await restore({
+      projects: [
+        { id: "t1", path: "/work/alpha", provider: "claude", providerSessions: {} },
+      ],
+      activeTabId: "t1",
+    });
+
+    expect(state.tabs[0].project.label).toBeUndefined();
+    expect(state.tabs[0].project.color).toBeUndefined();
+    expect(state.tabs[0].project.name).toBe("alpha");
+  });
+
+  it("carries a name and colour through a save and back", async () => {
+    // The round trip, not the intermediate shape: this fails if either
+    // toPersisted or restoreWorkspace forgets a field.
+    const store = new Store();
+    store.dispatch({
+      type: "tab/opened",
+      project: {
+        id: "t1",
+        path: "/work/alpha",
+        name: "alpha",
+        provider: "claude",
+        mode: "agent",
+        permission: "manual",
+        verbose: true,
+        providerSessions: {},
+        label: "auth rewrite",
+        color: "violet",
+      },
+    });
+
+    const state = await restore(toPersisted(store.getState()));
+
+    expect(state.tabs[0].project.label).toBe("auth rewrite");
+    expect(state.tabs[0].project.color).toBe("violet");
   });
 });

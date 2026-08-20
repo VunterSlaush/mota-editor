@@ -22,6 +22,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::oneshot;
 
+use crate::fs_confine::confine_to_project;
 use crate::runner;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120); // first npx run downloads the adapter
@@ -70,6 +71,9 @@ pub struct AcpSession {
     /// The project folder — the confinement root for the agent's
     /// client-fs requests.
     project_path: String,
+    /// The tab's subtask scope: narrows client-fs writes and terminals
+    /// below the confinement root. None = full authority (change = respawn).
+    subtask: Option<agent_core::SubtaskScope>,
     /// Model the agent was spawned with (env-based; change = respawn).
     model: Option<String>,
     /// Effort the agent was spawned with (env-based; change = respawn).
@@ -118,6 +122,11 @@ pub struct AcpSession {
     /// `session/update` stream restores the AGENT's memory, not the
     /// chat (which never lost the conversation), so updates are muted.
     replaying: AtomicBool,
+    /// Set on a throwaway session whose ANSWER is the point: the
+    /// assistant's words are collected here for the caller instead of
+    /// emitted to a tab. No tab is listening for a session that exists
+    /// only to answer one question (see `ask_once`).
+    capture: Mutex<Option<String>>,
     /// What the agent advertised at `initialize` — gates optional calls
     /// (`session/list`, `session/load`) instead of assuming support.
     caps: Mutex<acp::AgentCaps>,
@@ -270,6 +279,35 @@ impl AcpSession {
         *self.session_id.lock().unwrap_or_else(PoisonError::into_inner) = session_id;
     }
 
+    /// Start collecting the assistant's words instead of emitting them.
+    fn start_capture(&self) {
+        *self.capture.lock().unwrap_or_else(PoisonError::into_inner) = Some(String::new());
+    }
+
+    /// Everything the assistant said since `start_capture`.
+    fn captured(&self) -> String {
+        self.capture
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_default()
+    }
+
+    /// Fold one event into the capture buffer. Returns false when this
+    /// session is not capturing, and the event belongs to a tab instead.
+    fn capture_event(&self, event: &AgentEvent) -> bool {
+        let mut buffer = self.capture.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(text) = buffer.as_mut() else { return false };
+        match event {
+            AgentEvent::AssistantMessage { text: said }
+            | AgentEvent::AssistantDelta { text: said } => text.push_str(said),
+            // Thoughts, tool calls and plans are how the agent got to the
+            // answer, not the answer.
+            _ => {}
+        }
+        true
+    }
+
     async fn write_message(&self, message: &Value) -> Result<(), String> {
         let mut line = message.to_string();
         line.push('\n');
@@ -336,6 +374,7 @@ pub async fn start_turn(
         model: request.model.clone(),
         effort: request.effort.clone(),
         mcp_servers,
+        subtask: request.subtask.clone(),
     };
     let session = ensure_session(&app, sessions, tab_id, provider_id, &spec).await?;
 
@@ -350,19 +389,26 @@ pub async fn start_turn(
             "A turn is already running in this tab.".to_owned(),
         ));
     }
+    // The scope caps the permission BEFORE it reaches the approval
+    // flags: Mota's own auto-approval must never approve what the scope
+    // forbids (a read-only tab asks about everything).
+    let permission =
+        agent_core::scope::effective_permission(request.permission, request.subtask.as_ref());
     session.bypass.store(
-        request.permission == agent_core::Permission::Bypass,
+        permission == agent_core::Permission::Bypass,
         Ordering::SeqCst,
     );
     session.auto.store(
-        request.permission == agent_core::Permission::Auto,
+        permission == agent_core::Permission::Auto,
         Ordering::SeqCst,
     );
     session
         .plan_mode
         .store(request.mode == agent_core::Mode::Plan, Ordering::SeqCst);
 
-    let applied = apply_mode(&session, provider_id, request.mode, request.permission).await;
+    let applied =
+        apply_mode(&session, provider_id, request.mode, permission, request.subtask.as_ref())
+            .await;
     session
         .native_auto
         .store(applied == Some("auto"), Ordering::SeqCst);
@@ -431,8 +477,12 @@ async fn apply_mode(
     provider_id: &str,
     mode: agent_core::Mode,
     permission: agent_core::Permission,
+    subtask: Option<&agent_core::SubtaskScope>,
 ) -> Option<&'static str> {
-    let mode_id = acp::native_mode_id(provider_id, mode, permission)?;
+    // The scope's mode wins where a vendor has one (codex's read-only
+    // sandbox): that is the mechanical layer, the mode is just comfort.
+    let mode_id = agent_core::scope::native_scope_mode_id(provider_id, subtask)
+        .or_else(|| acp::native_mode_id(provider_id, mode, permission))?;
     // Only name modes the agent actually offered; an adapter that renamed
     // its ids gets no bogus request (empty list = agent reported none,
     // send untested as before).
@@ -580,6 +630,10 @@ pub struct SessionSpec {
     /// Servers Mota hands the agent at session creation.
     #[serde(default)]
     pub mcp_servers: Vec<acp::McpServer>,
+    /// The tab's subtask scope. Spawn-time: codex's read-only sandbox is
+    /// a session mode, so widening or narrowing means a fresh agent.
+    #[serde(default)]
+    pub subtask: Option<agent_core::SubtaskScope>,
 }
 
 async fn ensure_session(
@@ -589,7 +643,7 @@ async fn ensure_session(
     provider_id: &str,
     spec: &SessionSpec,
 ) -> Result<Arc<AcpSession>, AcpStartError> {
-    let SessionSpec { project_path, model, effort, mcp_servers } = spec;
+    let SessionSpec { project_path, model, effort, mcp_servers, subtask } = spec;
     let (model, effort) = (model.clone(), effort.clone());
 
     // One boot per tab at a time: a second caller (the first prompt or
@@ -610,7 +664,8 @@ async fn ensure_session(
         let matches = existing.provider_id == provider_id
             && existing.model == model
             && existing.effort == effort
-            && existing.mcp_servers == *mcp_servers;
+            && existing.mcp_servers == *mcp_servers
+            && existing.subtask == *subtask;
         // A dead session (agent crashed or was killed) must be respawned
         // even when the spec matches — reusing it can only fail or hang.
         if matches && !existing.dead.load(Ordering::SeqCst) {
@@ -815,7 +870,7 @@ async fn boot_agent(
     spec: &SessionSpec,
     emit_stages: bool,
 ) -> Result<Arc<AcpSession>, AcpStartError> {
-    let SessionSpec { project_path, model, effort, mcp_servers } = spec;
+    let SessionSpec { project_path, model, effort, mcp_servers, subtask } = spec;
     let spawned =
         spawn_agent(provider_id, project_path, model.as_deref(), effort.as_deref())?;
     let SpawnedAgent { mut child, install_hint, via_npx } = spawned;
@@ -830,6 +885,7 @@ async fn boot_agent(
     let session = Arc::new(AcpSession {
         provider_id: provider_id.to_owned(),
         project_path: project_path.clone(),
+        subtask: subtask.clone(),
         model: model.clone(),
         effort: effort.clone(),
         mcp_servers: mcp_servers.clone(),
@@ -849,6 +905,7 @@ async fn boot_agent(
         has_conversation: AtomicBool::new(false),
         dead: AtomicBool::new(false),
         replaying: AtomicBool::new(false),
+        capture: Mutex::new(None),
         caps: Mutex::new(acp::AgentCaps::default()),
         available_modes: Mutex::new(Vec::new()),
         stderr_tail: Mutex::new(VecDeque::new()),
@@ -886,6 +943,7 @@ struct SessionShape<'a> {
     provider_id: &'a str,
     model: Option<&'a str>,
     effort: Option<&'a str>,
+    subtask: Option<&'a agent_core::SubtaskScope>,
 }
 
 impl<'a> SessionShape<'a> {
@@ -895,6 +953,7 @@ impl<'a> SessionShape<'a> {
             provider_id: &session.provider_id,
             model: session.model.as_deref(),
             effort: session.effort.as_deref(),
+            subtask: session.subtask.as_ref(),
         }
     }
 
@@ -904,6 +963,7 @@ impl<'a> SessionShape<'a> {
             provider_id,
             model: spec.model.as_deref(),
             effort: spec.effort.as_deref(),
+            subtask: spec.subtask.as_ref(),
         }
     }
 }
@@ -920,6 +980,8 @@ fn respawn_reason(before: &SessionShape, after: &SessionShape) -> &'static str {
         "a model change"
     } else if before.effort != after.effort {
         "an effort change"
+    } else if before.subtask != after.subtask {
+        "an access-scope change"
     } else {
         "a tool-server change"
     }
@@ -1185,6 +1247,7 @@ pub(crate) async fn probe_handshake(
         // No MCP servers: the probe asks "can you work at all?", and a
         // failing server would answer a different question.
         mcp_servers: Vec::new(),
+        subtask: None,
     };
     let tab_id = format!("probe:{provider_id}");
     let session = boot_agent(app, &tab_id, provider_id, &spec, false).await?;
@@ -1203,6 +1266,94 @@ pub(crate) async fn probe_handshake(
     result
 }
 
+/// Ask a throwaway agent one question and return what it answered.
+///
+/// A session of its own, booted and shut down for this one exchange: the
+/// answer must not land in a tab's conversation, and it must not eat a
+/// tab's context window. Read-only throughout — the scope rides the
+/// prompt (and codex's sandbox via `native_scope_mode_id`), so an agent
+/// asked to look around cannot decide to tidy up while it is there.
+///
+/// Costs the user real tokens, so nothing calls this on its own: every
+/// caller is behind a button the user pressed.
+pub(crate) async fn ask_once(
+    app: &AppHandle,
+    provider_id: &str,
+    project_path: &str,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<String, AcpStartError> {
+    let spec = SessionSpec {
+        project_path: project_path.to_owned(),
+        model: None,
+        effort: None,
+        // No MCP servers: this asks about the folder tree, and a failing
+        // server would only give the boot a way to fail for other reasons.
+        mcp_servers: Vec::new(),
+        subtask: Some(agent_core::SubtaskScope::ReadOnly),
+    };
+    let tab_id = format!("ask:{provider_id}");
+    let session = boot_agent(app, &tab_id, provider_id, &spec, false).await?;
+    session.start_capture();
+
+    let answer = ask_in_session(&session, provider_id, project_path, prompt, timeout).await;
+    session.shutdown();
+    answer
+}
+
+/// The exchange itself, split out so the caller above always shuts the
+/// agent down — an early return here must not leak the process.
+async fn ask_in_session(
+    session: &Arc<AcpSession>,
+    provider_id: &str,
+    project_path: &str,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<String, AcpStartError> {
+    let id = session.request_id();
+    let opened = session
+        .call_with_timeout(acp::session_new_request(id, project_path, &[]), id, timeout)
+        .await
+        .map_err(|e| AcpStartError::Failed(session.with_stderr(e)))?;
+    if let (Some(session_id), _) = acp::parse_session_new_result(&opened) {
+        session.set_sid(session_id);
+    }
+
+    // Belt and braces on top of the prompt's own read-only wording: where
+    // the vendor has a read-only session mode, take it.
+    apply_mode(
+        session,
+        provider_id,
+        agent_core::Mode::Ask,
+        agent_core::Permission::Manual,
+        Some(&agent_core::SubtaskScope::ReadOnly),
+    )
+    .await;
+
+    let request = agent_core::TurnRequest {
+        prompt: prompt.to_owned(),
+        project_path: project_path.to_owned(),
+        resume_session_id: None,
+        mode: agent_core::Mode::Ask,
+        permission: agent_core::Permission::Manual,
+        attachments: Vec::new(),
+        model: None,
+        effort: None,
+        subtask: Some(agent_core::SubtaskScope::ReadOnly),
+    };
+    let id = session.request_id();
+    session
+        .call_with_timeout(
+            acp::prompt_request_for_provider(id, &session.sid(), provider_id, &request),
+            id,
+            timeout,
+        )
+        .await
+        .map_err(|e| AcpStartError::Failed(session.with_stderr(e)))?;
+
+    Ok(session.captured())
+}
+
 /// Serve one `terminal/*` request against the session's terminals.
 async fn handle_terminal_request(
     session: &Arc<AcpSession>,
@@ -1211,6 +1362,15 @@ async fn handle_terminal_request(
     use acp::TerminalRequest as T;
     match request {
         T::Create { id, command, args, env, cwd, output_byte_limit } => {
+            // A shell writes anywhere: refusing it is what makes a
+            // read-only subtask a guarantee rather than a suggestion.
+            // A boundary subtask keeps its terminals (advisory — ADR-0014).
+            if matches!(session.subtask, Some(agent_core::SubtaskScope::ReadOnly)) {
+                return acp::internal_error_response(
+                    id,
+                    "Commands are disabled in a read-only subtask.",
+                );
+            }
             let cwd = cwd.unwrap_or_else(|| session.project_path.clone());
             match session.terminals.create(&command, &args, &env, &cwd, output_byte_limit)
             {
@@ -1262,45 +1422,6 @@ pub fn read_terminal_output(
     let handle = session.terminals.get(terminal_id)?;
     let (output, truncated, exit) = handle.output();
     Some((output, truncated, exit.is_some()))
-}
-
-/// Resolve an agent-supplied path and require it inside the project.
-/// Canonicalizes real paths so `..` and symlinks cannot escape; for a
-/// write to a not-yet-existing file the PARENT directory must exist and
-/// be inside instead (the spec says create the file, not directories).
-fn confine_to_project(
-    project_path: &str,
-    requested: &str,
-    must_exist: bool,
-) -> Result<std::path::PathBuf, String> {
-    let project = std::fs::canonicalize(project_path)
-        .map_err(|e| format!("Project folder unavailable: {e}"))?;
-    match std::fs::canonicalize(requested) {
-        Ok(file) => {
-            if file.starts_with(&project) {
-                Ok(file)
-            } else {
-                Err(format!("Path is outside the project: {requested}"))
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !must_exist => {
-            let path = std::path::Path::new(requested);
-            let parent = path
-                .parent()
-                .ok_or_else(|| format!("Path has no parent directory: {requested}"))?;
-            let file_name = path
-                .file_name()
-                .ok_or_else(|| format!("Path names no file: {requested}"))?;
-            let parent = std::fs::canonicalize(parent)
-                .map_err(|e| format!("Parent directory unavailable: {e}"))?;
-            if parent.starts_with(&project) {
-                Ok(parent.join(file_name))
-            } else {
-                Err(format!("Path is outside the project: {requested}"))
-            }
-        }
-        Err(e) => Err(format!("Could not resolve {requested}: {e}")),
-    }
 }
 
 fn spawn_reader(
@@ -1453,7 +1574,10 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 return;
             }
             for event in events {
-                runner::emit(app, tab_id, &event);
+                // A capturing session answers its caller, not a tab.
+                if !session.capture_event(&event) {
+                    runner::emit(app, tab_id, &event);
+                }
             }
         }
         // Client fs, spawned off the reader loop (disk must never stall
@@ -1489,17 +1613,24 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
         Some(acp::Incoming::FsWriteRequest { id, path, content }) => {
             let session = Arc::clone(session);
             tauri::async_runtime::spawn(async move {
-                let response =
-                    match confine_to_project(&session.project_path, &path, false) {
-                        Ok(file) => match tokio::fs::write(&file, &content).await {
-                            Ok(()) => acp::fs_write_response(id),
-                            Err(e) => acp::internal_error_response(
-                                id,
-                                &format!("Could not write {path}: {e}"),
-                            ),
-                        },
-                        Err(message) => acp::internal_error_response(id, &message),
-                    };
+                // Writes answer to the subtask scope on top of the
+                // confinement root; the error text reaches the agent, so
+                // it says what is off-limits rather than just "no".
+                let confined = crate::fs_confine::confine_write_to_scope(
+                    &session.project_path,
+                    &path,
+                    session.subtask.as_ref(),
+                );
+                let response = match confined {
+                    Ok(file) => match tokio::fs::write(&file, &content).await {
+                        Ok(()) => acp::fs_write_response(id),
+                        Err(e) => acp::internal_error_response(
+                            id,
+                            &format!("Could not write {path}: {e}"),
+                        ),
+                    },
+                    Err(message) => acp::internal_error_response(id, &message),
+                };
                 let _ = session.write_message(&response).await;
             });
         }
@@ -1521,7 +1652,7 @@ mod tests {
         model: Option<&'a str>,
         effort: Option<&'a str>,
     ) -> SessionShape<'a> {
-        SessionShape { provider_id, model, effort }
+        SessionShape { provider_id, model, effort, subtask: None }
     }
 
     #[test]
@@ -1539,6 +1670,17 @@ mod tests {
             respawn_reason(&running, &shape("claude", Some("sonnet"), Some("high"))),
             "an effort change"
         );
+    }
+
+    #[test]
+    fn names_an_access_scope_change() {
+        let running = shape("claude", Some("sonnet"), Some("medium"));
+        let scoped = SessionShape {
+            subtask: Some(&agent_core::SubtaskScope::ReadOnly),
+            ..shape("claude", Some("sonnet"), Some("medium"))
+        };
+        assert_eq!(respawn_reason(&running, &scoped), "an access-scope change");
+        assert_eq!(respawn_reason(&scoped, &running), "an access-scope change");
     }
 
     #[test]
