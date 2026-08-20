@@ -56,6 +56,16 @@ export const MODEL_PRICES: readonly PriceEntry[] = [
     inputPerMTok: 0.3,
     outputPerMTok: 2.5,
   },
+  // OpenCode Zen, priced at zero. Scoped to the gateway's own naming
+  // rather than the provider as a whole: a paid model the user routed
+  // through opencode (OpenRouter, an Anthropic key, anything else) has a
+  // real price this table does not know, and must fall through to "n/a"
+  // instead of being reported as free.
+  { provider: "opencode", match: "-free", inputPerMTok: 0, outputPerMTok: 0 },
+  { provider: "opencode", match: "big-pickle", inputPerMTok: 0, outputPerMTok: 0 },
+  // Cline is deliberately absent: its account serves both free and paid
+  // models under ids we cannot read without the user's credentials, so
+  // every Cline turn shows "n/a" rather than a number that might be a lie.
 ];
 
 /** Family assumed when the user runs the provider's default model. */
@@ -63,6 +73,11 @@ const DEFAULT_MODEL_MATCH: Readonly<Record<ProviderId, string>> = {
   claude: "sonnet",
   codex: "gpt-5.5",
   gemini: "gemini-3.1-pro",
+  // opencode's own default when no model is set (verified 2026-08).
+  opencode: "big-pickle",
+  // Empty on purpose: nothing matches, so an unset Cline model prices as
+  // unknown rather than guessing at an account we cannot see.
+  cline: "",
 };
 
 /**

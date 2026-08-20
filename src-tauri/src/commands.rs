@@ -192,6 +192,13 @@ impl WarmSessionArgs {
 /// Models and efforts are picker values in the UI, but they travel into
 /// provider command lines and config strings — restrict them to plain
 /// tokens so nothing can smuggle flags or quoting along.
+///
+/// `/` is allowed because gateway-routed providers name their models
+/// `vendor/model`. It introduces no new risk: the value only ever becomes
+/// an env-var value or a single argv element, and `runner::os_command`
+/// passes an argv vector to an absolute program, never a shell. A leading
+/// `-` is a different matter — any CLI this is appended to would read it
+/// as a flag rather than the model it claims to be — so that is rejected.
 fn validate_token(value: Option<String>, what: &str) -> Result<Option<String>, String> {
     let Some(value) = value else { return Ok(None) };
     let value = value.trim().to_owned();
@@ -200,8 +207,8 @@ fn validate_token(value: Option<String>, what: &str) -> Result<Option<String>, S
     }
     let plain = value
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':'));
-    if plain {
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/'));
+    if plain && !value.starts_with('-') {
         Ok(Some(value))
     } else {
         Err(format!("Invalid {what} name: {value}"))
@@ -592,5 +599,37 @@ mod tests {
         assert_eq!(image_extension("image/png"), "png");
         assert_eq!(image_extension("image/webp"), "webp");
         assert_eq!(image_extension("application/octet-stream"), "png");
+    }
+
+    #[test]
+    fn a_slashed_model_id_is_a_valid_token() {
+        // Gateway-routed providers name models `vendor/model`; rejecting the
+        // slash would fail every such turn before anything is spawned.
+        assert_eq!(
+            validate_token(Some("opencode/grok-code-fast-1".to_owned()), "model").unwrap(),
+            Some("opencode/grok-code-fast-1".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_token_that_could_pass_for_a_flag_is_rejected() {
+        assert!(validate_token(Some("--dangerously-skip".to_owned()), "model").is_err());
+        assert!(validate_token(Some("-m".to_owned()), "effort").is_err());
+    }
+
+    #[test]
+    fn quoting_and_shell_metacharacters_are_still_rejected() {
+        for smuggled in ["a b", "a;b", "a$(b)", "a\"b", "a|b", "a\\b"] {
+            assert!(
+                validate_token(Some(smuggled.to_owned()), "model").is_err(),
+                "should have rejected: {smuggled}"
+            );
+        }
+    }
+
+    #[test]
+    fn blank_and_absent_tokens_mean_the_provider_default() {
+        assert_eq!(validate_token(None, "model").unwrap(), None);
+        assert_eq!(validate_token(Some("   ".to_owned()), "model").unwrap(), None);
     }
 }

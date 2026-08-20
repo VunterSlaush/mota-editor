@@ -47,7 +47,15 @@ describe("COST_PRESETS", () => {
   it("only names models the picker also offers", () => {
     for (const preset of COST_PRESETS) {
       for (const provider of PROVIDERS) {
-        expect(MODEL_SUGGESTIONS[provider.id]).toContain(preset.model[provider.id]);
+        const model = preset.model[provider.id];
+        if (MODEL_SUGGESTIONS[provider.id].length === 0) {
+          // Cline's model is chosen inside its own CLI, so the picker has
+          // nothing to offer and a preset has nothing to ask for. Naming
+          // a model here would be naming one no picker could show.
+          expect(model).toBe("");
+          continue;
+        }
+        expect(MODEL_SUGGESTIONS[provider.id]).toContain(model);
       }
     }
   });

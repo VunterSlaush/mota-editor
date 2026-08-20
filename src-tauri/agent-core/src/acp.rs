@@ -61,6 +61,20 @@ pub fn agent_commands(provider_id: &str) -> Vec<AcpAgentCommand> {
             args: vec!["--acp".to_owned()],
             install_hint: "npm i -g @google/gemini-cli",
         }],
+        // opencode and cline speak ACP from the same binary the user
+        // installs, so there is no adapter package and no npx fallback:
+        // if the binary is missing, npx would download an entire coding
+        // agent mid-send.
+        "opencode" => vec![AcpAgentCommand {
+            program: "opencode".to_owned(),
+            args: vec!["acp".to_owned()],
+            install_hint: "npm i -g opencode-ai",
+        }],
+        "cline" => vec![AcpAgentCommand {
+            program: "cline".to_owned(),
+            args: vec!["--acp".to_owned()],
+            install_hint: "npm i -g cline",
+        }],
         _ => vec![],
     }
 }
@@ -72,7 +86,9 @@ pub fn agent_commands(provider_id: &str) -> Vec<AcpAgentCommand> {
 /// Effort vocabulary (researched 2026-08): Claude via
 /// `CLAUDE_CODE_EFFORT_LEVEL` (low|medium|high|xhigh|max); Codex via
 /// `model_reasoning_effort` in `CODEX_CONFIG`
-/// (minimal|low|medium|high|xhigh); Gemini exposes no effort control.
+/// (minimal|low|medium|high|xhigh); Gemini and opencode expose no effort
+/// control. Cline takes both selectors on the command line instead — see
+/// [`agent_args`].
 pub fn agent_env(
     provider_id: &str,
     model: Option<&str>,
@@ -109,8 +125,41 @@ pub fn agent_env(
         "gemini" => model
             .map(|m| vec![("GEMINI_MODEL".to_owned(), m.to_owned())])
             .unwrap_or_default(),
+        // `opencode acp` takes no model flag, but opencode merges
+        // `OPENCODE_CONFIG_CONTENT` over the resolved config at startup —
+        // the same shape as Codex above. Effort has no config key, so a
+        // requested one is dropped rather than invented.
+        "opencode" => model
+            .map(|m| {
+                let config = json!({ "model": m });
+                vec![("OPENCODE_CONFIG_CONTENT".to_owned(), config.to_string())]
+            })
+            .unwrap_or_default(),
         _ => vec![],
     }
+}
+
+/// Command-line arguments that select the model and reasoning effort for
+/// a provider's ACP agent, appended after the launch candidate's own args.
+///
+/// The sibling of [`agent_env`]: same job, different transport. Cline
+/// takes both selectors as top-level flags that sit alongside `--acp`;
+/// every other provider configures itself through the environment and
+/// returns nothing here.
+pub fn agent_args(provider_id: &str, model: Option<&str>, effort: Option<&str>) -> Vec<String> {
+    let mut args = Vec::new();
+    if provider_id != "cline" {
+        return args;
+    }
+    if let Some(model) = model {
+        args.push("--model".to_owned());
+        args.push(model.to_owned());
+    }
+    if let Some(effort) = effort {
+        args.push("--thinking".to_owned());
+        args.push(effort.to_owned());
+    }
+    args
 }
 
 /// How to sign a provider in, for the "Sign in" action on the settings
@@ -159,6 +208,22 @@ pub fn sign_in_command(provider_id: &str) -> Option<SignInCommand> {
             program: "gemini",
             args: &[],
             hint: "Opens a terminal running Gemini; use /auth to sign in.",
+        }),
+        // The command opencode's own ACP handshake names in `authMethods`.
+        // Signing in is optional here: opencode serves its free models
+        // unauthenticated, and this raises the ceiling rather than
+        // unlocking the provider.
+        "opencode" => Some(SignInCommand {
+            program: "opencode",
+            args: &["auth", "login"],
+            hint: "Opens a terminal to sign in to OpenCode. Free models work without it.",
+        }),
+        // `cline auth` both signs in and chooses the account's model,
+        // which is why the model picker offers no list of its own.
+        "cline" => Some(SignInCommand {
+            program: "cline",
+            args: &["auth"],
+            hint: "Opens a terminal to sign in to Cline and pick its model.",
         }),
         _ => None,
     }
@@ -1399,6 +1464,8 @@ fn display_name(provider_id: &str) -> &str {
         "claude" => "Claude",
         "codex" => "Codex",
         "gemini" => "Gemini",
+        "opencode" => "OpenCode",
+        "cline" => "Cline",
         other => other,
     }
 }
@@ -1410,13 +1477,53 @@ mod tests {
 
     #[test]
     fn every_provider_has_acp_launch_candidates_fastest_first() {
-        for provider in ["claude", "codex", "gemini"] {
+        for provider in ["claude", "codex", "gemini", "opencode", "cline"] {
             assert!(!agent_commands(provider).is_empty(), "{provider}");
         }
         // Global binary is tried before npx for the adapter-based agents.
         assert_eq!(agent_commands("claude")[0].program, "claude-agent-acp");
         assert_eq!(agent_commands("codex")[0].program, "codex-acp");
         assert!(agent_commands("unknown").is_empty());
+    }
+
+    #[test]
+    fn same_binary_agents_enter_acp_without_an_npx_fallback() {
+        // opencode and cline ship ACP in the binary the user already
+        // installed. An npx candidate here would download a whole coding
+        // agent the moment the local one was missing.
+        let opencode = agent_commands("opencode");
+        assert_eq!(opencode.len(), 1);
+        assert_eq!(opencode[0].program, "opencode");
+        assert_eq!(opencode[0].args, vec!["acp".to_owned()]);
+
+        let cline = agent_commands("cline");
+        assert_eq!(cline.len(), 1);
+        assert_eq!(cline[0].program, "cline");
+        assert_eq!(cline[0].args, vec!["--acp".to_owned()]);
+    }
+
+    #[test]
+    fn cline_takes_both_selectors_on_the_command_line() {
+        assert_eq!(
+            agent_args("cline", Some("kimi-k2.5"), Some("high")),
+            vec!["--model", "kimi-k2.5", "--thinking", "high"]
+        );
+        assert_eq!(agent_args("cline", Some("kimi-k2.5"), None), vec!["--model", "kimi-k2.5"]);
+        assert!(agent_args("cline", None, None).is_empty());
+    }
+
+    #[test]
+    fn env_configured_agents_take_no_command_line_selectors() {
+        // The assertion that fails if someone later "unifies" the two
+        // mechanisms and starts handing every agent a --model flag.
+        // `opencode acp` in particular accepts no such flag: given one it
+        // prints its help and never starts the server.
+        for provider in ["claude", "codex", "gemini", "opencode"] {
+            assert!(
+                agent_args(provider, Some("some-model"), Some("high")).is_empty(),
+                "{provider}"
+            );
+        }
     }
 
     #[test]
@@ -1440,8 +1547,39 @@ mod tests {
             agent_env("gemini", Some("gemini-3-pro-preview"), Some("high")),
             vec![("GEMINI_MODEL".to_owned(), "gemini-3-pro-preview".to_owned())]
         );
+        // opencode merges an inline config blob, the same shape as Codex.
+        assert_eq!(
+            agent_env("opencode", Some("opencode/big-pickle"), Some("high")),
+            vec![(
+                "OPENCODE_CONFIG_CONTENT".to_owned(),
+                "{\"model\":\"opencode/big-pickle\"}".to_owned()
+            )]
+        );
+        // Cline configures itself on the command line, never the env.
+        assert!(agent_env("cline", Some("kimi-k2.5"), Some("high")).is_empty());
         assert!(agent_env("claude", None, None).is_empty());
         assert!(agent_env("codex", None, None).is_empty());
+        assert!(agent_env("opencode", None, None).is_empty());
+    }
+
+    #[test]
+    fn the_new_providers_have_no_native_modes_and_ride_the_preamble() {
+        // Neither agent advertises a session mode that enforces plan or
+        // read-only, so `turn::mode_preamble` is the whole enforcement.
+        // Pinned so the fall-through reads as intended, not overlooked.
+        for provider in ["opencode", "cline"] {
+            assert!(native_mode_id(provider, Mode::Plan, Permission::Manual).is_none());
+            assert!(native_mode_id(provider, Mode::Agent, Permission::Auto).is_none());
+            assert!(!plan_is_native(provider), "{provider}");
+        }
+    }
+
+    #[test]
+    fn a_login_failure_names_the_provider_and_its_own_sign_in_command() {
+        let message = auth_failure_message("opencode", "token expired");
+        assert!(message.starts_with("OpenCode needs you to sign in again."), "{message}");
+        assert!(message.contains("opencode auth login"), "{message}");
+        assert!(auth_failure_message("cline", "nope").contains("cline auth"));
     }
 
     #[test]

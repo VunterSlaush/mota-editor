@@ -3,7 +3,7 @@
 Mota Editor is a lightweight, cross-platform (Windows/Linux/macOS) workbench
 for driving AI coding agents across several projects at once: **one tab per
 project, one chat per tab, any agent per chat** (Claude, ChatGPT/Codex,
-Gemini).
+Gemini, OpenCode, Cline).
 
 The design follows Robert C. Martin's Clean Architecture. The governing
 principle is the **Dependency Rule**:
@@ -74,7 +74,7 @@ Key consequences:
 
 | Layer | Crate / location | Contents |
 |---|---|---|
-| Entities + provider boundary | `src-tauri/agent-core/` | `AgentEvent` (the domain vocabulary of a turn), the `Provider` trait, and one adapter per vendor CLI (`claude.rs`, `codex.rs`, `gemini.rs`). **No I/O, no Tauri, no processes** — pure parsing and command description, fully unit-tested. |
+| Entities + provider boundary | `src-tauri/agent-core/` | `AgentEvent` (the domain vocabulary of a turn), the `Provider` trait, and one adapter per vendor CLI (`claude.rs`, `codex.rs`, `gemini.rs`, `opencode.rs`, `cline.rs`). **No I/O, no Tauri, no processes** — pure parsing and command description, fully unit-tested. |
 | Interface adapters | `src-tauri/src/commands.rs` | Tauri command controllers: validate, delegate, return. |
 | Frameworks & drivers | `src-tauri/src/runner.rs`, `workspace_file.rs`, `lib.rs` | Process spawning (tokio), event emission over Tauri, JSON persistence, app bootstrap. |
 
@@ -96,7 +96,7 @@ ChatPanel → SendPrompt (use case) → AgentGateway (port)
                                         │
                     commands.rs → runner.rs → Provider (trait)
                                         │
-                     claude / codex / gemini CLI, headless mode
+        claude / codex / gemini / opencode / cline CLI, headless mode
 ```
 
 v1 drives each vendor's official CLI in headless streaming mode (`claude -p

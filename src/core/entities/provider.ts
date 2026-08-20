@@ -2,7 +2,7 @@
  * Entities layer — AI agent providers the workbench can drive.
  * Pure domain vocabulary; knows nothing about CLIs, HTTP, or Tauri.
  */
-export type ProviderId = "claude" | "codex" | "gemini";
+export type ProviderId = "claude" | "codex" | "gemini" | "opencode" | "cline";
 
 export interface ProviderDescriptor {
   readonly id: ProviderId;
@@ -38,6 +38,25 @@ export const PROVIDERS: readonly ProviderDescriptor[] = [
     supportsResume: false,
     contextWindow: 1_000_000,
   },
+  // Free-tier agents, so a workbench stays usable once a paid plan is
+  // spent. Both advertise `loadSession` at the ACP handshake (verified
+  // 2026-08). Their context window depends on which gateway the user
+  // authenticated, so the descriptor states a conservative floor and
+  // real `usage_update`s correct it on the first turn.
+  {
+    id: "opencode",
+    displayName: "OpenCode",
+    vendor: "opencode",
+    supportsResume: true,
+    contextWindow: 200_000,
+  },
+  {
+    id: "cline",
+    displayName: "Cline",
+    vendor: "Cline",
+    supportsResume: true,
+    contextWindow: 200_000,
+  },
 ];
 
 export function providerById(id: ProviderId): ProviderDescriptor {
@@ -68,6 +87,26 @@ export const MODEL_SUGGESTIONS: Readonly<Record<ProviderId, readonly string[]>> 
     "gemini-2.5-pro",
     "gemini-2.5-flash",
   ],
+  // OpenCode's own gateway, listed by `opencode models` 2026-08-20 — the
+  // models it serves at no charge and without a sign-in. The lineup
+  // rotates faster than the others, so treat a stale entry here as
+  // expected rather than surprising. Models from any other gateway the
+  // user configured in opencode are reachable by their `vendor/model`
+  // id, which the picker keeps once it has been chosen.
+  opencode: [
+    "opencode/big-pickle",
+    "opencode/nemotron-3-ultra-free",
+    "opencode/nemotron-3.5-lightning-free",
+    "opencode/deepseek-v4-flash-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/hy3-free",
+    "opencode/x-preview-f-free",
+  ],
+  // Deliberately empty: `cline auth` both signs the account in and
+  // chooses its model, and the account's catalogue is not readable
+  // without those credentials. Offering guessed ids would put entries in
+  // the picker that fail only once the user sends a prompt.
+  cline: [],
 };
 
 interface ContextWindowEntry {
@@ -147,6 +186,11 @@ export const EFFORT_OPTIONS: Readonly<Record<ProviderId, readonly string[]>> = {
   claude: ["low", "medium", "high", "xhigh", "max"],
   codex: ["minimal", "low", "medium", "high", "xhigh"],
   gemini: [],
+  // opencode's effort control (`--variant`) exists only on its one-shot
+  // run command; the ACP server it drives here has no config key for it.
+  opencode: [],
+  // Cline's `--thinking`, which it takes alongside `--acp`.
+  cline: ["none", "low", "medium", "high", "xhigh"],
 };
 
 /**
@@ -157,4 +201,6 @@ export const COMPACT_COMMAND: Readonly<Record<ProviderId, string>> = {
   claude: "/compact",
   codex: "/compact",
   gemini: "/compress",
+  opencode: "/compact",
+  cline: "/compact",
 };

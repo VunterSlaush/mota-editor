@@ -8,8 +8,9 @@ export function EmptyState({ onOpenProject }: { onOpenProject: () => void }) {
         Open a project folder
       </button>
       <p className="empty-state__hint">
-        Works with the Claude, Codex (ChatGPT) and Gemini CLIs — sign in to each one once
-        in a terminal, then use them from here.
+        Works with the agent CLIs you already have — sign in to each one once in a
+        terminal, then use them from here. OpenCode needs no account: its free models work
+        as soon as it is installed.
       </p>
     </main>
   );

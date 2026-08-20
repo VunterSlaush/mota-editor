@@ -1,5 +1,7 @@
 use crate::event::AgentEvent;
-use crate::providers::{claude::Claude, codex::Codex, gemini::Gemini};
+use crate::providers::{
+    claude::Claude, cline::Cline, codex::Codex, gemini::Gemini, opencode::Opencode,
+};
 use crate::turn::TurnRequest;
 
 /// The command line a provider wants executed for one turn.
@@ -47,10 +49,14 @@ pub fn provider_for(id: &str) -> Option<&'static dyn Provider> {
     static CLAUDE: Claude = Claude;
     static CODEX: Codex = Codex;
     static GEMINI: Gemini = Gemini;
+    static OPENCODE: Opencode = Opencode;
+    static CLINE: Cline = Cline;
     match id {
         "claude" => Some(&CLAUDE),
         "codex" => Some(&CODEX),
         "gemini" => Some(&GEMINI),
+        "opencode" => Some(&OPENCODE),
+        "cline" => Some(&CLINE),
         _ => None,
     }
 }

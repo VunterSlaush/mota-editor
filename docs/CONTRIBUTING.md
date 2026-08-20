@@ -51,13 +51,40 @@ suites — keep them in the seconds range (FIRST).
 
 ## Adding an AI provider (the expected common contribution)
 
+Two tiers, and it matters which one you are in.
+
+**The boundary — two files.**
+
 1. `src-tauri/agent-core/src/providers/<vendor>.rs` — implement
    `Provider` (command + line parser), with `#[cfg(test)]` tests built
-   from real captured CLI output.
+   from real captured CLI output. Capture it; do not write a parser from
+   the vendor's docs. A guessed schema does not fail loudly, it drops the
+   agent's reply while reporting success. If you cannot capture the
+   stream, parse only what you did capture and let the rest fall through
+   to a plain-text reading of stdout (see `providers/cline.rs`).
 2. Register it in `provider.rs::provider_for`.
-3. Add its descriptor to `src/core/entities/provider.ts` (`PROVIDERS`).
-4. That's all. If you needed to touch anything else, stop — the boundary
-   is broken; fix that first.
+
+If adding a provider forces a change to a **use case**, stop — that is
+the boundary breaking, and it is the thing this list exists to catch.
+
+**The tables that must name every provider.**
+
+`ProviderId` is a closed union on purpose. Widen it and `tsc` lists every
+table still missing a value; that list *is* the checklist, and today it
+is `PROVIDERS`, `MODEL_SUGGESTIONS`, `EFFORT_OPTIONS`, `COMPACT_COMMAND`,
+`BUILTIN_COMMANDS`, `DEFAULT_MODEL_MATCH` and `COST_PRESETS`. On the Rust
+side the equivalent is the `match provider_id` arms in `acp.rs`
+(`agent_commands`, `agent_env`, `agent_args`, `sign_in_command`,
+`display_name`) plus `command_discovery.rs`. `MODEL_PRICES` and
+`MODEL_CONTEXT_WINDOWS` take rows only where you know the numbers —
+absent means "n/a", which is the honest answer.
+
+These are exhaustiveness devices, not boundary leaks: none of them
+decides behaviour, they supply data an inner layer already asked for. The
+compiler and `npm test` between them will not let you forget one.
+
+ADR-0016 is a worked example, including what to do when an agent takes
+its model on the command line instead of from the environment.
 
 ## Writing an extension (no contribution to this repo needed)
 

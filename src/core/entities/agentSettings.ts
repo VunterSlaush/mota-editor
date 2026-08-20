@@ -142,23 +142,50 @@ export const COST_PRESETS: readonly CostPreset[] = [
     id: "economy",
     label: "Economy",
     description: "A small model at low effort — for edits, renames, and commit messages.",
-    model: { claude: "haiku", codex: "gpt-5.4-mini", gemini: "gemini-2.5-flash" },
-    effort: { claude: "low", codex: "low", gemini: "" },
+    // The free-tier agents are already at zero cost, so their presets
+    // trade speed against capability rather than price. Cline's model is
+    // whatever `cline auth` chose, so every preset leaves it alone.
+    model: {
+      claude: "haiku",
+      codex: "gpt-5.4-mini",
+      gemini: "gemini-2.5-flash",
+      opencode: "opencode/nemotron-3.5-lightning-free",
+      cline: "",
+    },
+    effort: { claude: "low", codex: "low", gemini: "", opencode: "", cline: "low" },
   },
   {
     id: "balanced",
     label: "Balanced",
     description: "The everyday pairing — capable enough for real work, priced sanely.",
-    model: { claude: "sonnet", codex: "gpt-5.3-codex", gemini: "gemini-3-flash-preview" },
-    effort: { claude: "medium", codex: "medium", gemini: "" },
+    model: {
+      claude: "sonnet",
+      codex: "gpt-5.3-codex",
+      gemini: "gemini-3-flash-preview",
+      opencode: "opencode/big-pickle",
+      cline: "",
+    },
+    effort: {
+      claude: "medium",
+      codex: "medium",
+      gemini: "",
+      opencode: "",
+      cline: "medium",
+    },
   },
   {
     id: "max",
     label: "Maximum",
     description:
       "The strongest model at high effort. Costs the most — save it for hard problems.",
-    model: { claude: "opus", codex: "gpt-5.5", gemini: "gemini-3.1-pro-preview" },
-    effort: { claude: "high", codex: "high", gemini: "" },
+    model: {
+      claude: "opus",
+      codex: "gpt-5.5",
+      gemini: "gemini-3.1-pro-preview",
+      opencode: "opencode/nemotron-3-ultra-free",
+      cline: "",
+    },
+    effort: { claude: "high", codex: "high", gemini: "", opencode: "", cline: "high" },
   },
 ];
 

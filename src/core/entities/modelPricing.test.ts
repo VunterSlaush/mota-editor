@@ -34,6 +34,36 @@ describe("blendedRatePerMTok", () => {
   });
 });
 
+describe("free tiers", () => {
+  it("prices a free model at zero rather than at nothing-known", () => {
+    // `toBe(0)`, not a falsy check: 0 and null are both falsy in JS and
+    // mean opposite things here — "this turn cost nothing" versus "we
+    // have no idea what this turn cost".
+    expect(blendedRatePerMTok("opencode", "opencode/big-pickle")).toBe(0);
+    expect(blendedRatePerMTok("opencode", "opencode/nemotron-3-ultra-free")).toBe(0);
+    expect(estimateCostUsd(5_000_000, "opencode", "opencode/mimo-v2.5-free")).toBe(0);
+    const tokens = { ...NO_BILLED_TOKENS, inputTokens: 9_000_000 };
+    expect(billedCostUsd(tokens, "opencode", "opencode/hy3-free")).toBe(0);
+  });
+
+  it("prices opencode's own default at zero when no model is set", () => {
+    expect(blendedRatePerMTok("opencode", undefined)).toBe(0);
+  });
+
+  it("does not claim a paid model is free just because opencode routed it", () => {
+    // The gateway carries whatever the user configured. Only Zen's own
+    // ids are the free ones; everything else has a price we don't know.
+    expect(blendedRatePerMTok("opencode", "anthropic/claude-sonnet-5")).toBeNull();
+    expect(blendedRatePerMTok("opencode", "openrouter/some/paid-model")).toBeNull();
+  });
+
+  it("says nothing about Cline's cost either way", () => {
+    // Its account mixes free and paid models under ids we cannot read.
+    expect(blendedRatePerMTok("cline", undefined)).toBeNull();
+    expect(blendedRatePerMTok("cline", "kimi-k2.5")).toBeNull();
+  });
+});
+
 describe("estimateCostUsd", () => {
   it("scales linearly per million tokens", () => {
     expect(estimateCostUsd(1_000_000, "claude", "sonnet")).toBeCloseTo(6);

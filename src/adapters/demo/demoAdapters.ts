@@ -1103,6 +1103,24 @@ export class DemoProviderProbe implements ProviderProbe {
         signInCommand: "codex login",
       };
     }
+    if (provider === "opencode") {
+      return {
+        provider,
+        readiness: "ready",
+        detail: "OpenCode 1.18.19. Free models need no sign-in.",
+        installHint: "npm i -g opencode-ai",
+        signInCommand: "opencode auth login",
+      };
+    }
+    if (provider === "cline") {
+      return {
+        provider,
+        readiness: "notInstalled",
+        detail: "no launch candidate found on PATH",
+        installHint: "npm i -g cline",
+        signInCommand: "cline auth",
+      };
+    }
     return {
       provider,
       readiness: "notInstalled",

@@ -72,12 +72,7 @@ impl Provider for Gemini {
             return events;
         }
         // Fallback: older CLIs print plain text.
-        let text = full_output.trim();
-        if text.is_empty() {
-            Vec::new()
-        } else {
-            vec![AgentEvent::AssistantMessage { text: text.to_owned() }]
-        }
+        super::plain_text_reply(full_output, emitted_message)
     }
 }
 

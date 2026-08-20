@@ -80,6 +80,32 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
   gemini: [CREATE_EXTENSION, CLEAR],
+  // Both verified against the shipped binaries (2026-08). Their fuller
+  // command sets arrive over ACP at runtime and are merged in by
+  // ListCommands, so only what they answer to headlessly is listed here.
+  opencode: [
+    CREATE_EXTENSION,
+    CLEAR,
+    {
+      name: "/init",
+      description: "Create or refresh AGENTS.md with project guidance",
+      source: "builtin",
+    },
+    {
+      name: "/compact",
+      description: "Summarize the conversation to free context",
+      source: "builtin",
+    },
+  ],
+  cline: [
+    CREATE_EXTENSION,
+    CLEAR,
+    {
+      name: "/compact",
+      description: "Summarize the conversation to free context",
+      source: "builtin",
+    },
+  ],
 };
 
 /**

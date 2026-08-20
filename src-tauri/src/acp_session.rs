@@ -1199,7 +1199,11 @@ fn spawn_agent(
         if runner::resolve_program(&candidate.program).is_none() {
             continue;
         }
-        let mut command = runner::os_command(&candidate.program, &candidate.args);
+        // Selector flags (where the agent takes them on the command line
+        // rather than from the environment) follow the launch args.
+        let mut args = candidate.args.clone();
+        args.extend(acp::agent_args(provider_id, model, effort));
+        let mut command = runner::os_command(&candidate.program, &args);
         command
             .current_dir(project_path)
             .stdin(Stdio::piped())

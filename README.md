@@ -2,7 +2,7 @@
 
 A lightweight, cross-platform workbench for running AI coding agents across
 several projects at once. **One tab per project. One chat per tab. Any
-agent per chat** — Claude, ChatGPT (Codex), or Gemini.
+agent per chat** — Claude, ChatGPT (Codex), Gemini, OpenCode, or Cline.
 
 Instead of keeping four IDE windows open just to talk to agents, open each
 project as a tab and chat with the agent of your choice, with the
@@ -22,6 +22,12 @@ chat UI, and an approval flow.
 | Claude | `npm i -g @agentclientprotocol/claude-agent-acp` | `claude` (Claude Code login) |
 | ChatGPT | `npm i -g @agentclientprotocol/codex-acp` | `codex` (ChatGPT login) |
 | Gemini | `npm i -g @google/gemini-cli` (has ACP built in: `gemini --acp`) | `gemini` |
+| OpenCode | `npm i -g opencode-ai` (has ACP built in: `opencode acp`) | nothing — its free models need no account (`opencode auth login` raises the ceiling) |
+| Cline | `npm i -g cline` (has ACP built in: `cline --acp`) | `cline auth` (also picks the model) |
+
+The last two exist so a spent plan doesn't end the day: OpenCode serves
+free models through its own gateway, and Cline's account carries a free
+tier. Switch a tab to either from the provider picker.
 
 The global installs are optional but **strongly recommended for speed**:
 Mota Editor tries the globally-installed adapter binary first (instant
