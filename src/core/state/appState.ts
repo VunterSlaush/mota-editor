@@ -19,7 +19,7 @@ import type {
   ToolCallContent,
   ToolLocation,
 } from "../entities/message";
-import { mergeToolCall } from "../entities/message";
+import { mergeToolCall, pendingApproval, pendingQuestion } from "../entities/message";
 import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
 import { normalizedTabLabel } from "../entities/project";
@@ -844,21 +844,35 @@ export function reduce(state: AppState, action: Action): AppState {
         planMarkdown: undefined,
       }));
 
-    case "chat/approvalResolved":
+    // Both resolve the card by identity, not by request id: ids are the
+    // agent's and get reused by the next agent process, so a transcript
+    // can hold several cards wearing the same one (see `pendingApproval`).
+    case "chat/approvalResolved": {
+      const target = pendingApproval(
+        tabById(state, action.tabId)?.messages ?? [],
+        action.requestId,
+      );
+      if (!target) return state;
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         messages: tab.messages.map((m) =>
-          m.approval?.requestId === action.requestId
+          m.id === target.id && m.approval
             ? { ...m, approval: { ...m.approval, resolvedOptionId: action.optionId } }
             : m,
         ),
       }));
+    }
 
-    case "chat/questionAnswered":
+    case "chat/questionAnswered": {
+      const target = pendingQuestion(
+        tabById(state, action.tabId)?.messages ?? [],
+        action.requestId,
+      );
+      if (!target) return state;
       return mapTab(state, action.tabId, (tab) => ({
         ...tab,
         messages: tab.messages.map((m) =>
-          m.question?.requestId === action.requestId
+          m.id === target.id && m.question
             ? {
                 ...m,
                 question: {
@@ -870,6 +884,7 @@ export function reduce(state: AppState, action: Action): AppState {
             : m,
         ),
       }));
+    }
 
     case "chat/approvalsCancelled":
       // Questions are released by the same event: the turn ending strands

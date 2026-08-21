@@ -257,6 +257,58 @@ export function infoMessage(text: string): ChatMessage {
   return { id: nextMessageId(), role: "info", text };
 }
 
+/**
+ * The card a request id currently belongs to: the LAST message still
+ * waiting on it.
+ *
+ * A request id is the agent's own JSON-RPC id, unique only inside the
+ * process that issued it. A new agent process — a model change, a
+ * resumed conversation, a restarted app — starts counting from zero
+ * again while the cards it already answered stay in the transcript. Take
+ * the first message with the id and the click lands on a card that was
+ * settled hours ago: the live card never resolves and the button looks
+ * dead. Searching backwards for an unsettled card is what keeps the
+ * answer on the card the user is looking at.
+ */
+export function pendingApproval(
+  messages: readonly ChatMessage[],
+  requestId: string,
+): ChatMessage | undefined {
+  return lastPending(
+    messages,
+    (m) =>
+      m.approval?.requestId === requestId &&
+      !m.approval.resolvedOptionId &&
+      !m.approval.cancelled,
+  );
+}
+
+/** The unanswered question card this request id belongs to, if any.
+ *  Same reuse problem as {@link pendingApproval}. */
+export function pendingQuestion(
+  messages: readonly ChatMessage[],
+  requestId: string,
+): ChatMessage | undefined {
+  return lastPending(
+    messages,
+    (m) =>
+      m.question?.requestId === requestId &&
+      !m.question.answers &&
+      !m.question.skipped &&
+      !m.question.cancelled,
+  );
+}
+
+function lastPending(
+  messages: readonly ChatMessage[],
+  matches: (message: ChatMessage) => boolean,
+): ChatMessage | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (matches(messages[i])) return messages[i];
+  }
+  return undefined;
+}
+
 export function questionMessage(
   message: string,
   requestId: string,
