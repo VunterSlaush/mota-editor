@@ -214,6 +214,13 @@ export function App({ context }: { context: AppContext }) {
     },
     [activeProjectId],
   );
+  // Stable for a third reason: both the Files panel and the composer's "@"
+  // menu fetch this from an effect, and a fresh arrow every render would
+  // have them re-listing the whole project on every keystroke.
+  const loadProjectFiles = useCallback(
+    () => context.listProjectFiles.execute(activeProjectId),
+    [context, activeProjectId],
+  );
   const respondPermission = useCallback(
     (requestId: string, optionId: string) =>
       void context.respondPermission.execute(activeProjectId, requestId, optionId),
@@ -440,7 +447,7 @@ export function App({ context }: { context: AppContext }) {
           onPasteImage={(bytes, mimeType) =>
             context.pastedImages.saveImage(bytes, mimeType)
           }
-          loadProjectFiles={() => context.listProjectFiles.execute(tab.project.id)}
+          loadProjectFiles={loadProjectFiles}
         />
       ) : (
         <EmptyState onOpenProject={() => void context.openProject.execute()} />

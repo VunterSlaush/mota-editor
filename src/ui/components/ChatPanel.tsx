@@ -32,6 +32,7 @@ import { Composer } from "./Composer";
 import { ContextFullBar } from "./ContextFullBar";
 import { DiffModal } from "./DiffModal";
 import { ExtensionPanel, type ExtensionPanelsView } from "./ExtensionPanel";
+import { FilesPanel } from "./FilesPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
@@ -594,6 +595,9 @@ export function ChatPanel({
         {shownSidebarView && (
           <>
             <div style={{ width: sidebar.width }} className="changes-container">
+              {shownSidebarView === "files" && (
+                <FilesPanel loadProjectFiles={loadProjectFiles} onOpenFile={onOpenFile} />
+              )}
               {shownSidebarView === "changes" && (
                 <ChangesPanel
                   changes={changes}

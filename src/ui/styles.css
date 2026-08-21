@@ -3910,6 +3910,38 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Files panel ----
+   The project's own files. Borrows the Changes panel's rows wholesale;
+   the indent and the folder caret are all that is its own. */
+.files {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Tighter than a Changes row: a tree is read as a shape, and the gaps
+   that suit a dozen changed files bury it. */
+.files__row {
+  padding: 1px 0;
+}
+
+/* Fixed width, present on every row: a file's name has to line up with
+   the folder names above it, not with their carets. */
+.files__caret {
+  flex: none;
+  width: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.files__row .changes__file {
+  align-items: center;
+  gap: 2px;
+}
+
 /* ---- Worktrees panel ----
    The repository's checkouts and what each one's agent is doing. It
    borrows the Changes panel's rows wholesale; only the leading icon and

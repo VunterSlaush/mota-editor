@@ -14,6 +14,7 @@ mod fs_confine;
 mod mcp_probe;
 mod git;
 mod history_file;
+mod project_files;
 mod provider_probe;
 mod runner;
 mod session_index;
@@ -88,6 +89,7 @@ pub fn run() {
             git::git_remote_url,
             git::git_current_branch,
             git::git_list_files,
+            project_files::list_folder_files,
             git::git_diff,
             git::git_stage,
             git::git_unstage,

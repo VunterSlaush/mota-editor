@@ -31,6 +31,7 @@ import type {
 } from "../../core/ports/gitPort";
 import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
 import type { NotificationPort } from "../../core/ports/notificationPort";
+import type { ProjectFiles } from "../../core/ports/projectFiles";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
 import type { ShellHistorySource } from "../../core/ports/shellHistorySource";
 import type {
@@ -509,6 +510,17 @@ export class DemoGit implements GitPort {
 
   async branchesMerged(): Promise<GitBranch[]> {
     return [{ name: "dev", current: false, remote: false }];
+  }
+}
+
+/**
+ * The disk walk, without a disk. Never reached in the browser preview —
+ * the demo repository always answers — so it stands in only for the shape
+ * of the port.
+ */
+export class DemoProjectFiles implements ProjectFiles {
+  async walk(): Promise<string[]> {
+    return [];
   }
 }
 

@@ -11,6 +11,7 @@ import {
   DemoMcpProbe,
   DemoNotifications,
   DemoPastedImageStore,
+  DemoProjectFiles,
   DemoProviderProbe,
   DemoShell,
   DemoShellHistory,
@@ -33,6 +34,7 @@ import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
 import { TauriMcpProbe } from "../adapters/tauri/tauriMcpProbe";
 import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
 import { TauriPastedImageStore } from "../adapters/tauri/tauriPastedImageStore";
+import { TauriProjectFiles } from "../adapters/tauri/tauriProjectFiles";
 import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriShell } from "../adapters/tauri/tauriShell";
 import { TauriShellHistory } from "../adapters/tauri/tauriShellHistory";
@@ -171,6 +173,7 @@ export function createAppContext(): AppContext {
   const filePicker = inTauri ? new TauriFilePicker() : new DemoFilePicker();
   const commandCatalog = inTauri ? new TauriCommandCatalog() : new DemoCommandCatalog();
   const gitPort = inTauri ? new TauriGitStatus() : new DemoGit();
+  const projectFiles = inTauri ? new TauriProjectFiles() : new DemoProjectFiles();
   const transcriptStore = inTauri
     ? new TauriTranscriptStore()
     : new DemoTranscriptStore();
@@ -297,7 +300,7 @@ export function createAppContext(): AppContext {
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
-    listProjectFiles: new ListProjectFiles(store, gitPort),
+    listProjectFiles: new ListProjectFiles(store, gitPort, projectFiles),
     manageExtensions: new ManageExtensions(store, extensionHost, notifications),
     extensionPanels: new ExtensionPanels(extensionHost),
     shells: new Shells(store, shellPort, shellHistory),

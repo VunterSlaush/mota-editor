@@ -3,6 +3,7 @@ import {
   Bug,
   Calendar,
   ClockCounterClockwise,
+  Files,
   Gear,
   GitBranch,
   GitFork,
@@ -15,6 +16,7 @@ import {
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 
 export type SidebarView =
+  | "files"
   | "changes"
   | "history"
   | "worktrees"
@@ -37,6 +39,7 @@ interface Props {
 }
 
 const ITEMS: readonly { view: SidebarView; Icon: Icon; title: string }[] = [
+  { view: "files", Icon: Files, title: "Files" },
   { view: "changes", Icon: GitBranch, title: "Source control" },
   { view: "history", Icon: ClockCounterClockwise, title: "Session history" },
   { view: "worktrees", Icon: GitFork, title: "Worktrees" },
