@@ -3920,26 +3920,126 @@ body {
   padding: 12px;
 }
 
+/* The search box shares the actions row with Refresh, and takes what the
+   button leaves. */
+.files__search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+}
+
+.files__search:focus-within {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.files__search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.files__search-input:focus {
+  outline: none;
+}
+
 /* Tighter than a Changes row: a tree is read as a shape, and the gaps
    that suit a dozen changed files bury it. */
 .files__row {
-  padding: 1px 0;
+  padding: 0;
+}
+
+.files__button {
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+/* The whole row lights up, the way a file manager's does — the underline
+   the Changes panel puts on a file name reads as a link, and a tree of
+   links is a tree that looks like it is all one hover. */
+.files__button:hover {
+  background: var(--border);
+}
+
+.files__button:hover .changes__filename {
+  text-decoration: none;
 }
 
 /* Fixed width, present on every row: a file's name has to line up with
    the folder names above it, not with their carets. */
 .files__caret {
   flex: none;
-  width: 14px;
+  width: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
 }
 
-.files__row .changes__file {
+.files__icon {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
+}
+
+/* File-type colour comes from the theme's own five, not from a palette
+   of this panel's own: every theme already answers what "blue" and
+   "yellow" mean in it, the light ones included. The groupings are the
+   ones an editor has taught everyone to expect — TypeScript blue,
+   JavaScript yellow, stylesheets violet, markup warm, data green. */
+.files__icon--folder,
+.files__icon--ts,
+.files__icon--tsx,
+.files__icon--python {
+  color: var(--accent);
+}
+
+.files__icon--js,
+.files__icon--jsx {
+  color: var(--warning);
+}
+
+.files__icon--style,
+.files__icon--image {
+  color: var(--tool);
+}
+
+.files__icon--markup,
+.files__icon--rust {
+  color: var(--error);
+}
+
+.files__icon--data {
+  color: var(--success);
+}
+
+/* Prose and the unrecognised stay quiet: colour should mean something,
+   and "I have no idea what this is" is not a thing to shout. */
+.files__icon--markdown,
+.files__icon--text,
+.files__icon--plain {
+  color: var(--text-dim);
+}
+
+/* The folder it lives in, after the name — only search results have one,
+   and it must give up its width to the name first. */
+.files__row .changes__dir {
+  flex: 1;
+  text-align: right;
 }
 
 /* ---- Worktrees panel ----

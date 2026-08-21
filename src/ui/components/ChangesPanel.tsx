@@ -24,7 +24,7 @@ import type { GitChange } from "../../core/ports/gitPort";
 import type { GitActionResult, GitVerb } from "../../core/usecases/gitActions";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import { openExternalLink } from "../externalLink";
-import { fileName } from "../fileName";
+import { fileName, parentDir } from "../fileName";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { AgentDiff } from "./ToolCallContentView";
 
@@ -571,12 +571,6 @@ interface ListProps {
 /** "3 changes" / "1 change" — the agent-edits row's tooltip counts them. */
 function editCount(count: number): string {
   return `${String(count)} ${count === 1 ? "change" : "changes"}`;
-}
-
-/** The path without its file name — the gray VS-style suffix. */
-function parentDir(path: string): string {
-  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return cut > 0 ? path.slice(0, cut) : "";
 }
 
 function ChangeList({

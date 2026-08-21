@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFileTree, visibleRows } from "./fileTree";
+import { buildFileTree, fileKind, visibleRows } from "./fileTree";
 
 /** Names at the top level, in the order the tree puts them. */
 const topNames = (paths: readonly string[]) =>
@@ -89,6 +89,51 @@ describe("buildFileTree", () => {
 
     expect(names).not.toContain("");
     expect(names).toContain("b.ts");
+  });
+});
+
+describe("fileKind", () => {
+  it("knows the languages the project is written in", () => {
+    expect(fileKind("App.tsx")).toBe("tsx");
+    expect(fileKind("store.ts")).toBe("ts");
+    expect(fileKind("main.rs")).toBe("rust");
+    expect(fileKind("styles.css")).toBe("style");
+    expect(fileKind("index.html")).toBe("markup");
+    expect(fileKind("tauri.conf.json")).toBe("data");
+    expect(fileKind("README.md")).toBe("markdown");
+    expect(fileKind("icon.png")).toBe("image");
+  });
+
+  it("reads several spellings of the same language as one kind", () => {
+    expect([fileKind("a.js"), fileKind("a.mjs"), fileKind("a.cjs")]).toEqual([
+      "js",
+      "js",
+      "js",
+    ]);
+    expect([fileKind("a.yml"), fileKind("a.yaml"), fileKind("a.toml")]).toEqual([
+      "data",
+      "data",
+      "data",
+    ]);
+  });
+
+  it("does not care how the extension is capitalised", () => {
+    expect(fileKind("PHOTO.PNG")).toBe("image");
+  });
+
+  it("reads the last extension, not the first", () => {
+    expect(fileKind("appState.test.ts")).toBe("ts");
+  });
+
+  it("has a plain kind for everything it does not recognise", () => {
+    expect(fileKind("Dockerfile")).toBe("plain");
+    expect(fileKind("LICENSE")).toBe("plain");
+    expect(fileKind("archive.xyz")).toBe("plain");
+  });
+
+  it("treats a dotfile as a name, not as an extension", () => {
+    // ".gitignore" is not a gitignore-flavoured file: it has no extension.
+    expect(fileKind(".gitignore")).toBe("plain");
   });
 });
 

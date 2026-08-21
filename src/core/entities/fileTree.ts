@@ -61,6 +61,75 @@ export function visibleRows(
   return rows;
 }
 
+/**
+ * What a file is, as far as the tree cares: enough to pick a glyph and a
+ * colour for its row, and no more. Several spellings of one language
+ * collapse into one kind, and anything unrecognised is `plain` — a tree
+ * that guessed wrong would be worse than a tree that stayed quiet.
+ */
+export type FileKind =
+  | "ts"
+  | "tsx"
+  | "js"
+  | "jsx"
+  | "style"
+  | "markup"
+  | "data"
+  | "rust"
+  | "python"
+  | "markdown"
+  | "text"
+  | "image"
+  | "plain";
+
+const KIND_BY_EXTENSION: Readonly<Record<string, FileKind>> = {
+  ts: "ts",
+  mts: "ts",
+  cts: "ts",
+  tsx: "tsx",
+  js: "js",
+  mjs: "js",
+  cjs: "js",
+  jsx: "jsx",
+  css: "style",
+  scss: "style",
+  sass: "style",
+  less: "style",
+  html: "markup",
+  htm: "markup",
+  vue: "markup",
+  svelte: "markup",
+  xml: "markup",
+  json: "data",
+  yaml: "data",
+  yml: "data",
+  toml: "data",
+  sql: "data",
+  csv: "data",
+  rs: "rust",
+  py: "python",
+  md: "markdown",
+  markdown: "markdown",
+  txt: "text",
+  log: "text",
+  png: "image",
+  jpg: "image",
+  jpeg: "image",
+  gif: "image",
+  svg: "image",
+  webp: "image",
+  ico: "image",
+};
+
+/** The kind of the file a row shows, from its name alone. */
+export function fileKind(name: string): FileKind {
+  const cut = name.lastIndexOf(".");
+  // A leading dot is the whole name of a `.gitignore`, not an extension:
+  // reading it as one would file it under a language it is not.
+  if (cut <= 0) return "plain";
+  return KIND_BY_EXTENSION[name.slice(cut + 1).toLowerCase()] ?? "plain";
+}
+
 /** A folder while it is still being built: children by name, order later. */
 interface Builder {
   readonly children: Map<string, Builder>;
