@@ -8,6 +8,7 @@ import {
   CaretDown,
   CaretRight,
   Check,
+  CheckCircle,
   CircleNotch,
   DotsThree,
   GitBranch,
@@ -15,9 +16,11 @@ import {
   Minus,
   Plus,
   Trash,
+  WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { noticeParts } from "../../core/entities/gitAction";
 import { commitUrl } from "../../core/entities/gitRemote";
 import type { AgentEditedFile } from "../../core/entities/tool";
 import type { GitChange } from "../../core/ports/gitPort";
@@ -288,19 +291,14 @@ export function ChangesPanel({
         </button>
       </div>
 
+      {/* Keyed by the message: a new outcome is a new notice, and it
+          starts folded rather than inheriting the last one's state. */}
       {shown && (
-        <p className={`changes__notice ${shown.ok ? "" : "changes__notice--error"}`}>
-          <span className="changes__notice-text">{shown.message}</span>
-          <button
-            type="button"
-            className="changes__notice-dismiss"
-            aria-label="Dismiss this message"
-            title="Dismiss"
-            onClick={() => setDismissed(shown)}
-          >
-            <X size={12} />
-          </button>
-        </p>
+        <Notice
+          key={shown.message}
+          result={shown}
+          onDismiss={() => setDismissed(shown)}
+        />
       )}
 
       {!changes ? (
@@ -485,6 +483,58 @@ function pendingTitle(verb: "pull" | "push", count: number): string {
   return count === 0
     ? "Push — nothing waiting to be pushed"
     : `Push ${commits} to the upstream`;
+}
+
+/**
+ * UI — how the last git verb ended.
+ *
+ * A sentence first, and git's own report folded away behind it. Both
+ * used to share one paragraph at one size, which is what made a push
+ * read as a wall of ref hashes with the outcome buried in it: the
+ * hashes are worth keeping, but not worth reading first.
+ */
+function Notice({
+  result,
+  onDismiss,
+}: {
+  result: GitActionResult;
+  onDismiss: () => void;
+}) {
+  const { headline, detail } = noticeParts(result.message);
+  const [showDetail, setShowDetail] = useState(false);
+  const StateIcon = result.ok ? CheckCircle : WarningCircle;
+
+  return (
+    <div className={`changes__notice ${result.ok ? "" : "changes__notice--error"}`}>
+      <div className="changes__notice-head">
+        <StateIcon className="changes__notice-icon" size={14} weight="fill" />
+        <span className="changes__notice-text">{headline}</span>
+        <button
+          type="button"
+          className="changes__notice-dismiss"
+          aria-label="Dismiss this message"
+          title="Dismiss"
+          onClick={onDismiss}
+        >
+          <X size={12} />
+        </button>
+      </div>
+      {detail !== "" && (
+        <>
+          <button
+            type="button"
+            className="changes__notice-more"
+            aria-expanded={showDetail}
+            onClick={() => setShowDetail(!showDetail)}
+          >
+            {showDetail ? <CaretDown size={10} /> : <CaretRight size={10} />}
+            {showDetail ? "Hide what git said" : "What git said"}
+          </button>
+          {showDetail && <pre className="changes__notice-detail">{detail}</pre>}
+        </>
+      )}
+    </div>
+  );
 }
 
 /** A titled, collapsible group with its item count in the header, and

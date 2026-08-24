@@ -23,6 +23,7 @@ import type { McpProbe } from "../../core/ports/mcpProbe";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
 import type { SuggestedPresets } from "../../core/usecases/subtasks";
+import { APP_VERSION } from "../version";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsExtensions } from "./SettingsExtensions";
@@ -163,6 +164,10 @@ export function SettingsModal({
               {item.label}
             </button>
           ))}
+          {/* Under the sections, where an About box would be if this
+              modal had one — the version is the only thing such a box
+              would have said. */}
+          <span className="settings-modal__version">Mota Editor {APP_VERSION}</span>
         </nav>
         <div className="settings-modal__body">
           {section === "defaults" && (

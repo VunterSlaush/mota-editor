@@ -297,6 +297,97 @@ pub fn discard_all_clean_args() -> Vec<String> {
     vec!["clean".to_owned(), "-f".to_owned(), "-d".to_owned()]
 }
 
+/// What a push did, said first in words, with git's own output kept
+/// underneath — the same shape `explain_failure` produces, because the
+/// panel renders both the same way.
+///
+/// git says nothing at all on stdout for a push and writes its report to
+/// stderr, so a push that worked used to reach the user as "Done." The
+/// interesting line is the ref update (`abc..def  main -> main`), and the
+/// remote it went to is on the `To ...` line above it.
+pub fn explain_push(output: &str) -> String {
+    if output.to_lowercase().contains("everything up-to-date") {
+        return "Everything up to date — nothing to push.".to_owned();
+    }
+    let headline = match (pushed_branch(output), pushed_remote(output)) {
+        (Some(branch), Some(remote)) => format!("Pushed {branch} to {remote}."),
+        (Some(branch), None) => format!("Pushed {branch}."),
+        (None, _) => "Pushed.".to_owned(),
+    };
+    lead(&headline, output)
+}
+
+/// What a pull brought down. `--ff-only` reports on stdout: what it
+/// updated, then a diffstat, which is the line worth leading with.
+pub fn explain_pull(output: &str) -> String {
+    if output.to_lowercase().contains("already up to date") {
+        return "Already up to date — nothing to pull.".to_owned();
+    }
+    let headline = match diffstat(output) {
+        Some(stat) => format!("Pulled — {stat}."),
+        None => "Pulled.".to_owned(),
+    };
+    lead(&headline, output)
+}
+
+/// What a fetch found. Nothing to say is the common case and deserves to
+/// read as one, rather than as git's silence.
+pub fn explain_fetch(output: &str) -> String {
+    let updates = output.lines().filter(|line| line.contains("->")).count();
+    if updates == 0 {
+        return "Already up to date — nothing to fetch.".to_owned();
+    }
+    let headline = if updates == 1 {
+        "Fetched 1 update.".to_owned()
+    } else {
+        format!("Fetched {updates} updates.")
+    };
+    lead(&headline, output)
+}
+
+/// A headline, then git's own words under it — or the headline alone
+/// when git had nothing to add.
+fn lead(headline: &str, output: &str) -> String {
+    let detail = significant_lines(output, 4);
+    if detail.is_empty() {
+        headline.to_owned()
+    } else {
+        format!("{headline}\n\n{detail}")
+    }
+}
+
+/// The local branch a push sent, from its `local -> remote` ref line.
+fn pushed_branch(output: &str) -> Option<String> {
+    output
+        .lines()
+        .find(|line| line.contains(" -> ") && !line.contains("[deleted]"))
+        .and_then(|line| line.split(" -> ").next())
+        .map(|left| left.split_whitespace().last().unwrap_or_default().to_owned())
+        .filter(|branch| !branch.is_empty())
+}
+
+/// The remote a push named, short enough for a sidebar: the host and
+/// path of `To git@github.com:owner/repo.git`, never the whole URL.
+fn pushed_remote(output: &str) -> Option<String> {
+    let target = output.lines().find_map(|line| line.trim().strip_prefix("To "))?;
+    let trimmed = target.trim().trim_end_matches(".git");
+    let short = trimmed.rsplit(['/', ':']).take(2).collect::<Vec<_>>();
+    match short.as_slice() {
+        [repo, owner] => Some(format!("{owner}/{repo}")),
+        _ => Some(trimmed.to_owned()),
+    }
+}
+
+/// git's own count of what changed, e.g. "3 files changed, 12
+/// insertions(+)". Reported verbatim: it is already a sentence.
+fn diffstat(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| line.contains("file") && line.contains("changed"))
+        .map(str::to_owned)
+}
+
 /// Why a git command failed, said first in words the user can act on,
 /// with git's own output kept underneath.
 ///
@@ -547,6 +638,84 @@ mod tests {
             explain_failure("   \n\n"),
             "git failed without an error message."
         );
+    }
+
+    /// What `git push` actually writes — all of it on stderr, which is
+    /// why a push used to reach the panel as "Done."
+    const PUSHED: &str = "\
+Enumerating objects: 12, done.
+Writing objects: 100% (7/7), 1.10 KiB | 1.10 MiB/s, done.
+To github.com:monalee-inc/mota-editor.git
+   3c5f926..b169a7c  main -> main";
+
+    #[test]
+    fn a_push_says_what_went_where() {
+        let explained = explain_push(PUSHED);
+        assert!(
+            explained.starts_with("Pushed main to monalee-inc/mota-editor."),
+            "{explained}"
+        );
+    }
+
+    #[test]
+    fn a_push_keeps_gits_own_report_under_the_headline() {
+        let explained = explain_push(PUSHED);
+        assert!(explained.contains("3c5f926..b169a7c"), "{explained}");
+    }
+
+    #[test]
+    fn a_push_with_nothing_to_send_says_so_in_words() {
+        assert_eq!(
+            explain_push("Everything up-to-date"),
+            "Everything up to date — nothing to push."
+        );
+    }
+
+    #[test]
+    fn a_push_we_cannot_read_still_reports_success() {
+        assert!(explain_push("").starts_with("Pushed."));
+    }
+
+    #[test]
+    fn a_pull_leads_with_what_changed() {
+        let explained = explain_pull(
+            "Updating 3c5f926..b169a7c\nFast-forward\n 6 files changed, 353 insertions(+), 18 deletions(-)",
+        );
+        assert!(
+            explained.starts_with("Pulled — 6 files changed, 353 insertions(+), 18 deletions(-)."),
+            "{explained}"
+        );
+    }
+
+    #[test]
+    fn a_pull_with_nothing_to_take_says_so_in_words() {
+        assert_eq!(
+            explain_pull("Already up to date.\n"),
+            "Already up to date — nothing to pull."
+        );
+    }
+
+    #[test]
+    fn a_fetch_counts_the_refs_it_moved() {
+        let explained = explain_fetch(
+            "From github.com:monalee-inc/mota-editor\n   3c5f926..b169a7c  main       -> origin/main\n * [new branch]      feat/x     -> origin/feat/x",
+        );
+        assert!(explained.starts_with("Fetched 2 updates."), "{explained}");
+    }
+
+    #[test]
+    fn a_fetch_that_found_nothing_says_so_rather_than_nothing() {
+        assert_eq!(
+            explain_fetch(""),
+            "Already up to date — nothing to fetch."
+        );
+    }
+
+    #[test]
+    fn one_update_is_not_reported_as_updates() {
+        let explained =
+            explain_fetch("From github.com:o/r\n   aaa..bbb  main -> origin/main");
+        assert!(explained.starts_with("Fetched 1 update."), "{explained}");
     }
 
     #[test]

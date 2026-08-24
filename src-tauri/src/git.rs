@@ -28,6 +28,31 @@ async fn run_git(project_path: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Like `run_git`, but keeps what git said on stderr when it succeeded.
+///
+/// Only the remote verbs need this, and they need it badly: push and
+/// fetch write their entire report to stderr and leave stdout empty, so
+/// reading stdout alone is why a push that moved seven objects used to
+/// reach the user as "Done."
+async fn run_git_reporting(project_path: &str, args: &[&str]) -> Result<String, String> {
+    let mut full_args = vec!["-C".to_owned(), project_path.to_owned()];
+    full_args.extend(args.iter().map(|a| (*a).to_owned()));
+
+    let output = runner::os_command("git", &full_args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .await
+        .map_err(|e| format!("Could not run git: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        Ok(format!("{}\n{}", stdout.trim_end(), stderr.trim_end()))
+    } else {
+        Err(vcs::explain_failure(stderr.trim()))
+    }
+}
+
 /// Like `run_git`, but a diff that found differences (exit code 1) is a
 /// success, not a failure — which is how `git diff --no-index` reports.
 async fn run_git_diff(project_path: &str, args: &[&str]) -> Result<String, String> {
@@ -323,12 +348,14 @@ pub async fn git_checkout(project_path: String, branch: String) -> Result<String
 
 #[tauri::command]
 pub async fn git_push(project_path: String) -> Result<String, String> {
-    run_git(&project_path, &["push"]).await.map(summary)
+    run_git_reporting(&project_path, &["push"]).await.map(|out| vcs::explain_push(&out))
 }
 
 #[tauri::command]
 pub async fn git_pull(project_path: String) -> Result<String, String> {
-    run_git(&project_path, &["pull", "--ff-only"]).await.map(summary)
+    run_git_reporting(&project_path, &["pull", "--ff-only"])
+        .await
+        .map(|out| vcs::explain_pull(&out))
 }
 
 /// Update the remote-tracking branches without touching the working
@@ -337,9 +364,9 @@ pub async fn git_pull(project_path: String) -> Result<String, String> {
 /// doesn't accumulate ghosts.
 #[tauri::command]
 pub async fn git_fetch(project_path: String) -> Result<String, String> {
-    // git writes fetch progress to stderr and leaves stdout empty, so a
-    // successful no-op summarises as "Done." rather than staying blank.
-    run_git(&project_path, &["fetch", "--prune"]).await.map(summary)
+    run_git_reporting(&project_path, &["fetch", "--prune"])
+        .await
+        .map(|out| vcs::explain_fetch(&out))
 }
 
 /// Every checkout of this repository, main first. Run from any of them —

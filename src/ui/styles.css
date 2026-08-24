@@ -538,10 +538,16 @@ body {
   word-break: break-word;
 }
 
+/* Right-aligned rather than colour-filled. A solid accent bubble spends
+   the loudest colour in the theme on the one message whose contents the
+   user already knows, and it leaves nothing to say the things inside it
+   with — a /command on it could only ever be a chip. Quiet surface, real
+   text colour, and the accent goes back to meaning something. */
 .msg--user {
   align-self: flex-end;
-  background: var(--accent);
-  color: #fff;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 
 /* Assistant replies read like Claude Code: plain full-width prose,
@@ -2036,6 +2042,16 @@ body {
   background: var(--bg-input);
 }
 
+/* `margin-top: auto` pins it to the bottom of the section list however
+   many sections there are. */
+.settings-modal__version {
+  margin-top: auto;
+  padding: 10px 10px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 /* The bottom padding is room for a dropdown opened on the last row: the
    scroll container clips, so a panel with nothing under it is cut off. */
 .settings-modal__body {
@@ -3140,23 +3156,77 @@ body {
   cursor: default;
 }
 
+/* The outcome of the last git verb. A column, not a paragraph: the
+   sentence, then the way to fold git's own words open under it. */
 .changes__notice {
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   font-size: 12px;
   color: var(--text-dim);
   background: var(--bg-raised);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--success);
   border-radius: 6px;
-  padding: 6px 8px;
-  white-space: pre-wrap;
+  padding: 7px 9px;
   word-break: break-word;
 }
 
+.changes__notice-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.changes__notice-icon {
+  flex: none;
+  /* Nudged onto the first line's baseline rather than its box top. */
+  margin-top: 1px;
+  color: var(--success);
+}
+
+/* The one line worth reading, so it gets the panel's real text colour —
+   the dim it used to share with git's ref hashes is what buried it. */
 .changes__notice-text {
   flex: 1;
   min-width: 0;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+/* Quiet enough to ignore when the sentence was answer enough. */
+.changes__notice-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 1px 3px;
+  margin-left: 17px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.changes__notice-more:hover {
+  color: var(--text);
+  background: var(--border);
+}
+
+/* git's own report: monospace, because it is hashes and refs, and
+   scrollable, because a rejected push can be a dozen lines. */
+.changes__notice-detail {
+  margin: 0 0 0 17px;
+  max-height: 140px;
+  overflow: auto;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
 }
 
 /* Dimmer than the message it sits beside — a git error is the thing to
@@ -3179,9 +3249,18 @@ body {
   background: var(--border);
 }
 
+/* A failure is the one notice that has to be unmissable: the stripe, the
+   icon and the sentence itself all carry it. */
 .changes__notice--error {
-  color: var(--error);
   border-color: var(--error);
+}
+
+.changes__notice--error .changes__notice-icon {
+  color: var(--error);
+}
+
+.changes__notice--error .changes__notice-text {
+  color: var(--error);
 }
 
 .changes__file-action {
@@ -4394,7 +4473,8 @@ body {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--bg-input);
+  color: var(--text-dim);
   border-radius: 999px;
   padding: 1px 8px;
 }
@@ -4523,15 +4603,9 @@ body {
   font-weight: inherit;
 }
 
-/* The user's own bubble is already accent-coloured, so the same accent
-   would be invisible there. */
-.msg--user .cmd-token,
-.pinned-prompt .cmd-token {
-  color: inherit;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 4px;
-  padding: 0 3px;
-}
+/* A sent message and the pinned prompt both draw on a quiet surface, so
+   the token needs no rule of its own: the accent and the weight above
+   are what a /command looks like everywhere in the app. */
 
 .composer-card__toolbar {
   display: flex;
@@ -4780,6 +4854,15 @@ body {
   font-weight: 600;
 }
 
+/* Beside the name, not part of it: a build number should be readable
+   without competing with the word it follows. */
+.empty-state__version {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+
 .empty-state p {
   margin: 0;
   color: var(--text-dim);
@@ -4975,13 +5058,12 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  /* On the accent bubble; same contrast precedent as .msg--user .cmd-token. */
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-dim);
 }
 
 .msg__turn-toggle:hover,
 .msg__turn-toggle[aria-expanded="true"] {
-  color: rgba(255, 255, 255, 1);
+  color: var(--text);
 }
 
 .msg__turn-details {
@@ -4990,15 +5072,18 @@ body {
   gap: 3px 10px;
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  border-top: 1px solid var(--border);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--text-dim);
 }
 
+/* The command the turn ran, said the way commands are said everywhere. */
 .msg__turn-cmd {
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--bg-input);
   border-radius: 999px;
   padding: 1px 8px;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* ---- Settings: Insights section ---- */

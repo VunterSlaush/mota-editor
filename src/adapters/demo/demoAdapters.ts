@@ -425,14 +425,28 @@ export class DemoGit implements GitPort {
   async checkout(_p: string, branch: string): Promise<string> {
     return `Switched to branch '${branch}'`;
   }
+  // The remote verbs answer in the shape the real backend does — a
+  // sentence, a blank line, then git's own report — so the browser
+  // preview renders the notice the desktop app renders.
   async push(): Promise<string> {
-    return "Everything up-to-date";
+    return [
+      "Pushed main to monalee-inc/mota-editor.",
+      "",
+      "To github.com:monalee-inc/mota-editor.git",
+      "   3c5f926..b169a7c  main -> main",
+    ].join("\n");
   }
   async pull(): Promise<string> {
-    return "Already up to date.";
+    return [
+      "Pulled — 2 files changed, 18 insertions(+), 4 deletions(-).",
+      "",
+      "Updating 3c5f926..b169a7c",
+      "Fast-forward",
+      " 2 files changed, 18 insertions(+), 4 deletions(-)",
+    ].join("\n");
   }
   async fetch(): Promise<string> {
-    return "Fetched origin.";
+    return "Already up to date — nothing to fetch.";
   }
 
   // Linked worktrees only — the main entry is derived per call, echoing
