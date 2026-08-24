@@ -68,7 +68,7 @@ impl Provider for Codex {
                 Permission::Manual => {}
             }
         }
-        args.push(effective_prompt(request, false));
+        args.push(effective_prompt(request, "codex", false));
         TurnCommand { program: "codex".to_owned(), args }
     }
 

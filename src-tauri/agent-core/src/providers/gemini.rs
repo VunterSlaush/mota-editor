@@ -28,7 +28,7 @@ impl Provider for Gemini {
     fn build_command(&self, request: &TurnRequest) -> TurnCommand {
         let mut args = vec![
             "-p".to_owned(),
-            effective_prompt(request, false),
+            effective_prompt(request, "gemini", false),
             "--output-format".to_owned(),
             "json".to_owned(),
         ];

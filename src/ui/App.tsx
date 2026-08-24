@@ -178,6 +178,10 @@ export function App({ context }: { context: AppContext }) {
     (provider: ProviderId) => context.listCommands.forProvider(projectPath, provider),
     [context, projectPath],
   );
+  const loadSubagentsFor = useCallback(
+    (provider: ProviderId) => context.listSubagents.forProvider(projectPath, provider),
+    [context, projectPath],
+  );
   const probeProvider = useCallback(
     (provider: ProviderId) => context.providerProbe.probe(provider, projectPath),
     [context, projectPath],
@@ -457,6 +461,7 @@ export function App({ context }: { context: AppContext }) {
           settings={state.settings}
           onChange={(patch) => void context.updateSettings.execute(patch)}
           loadCommands={loadCommandsFor}
+          loadSubagents={loadSubagentsFor}
           probeProvider={probeProvider}
           signInProvider={signInProvider}
           loadInsights={context.loadInsights}

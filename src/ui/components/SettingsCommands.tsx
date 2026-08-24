@@ -12,6 +12,7 @@ import {
   PROVIDERS,
   type ProviderId,
 } from "../../core/entities/provider";
+import { isNeverDelegated, type SubagentInfo } from "../../core/entities/subagent";
 import type { AppSettings } from "../../core/state/appState";
 import { OptionPicker } from "./OptionPicker";
 
@@ -19,6 +20,7 @@ interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
+  loadSubagents: (provider: ProviderId) => Promise<SubagentInfo[]>;
 }
 
 /** Empty id = "leave this alone", which is every command's default. */
@@ -43,9 +45,15 @@ const SOURCE_GROUPS: readonly { source: CommandSource; label: string; hint: stri
  * UI — what each slash command does to its tab. Picking a value here
  * means running that command switches the tab to it and leaves it there.
  */
-export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
+export function SettingsCommands({
+  settings,
+  onChange,
+  loadCommands,
+  loadSubagents,
+}: Props) {
   const [provider, setProvider] = useState<ProviderId>(settings.defaultProvider);
   const [commands, setCommands] = useState<readonly CommandInfo[]>([]);
+  const [subagents, setSubagents] = useState<readonly SubagentInfo[]>([]);
   const efforts = EFFORT_OPTIONS[provider];
   const models = MODEL_SUGGESTIONS[provider];
 
@@ -58,6 +66,16 @@ export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
       cancelled = true;
     };
   }, [provider, loadCommands]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadSubagents(provider).then((loaded) => {
+      if (!cancelled) setSubagents(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, loadSubagents]);
 
   const configFor = (name: string): CommandConfig =>
     settings.commandConfigs[commandConfigKey(provider, name)] ?? {};
@@ -81,8 +99,14 @@ export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
       </p>
       <p className="settings-section__hint">
         Model and effort only apply before a conversation starts: changing either restarts
-        the agent, which re-sends the whole conversation. Pin a cheap model on mechanical
-        commands to spend less on them.
+        the agent, which re-sends the whole conversation.
+      </p>
+      <p className="settings-section__hint">
+        Run as hands the command to a sub-agent instead. That is where the saving is — the
+        sub-agent works in its own context, so everything it reads stays out of this chat
+        and the turns after it stop paying to re-read it. It is also the only way the
+        model and effort above take effect mid-conversation, since a sub-agent starts
+        fresh: whatever its own definition pins is what it runs on.
       </p>
 
       <div className="settings-field">
@@ -181,6 +205,31 @@ export function SettingsCommands({ settings, onChange, loadCommands }: Props) {
                       ]}
                       onChange={(effort) =>
                         update(command.name, { effort: effort || undefined })
+                      }
+                    />
+                  )}
+                  {/* Commands Mota answers itself, and the one that
+                      compacts THIS conversation, have nowhere else to
+                      run — offering the choice would be offering a
+                      setting that quietly does nothing. */}
+                  {!isNeverDelegated(provider, command.name) && (
+                    <OptionPicker
+                      ariaLabel={`Where ${command.name} runs`}
+                      placement="bottom"
+                      className="command-row__picker"
+                      disabled={false}
+                      placeholder="Run as"
+                      value={configFor(command.name).agent ?? INHERIT}
+                      options={[
+                        { id: INHERIT, label: "In this chat" },
+                        ...subagents.map((agent) => ({
+                          id: agent.name,
+                          label: agent.name,
+                          description: agent.description,
+                        })),
+                      ]}
+                      onChange={(agent) =>
+                        update(command.name, { agent: agent || undefined })
                       }
                     />
                   )}

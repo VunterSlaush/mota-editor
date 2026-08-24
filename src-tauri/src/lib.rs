@@ -3,6 +3,7 @@
 //! process runner, and workspace persistence.
 
 mod acp_session;
+mod agent_discovery;
 mod app_badge;
 mod billing_log;
 mod boundary_suggest;
@@ -76,6 +77,7 @@ pub fn run() {
             commands::end_session,
             commands::get_terminal_output,
             commands::list_custom_commands,
+            commands::list_subagents,
             app_badge::set_app_badge,
             commands::open_external,
             commands::open_extensions_dir,

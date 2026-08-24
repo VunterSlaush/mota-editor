@@ -173,6 +173,8 @@ export class TauriAgentGateway implements AgentGateway {
           resumeSessionId: request.resumeSessionId ?? null,
           mcpServers: toWireServers(request.mcpServers),
           subtask: request.subtask ?? null,
+          delegateTo: request.delegateTo ?? null,
+          handoff: request.handoff ?? null,
         },
       });
     } catch (e) {

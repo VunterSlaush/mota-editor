@@ -17,6 +17,7 @@ import type { CommandInfo } from "../../core/entities/command";
 import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
 import type { ProviderId } from "../../core/entities/provider";
+import type { SubagentInfo } from "../../core/entities/subagent";
 import type { BoundaryPreset } from "../../core/entities/subtask";
 import type { ProvisionEntry } from "../../core/entities/worktree";
 import type { McpProbe } from "../../core/ports/mcpProbe";
@@ -53,6 +54,7 @@ interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
+  loadSubagents: (provider: ProviderId) => Promise<SubagentInfo[]>;
   probeProvider: (provider: ProviderId) => Promise<ProviderStatus>;
   /** Opens the provider's own login prompt in a terminal. */
   signInProvider: (provider: ProviderId) => Promise<void>;
@@ -109,6 +111,7 @@ export function SettingsModal({
   settings,
   onChange,
   loadCommands,
+  loadSubagents,
   probeProvider,
   signInProvider,
   loadInsights,
@@ -178,6 +181,7 @@ export function SettingsModal({
               settings={settings}
               onChange={onChange}
               loadCommands={loadCommands}
+              loadSubagents={loadSubagents}
             />
           )}
           {section === "tools" && (

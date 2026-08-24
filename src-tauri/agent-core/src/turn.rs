@@ -45,6 +45,13 @@ pub struct TurnRequest {
     pub effort: Option<String>,
     /// The tab's subtask scope; None for a tab with full authority.
     pub subtask: Option<crate::scope::SubtaskScope>,
+    /// Sub-agent this turn's slash command was handed off to; None to
+    /// run it in the conversation as usual. Set only when the prompt
+    /// begins with a command, so its leading token IS that command.
+    pub delegate_to: Option<String>,
+    /// Recent conversation to carry into that sub-agent, which would
+    /// otherwise start with no idea what "this" refers to.
+    pub handoff: Option<String>,
 }
 
 const PLAN_PREAMBLE: &str = "You are in PLAN MODE. Do not create, modify, or delete any \
@@ -81,7 +88,11 @@ pub fn mode_preamble(mode: Mode, plan_is_native: bool) -> Option<&'static str> {
 
 /// Compose the prompt actually sent to the CLI: mode preamble (unless the
 /// provider enforces the mode natively) + attachment note + user prompt.
-pub fn effective_prompt(request: &TurnRequest, mode_is_native: bool) -> String {
+pub fn effective_prompt(
+    request: &TurnRequest,
+    provider_id: &str,
+    mode_is_native: bool,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     if let Some(preamble) = mode_preamble(request.mode, mode_is_native) {
@@ -107,7 +118,11 @@ pub fn effective_prompt(request: &TurnRequest, mode_is_native: bool) -> String {
         ));
     }
 
-    parts.push(request.prompt.clone());
+    // Written by BOTH prompt paths, like the scope preamble: the
+    // headless fallback must delegate too, or a command configured to
+    // run in a sub-agent would quietly run inline at full price on any
+    // machine without the ACP adapter.
+    parts.push(crate::delegate::outgoing_prompt(provider_id, request));
     parts.join("\n\n")
 }
 
@@ -145,6 +160,8 @@ pub fn test_request(prompt: &str) -> TurnRequest {
         model: None,
         effort: None,
         subtask: None,
+        delegate_to: None,
+        handoff: None,
     }
 }
 
@@ -155,13 +172,13 @@ mod tests {
     #[test]
     fn agent_mode_sends_the_prompt_untouched() {
         let request = test_request("hello");
-        assert_eq!(effective_prompt(&request, false), "hello");
+        assert_eq!(effective_prompt(&request, "claude", false), "hello");
     }
 
     #[test]
     fn plan_mode_prepends_the_plan_preamble_when_not_native() {
         let request = TurnRequest { mode: Mode::Plan, ..test_request("add auth") };
-        let prompt = effective_prompt(&request, false);
+        let prompt = effective_prompt(&request, "claude", false);
         assert!(prompt.starts_with("You are in PLAN MODE."));
         assert!(prompt.ends_with("add auth"));
     }
@@ -169,13 +186,13 @@ mod tests {
     #[test]
     fn plan_mode_adds_nothing_when_the_provider_is_native() {
         let request = TurnRequest { mode: Mode::Plan, ..test_request("add auth") };
-        assert_eq!(effective_prompt(&request, true), "add auth");
+        assert_eq!(effective_prompt(&request, "claude", true), "add auth");
     }
 
     #[test]
     fn debug_mode_prepends_the_debug_preamble_even_for_native_providers() {
         let request = TurnRequest { mode: Mode::Debug, ..test_request("it crashes") };
-        assert!(effective_prompt(&request, true).starts_with("You are in DEBUG MODE."));
+        assert!(effective_prompt(&request, "claude", true).starts_with("You are in DEBUG MODE."));
     }
 
     #[test]
@@ -188,7 +205,7 @@ mod tests {
             }),
             ..test_request("edit the web app")
         };
-        let prompt = effective_prompt(&request, true);
+        let prompt = effective_prompt(&request, "claude", true);
         assert!(prompt.contains("- apps/web"));
         assert!(prompt.ends_with("edit the web app"));
     }
@@ -200,7 +217,7 @@ mod tests {
         // would answer a question with an implementation plan. The
         // preamble IS the difference between the two modes.
         let request = TurnRequest { mode: Mode::Ask, ..test_request("how does auth work?") };
-        let prompt = effective_prompt(&request, true);
+        let prompt = effective_prompt(&request, "claude", true);
         assert!(prompt.starts_with("You are in ASK MODE."));
         assert!(prompt.ends_with("how does auth work?"));
     }
@@ -208,7 +225,7 @@ mod tests {
     #[test]
     fn ask_mode_tells_the_agent_not_to_plan() {
         let request = TurnRequest { mode: Mode::Ask, ..test_request("what is this?") };
-        let prompt = effective_prompt(&request, true);
+        let prompt = effective_prompt(&request, "claude", true);
         assert!(prompt.contains("not a request for an implementation plan"));
     }
 
@@ -224,7 +241,7 @@ mod tests {
             attachments: vec!["/tmp/spec.pdf".to_owned()],
             ..test_request("summarize this")
         };
-        let prompt = effective_prompt(&request, false);
+        let prompt = effective_prompt(&request, "claude", false);
         assert!(prompt.contains("- /tmp/spec.pdf"));
         assert!(prompt.ends_with("summarize this"));
     }

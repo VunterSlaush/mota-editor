@@ -22,6 +22,19 @@ export interface CommandConfig {
    * and remembering to choose it every time.
    */
   readonly model?: string;
+  /**
+   * Hand the command off to this sub-agent instead of running it in the
+   * chat (empty or absent means run it here).
+   *
+   * This is the setting that makes the two above work. Model and effort
+   * are spawn-time, so ApplyCommandConfig has to skip them once a
+   * conversation exists — but a sub-agent is a fresh child, so whatever
+   * its definition pins applies with nothing to re-ingest. It is also
+   * where the saving actually is: the child's tool output never enters
+   * this conversation, so the turns that follow stop paying to re-read
+   * it.
+   */
+  readonly agent?: string;
 }
 
 /**
@@ -44,5 +57,11 @@ export function leadingCommand(prompt: string): string | null {
 
 /** Whether a config would actually change anything. */
 export function isEmptyCommandConfig(config: CommandConfig | undefined): boolean {
-  return !config?.mode && !config?.permission && !config?.effort && !config?.model;
+  return (
+    !config?.mode &&
+    !config?.permission &&
+    !config?.effort &&
+    !config?.model &&
+    !config?.agent
+  );
 }

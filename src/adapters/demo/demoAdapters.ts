@@ -5,7 +5,9 @@ import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type { ProviderId } from "../../core/entities/provider";
+import type { SubagentInfo } from "../../core/entities/subagent";
 import type { ProvisionEntry } from "../../core/entities/worktree";
+import type { AgentCatalog } from "../../core/ports/agentCatalog";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -315,6 +317,18 @@ export class DemoPastedImageStore implements PastedImageStore {
 export class DemoCommandCatalog implements CommandCatalog {
   async listCustomCommands(): Promise<CommandInfo[]> {
     return [{ name: "/deploy", description: "Ship it to production", source: "project" }];
+  }
+}
+
+export class DemoAgentCatalog implements AgentCatalog {
+  async listSubagents(): Promise<SubagentInfo[]> {
+    return [
+      {
+        name: "mota-commit-push",
+        description: "Commits and pushes on a cheaper model",
+        source: "user",
+      },
+    ];
   }
 }
 

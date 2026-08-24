@@ -1,4 +1,5 @@
 import {
+  DemoAgentCatalog,
   DemoAgentGateway,
   DemoAppBadge,
   DemoBillingStore,
@@ -22,6 +23,7 @@ import {
   DemoZoom,
 } from "../adapters/demo/demoAdapters";
 import { isTauriRuntime } from "../adapters/tauri/runtime";
+import { TauriAgentCatalog } from "../adapters/tauri/tauriAgentCatalog";
 import { TauriAgentGateway } from "../adapters/tauri/tauriAgentGateway";
 import { TauriAppBadge } from "../adapters/tauri/tauriAppBadge";
 import { TauriBillingStore } from "../adapters/tauri/tauriBillingStore";
@@ -63,6 +65,7 @@ import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
 import { ListCommands } from "../core/usecases/listCommands";
 import { ListProjectFiles } from "../core/usecases/listProjectFiles";
+import { ListSubagents } from "../core/usecases/listSubagents";
 import { LoadBranches } from "../core/usecases/loadBranches";
 import { LoadGitChanges } from "../core/usecases/loadGitChanges";
 import { LoadInsights } from "../core/usecases/loadInsights";
@@ -135,6 +138,7 @@ export interface AppContext {
   readonly respondPermission: RespondPermission;
   readonly respondQuestion: RespondQuestion;
   readonly listCommands: ListCommands;
+  readonly listSubagents: ListSubagents;
   readonly listProjectFiles: ListProjectFiles;
   /** Installed extensions: list, enable (native consent), disable, log. */
   readonly manageExtensions: ManageExtensions;
@@ -172,6 +176,7 @@ export function createAppContext(): AppContext {
   const folderPicker = inTauri ? new TauriFolderPicker() : new DemoFolderPicker();
   const filePicker = inTauri ? new TauriFilePicker() : new DemoFilePicker();
   const commandCatalog = inTauri ? new TauriCommandCatalog() : new DemoCommandCatalog();
+  const agentCatalog = inTauri ? new TauriAgentCatalog() : new DemoAgentCatalog();
   const gitPort = inTauri ? new TauriGitStatus() : new DemoGit();
   const projectFiles = inTauri ? new TauriProjectFiles() : new DemoProjectFiles();
   const transcriptStore = inTauri
@@ -223,6 +228,7 @@ export function createAppContext(): AppContext {
     extensionHost,
     notifications,
   );
+  const listSubagents = new ListSubagents(store, agentCatalog);
   const sendPrompt = new SendPrompt(
     store,
     agentGateway,
@@ -238,6 +244,7 @@ export function createAppContext(): AppContext {
     ),
     newId,
     runExtensionCommand,
+    listSubagents,
   );
   runExtensionCommand.connectTurnStarter((tabId, prompt) =>
     sendPrompt.execute(tabId, prompt),
@@ -300,6 +307,7 @@ export function createAppContext(): AppContext {
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
+    listSubagents,
     listProjectFiles: new ListProjectFiles(store, gitPort, projectFiles),
     manageExtensions: new ManageExtensions(store, extensionHost, notifications),
     extensionPanels: new ExtensionPanels(extensionHost),

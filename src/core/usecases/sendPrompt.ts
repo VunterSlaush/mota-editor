@@ -6,6 +6,7 @@ import {
   createExtensionPrompt,
 } from "../entities/createExtensionGuide";
 import { expandPromptCommand, findExtensionCommand } from "../entities/extension";
+import { buildHandoff } from "../entities/handoff";
 import {
   AUTH_REQUIRED_CONTEXT,
   approvalMessage,
@@ -20,7 +21,13 @@ import {
   userMessage,
 } from "../entities/message";
 import { tabLabel } from "../entities/project";
-import { COMPACT_COMMAND, contextWindowFor, providerById } from "../entities/provider";
+import {
+  COMPACT_COMMAND,
+  contextWindowFor,
+  type ProviderId,
+  providerById,
+} from "../entities/provider";
+import { delegatedSubagent, subagentExists } from "../entities/subagent";
 import { estimateTokens } from "../entities/tokens";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
@@ -30,6 +37,7 @@ import { type TabState, tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import { agentServers } from "./agentServers";
 import type { ApplyCommandConfig } from "./applyCommandConfig";
+import type { ListSubagents } from "./listSubagents";
 import { persistWorkspace } from "./persistWorkspace";
 import { declineParkedPlan } from "./planApproval";
 import type { RunExtensionCommand } from "./runExtensionCommand";
@@ -92,10 +100,32 @@ export class SendPrompt {
     private readonly applyCommandConfig: ApplyCommandConfig,
     private readonly newId: IdGenerator,
     private readonly extensionCommands?: RunExtensionCommand,
+    private readonly subagents?: ListSubagents,
   ) {
     agentGateway.subscribeAgentInitiated((tabId, event) =>
       this.onAgentInitiated(tabId, event),
     );
+  }
+
+  /**
+   * Whether a sub-agent by this name exists to hand the command to.
+   *
+   * The check has to happen here rather than after the fact: the
+   * providers resolve a mention against their own agent list and drop a
+   * miss SILENTLY, so a deleted or renamed definition produces no error
+   * anywhere — just an ordinary, expensive inline run that looks like it
+   * worked. Nothing to report means we cannot tell, and the delegation
+   * goes ahead: the point of the check is to catch a name we KNOW is
+   * wrong, not to add a second way for this to fail.
+   */
+  private async canDelegate(
+    path: string,
+    provider: ProviderId,
+    agent: string,
+  ): Promise<boolean> {
+    if (!this.subagents) return true;
+    const known = await this.subagents.forProvider(path, provider).catch(() => null);
+    return known === null || subagentExists(known, agent);
   }
 
   async execute(
@@ -189,6 +219,46 @@ export class SendPrompt {
           ? expandPromptCommand(extensionHit.command.template, commandArgs)
           : trimmed;
 
+    // A command can be configured to run in a sub-agent instead of here,
+    // which is where the saving is: the child's tool output never enters
+    // this conversation, so none of the turns after it pay to re-read it.
+    // Checked last, because everything above either never reaches an
+    // agent or has already rewritten what does.
+    const delegateTo = extensionHit
+      ? null
+      : delegatedSubagent(
+          this.store.getState().settings.commandConfigs,
+          provider,
+          command,
+        );
+    if (delegateTo && !(await this.canDelegate(path, provider, delegateTo))) {
+      // Loud, and before anything is spent. A mention the provider
+      // cannot resolve is dropped silently, so the command would have
+      // run here anyway — at MORE than it costs today, since it would
+      // also leave its output behind. Saying nothing is the one outcome
+      // that turns this feature into a bill.
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: userMessage(trimmed, attachments, {
+          sentAt,
+          mode,
+          permission,
+          ...(command ? { command } : {}),
+        }),
+      });
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: errorMessage(
+          `${command} is set to run in the “${delegateTo}” sub-agent, but there is no ` +
+            `sub-agent by that name. Nothing was sent. Choose another in Settings → ` +
+            `Commands, or add a definition for it.`,
+        ),
+      });
+      return;
+    }
+
     const message = userMessage(trimmed, attachments, {
       sentAt,
       mode,
@@ -205,6 +275,19 @@ export class SendPrompt {
     });
 
     this.store.dispatch({ type: "chat/messageAppended", tabId, message });
+    // Said out loud, because what was sent is not what was typed — and
+    // because the child's whole report arrives as a tool row, which the
+    // transcript hides while Verbose is off. Without this the turn would
+    // look like it did nothing.
+    if (delegateTo) {
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: infoMessage(
+          `Running ${command} in the ${delegateTo} sub-agent — its work stays out of this conversation.`,
+        ),
+      });
+    }
     // The clock comes from here, not the reducer, which stays pure.
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: sentAt });
 
@@ -215,7 +298,10 @@ export class SendPrompt {
       tabId,
       provider,
       projectPath: path,
-      prompt: outgoing,
+      // A delegated turn sends the typed text: the adapter splits the
+      // command from its arguments to build the hand-off, and every
+      // rewrite above is on a path that is never delegated.
+      prompt: delegateTo ? trimmed : outgoing,
       mode,
       permission,
       model,
@@ -228,6 +314,15 @@ export class SendPrompt {
         configured.project.mcpOverrides,
       ),
       subtask: configured.project.subtask,
+      ...(delegateTo
+        ? {
+            delegateTo,
+            // Built from the conversation as it stands BEFORE this
+            // prompt: the child needs what "this" refers to, and this
+            // prompt is the one thing it is already being told.
+            handoff: buildHandoff(configured.messages) || undefined,
+          }
+        : {}),
     };
 
     let failure = await this.tryStart(tabId, request, turn);
