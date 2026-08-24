@@ -1,4 +1,5 @@
 import { Cpu } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import { MODEL_SUGGESTIONS, type ProviderId } from "../../core/entities/provider";
 import { OptionPicker, type PickerOption } from "./OptionPicker";
 
@@ -28,6 +29,11 @@ interface Props {
  * provider's default model. A model set elsewhere (settings, a restored
  * workspace) that isn't a suggestion is kept as its own option, so
  * opening the list can never silently drop it.
+ *
+ * The exception is a provider that publishes no list at all, because its
+ * catalogue lives behind the user's own account (Cline). There is no
+ * closed list to pick from, so the control becomes what it honestly is —
+ * a text field. Blank still means the provider's default.
  */
 export function ModelPicker({
   provider,
@@ -42,6 +48,18 @@ export function ModelPicker({
 }: Props) {
   const shown = pendingValue ?? value;
   const suggestions = MODEL_SUGGESTIONS[provider];
+  if (suggestions.length === 0) {
+    return (
+      <ModelField
+        value={shown}
+        defaultModel={defaultModel}
+        pending={pendingValue !== undefined}
+        disabled={disabled}
+        className={className}
+        onChange={onChange}
+      />
+    );
+  }
   const custom = shown !== "" && !suggestions.includes(shown) ? [shown] : [];
   const label = (model: string) => {
     const base =
@@ -73,6 +91,65 @@ export function ModelPicker({
         pendingValue !== undefined ? `${className} picker__trigger--pending` : className
       }
       onChange={onChange}
+    />
+  );
+}
+
+/**
+ * The text-field form, for providers whose model list is not ours to
+ * know. Edits are local until the user commits with Enter or by leaving
+ * the field: reporting every keystroke would respawn the agent letter by
+ * letter, since a model change is what makes a session's shape stale.
+ */
+function ModelField({
+  value,
+  defaultModel,
+  pending,
+  disabled,
+  className,
+  onChange,
+}: {
+  value: string;
+  defaultModel?: string;
+  pending: boolean;
+  disabled: boolean;
+  className: string;
+  onChange: (model: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  // A model set elsewhere — settings, a restored workspace, a preset —
+  // has to win over a stale draft, or the field would show one model
+  // while the agent ran another.
+  useEffect(() => setDraft(value), [value]);
+
+  const commit = () => {
+    const next = draft.trim();
+    setDraft(next);
+    if (next !== value) onChange(next);
+  };
+
+  return (
+    <input
+      type="text"
+      className={`picker__trigger model-field ${className} ${
+        pending ? "picker__trigger--pending" : ""
+      }`}
+      aria-label="Model"
+      value={draft}
+      disabled={disabled}
+      spellCheck={false}
+      placeholder={defaultModel ? `Default: ${defaultModel}` : "Default model"}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          setDraft(value);
+          e.currentTarget.blur();
+        }
+      }}
     />
   );
 }

@@ -4477,6 +4477,25 @@ body {
   color: var(--text-dim);
 }
 
+/* The model control for providers that publish no list — a text field
+   wearing the trigger's clothes, so a toolbar of pickers stays one row
+   of controls rather than sprouting a form. */
+.model-field {
+  cursor: text;
+  min-width: 120px;
+}
+
+.model-field::placeholder {
+  color: var(--text-dim);
+  opacity: 1;
+}
+
+.model-field:focus {
+  background: var(--border);
+  color: var(--text);
+  outline: none;
+}
+
 /* A value the user picked that is NOT what the agent is running yet —
    dashed, so the toolbar never reads as settled when it isn't. */
 .picker__trigger--pending {

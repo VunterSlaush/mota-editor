@@ -793,10 +793,20 @@ async fn ensure_session(
         )
         .await
         .map_err(|e| {
-            let detail = session.with_stderr(format!(
-                "Could not start an agent session: {e}. If this is an authentication \
-                 problem, sign in to the {provider_id} CLI in a terminal first."
-            ));
+            // Some agents refuse `session/new` outright until the client
+            // has authenticated (Cline answers "Authentication required:
+            // Call authenticate before starting a session"). That is the
+            // same problem a failed prompt reports, and it deserves the
+            // same answer: name the provider and its own sign-in command,
+            // rather than a paragraph hedging about what might be wrong.
+            let detail = if acp::is_auth_failure(&e) {
+                acp::auth_failure_message(provider_id, &e)
+            } else {
+                session.with_stderr(format!(
+                    "Could not start an agent session: {e}. If this is an authentication \
+                     problem, sign in to the {provider_id} CLI in a terminal first."
+                ))
+            };
             session.shutdown();
             emit_stage(app, tab_id, "ready");
             AcpStartError::Failed(detail)

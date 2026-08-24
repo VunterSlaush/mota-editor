@@ -1575,6 +1575,22 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_that_refuses_to_open_a_session_unauthenticated_reads_as_a_login_problem() {
+        // Cline's exact words when `session/new` arrives before the
+        // client has authenticated (captured from cline 3.0.55). Left
+        // unclassified this surfaces as a raw wire error with nothing the
+        // user can act on, which is how it first shipped.
+        assert!(is_auth_failure(
+            "Authentication required: Call authenticate before starting a session"
+        ));
+        // And cline's words when the account's own token is rejected.
+        assert!(is_auth_failure(
+            "Unauthorized: Please make sure you're using the latest version of Cline \
+             and re-authenticate your Cline account."
+        ));
+    }
+
+    #[test]
     fn a_login_failure_names_the_provider_and_its_own_sign_in_command() {
         let message = auth_failure_message("opencode", "token expired");
         assert!(message.starts_with("OpenCode needs you to sign in again."), "{message}");

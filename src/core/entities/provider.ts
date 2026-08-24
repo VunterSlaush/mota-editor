@@ -103,9 +103,12 @@ export const MODEL_SUGGESTIONS: Readonly<Record<ProviderId, readonly string[]>> 
     "opencode/x-preview-f-free",
   ],
   // Deliberately empty: `cline auth` both signs the account in and
-  // chooses its model, and the account's catalogue is not readable
-  // without those credentials. Offering guessed ids would put entries in
-  // the picker that fail only once the user sends a prompt.
+  // chooses its model, and the account's catalogue is fetched at runtime
+  // from credentials we do not hold. Offering guessed ids would put
+  // entries in the picker that fail only once the user sends a prompt.
+  // An empty list is not a dead end — the model control becomes a text
+  // field, so any id the account accepts (`~z-ai/glm-latest`) can be
+  // typed and is then remembered per tab like any other.
   cline: [],
 };
 

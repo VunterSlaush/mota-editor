@@ -193,8 +193,10 @@ impl WarmSessionArgs {
 /// provider command lines and config strings — restrict them to plain
 /// tokens so nothing can smuggle flags or quoting along.
 ///
-/// `/` is allowed because gateway-routed providers name their models
-/// `vendor/model`. It introduces no new risk: the value only ever becomes
+/// `/` and `~` are allowed because gateway-routed providers name their
+/// models `vendor/model`, and Cline prefixes the ones it routes itself
+/// with a tilde (`~z-ai/glm-latest`). Neither introduces new risk: the
+/// value only ever becomes
 /// an env-var value or a single argv element, and `runner::os_command`
 /// passes an argv vector to an absolute program, never a shell. A leading
 /// `-` is a different matter — any CLI this is appended to would read it
@@ -207,7 +209,7 @@ fn validate_token(value: Option<String>, what: &str) -> Result<Option<String>, S
     }
     let plain = value
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/'));
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/' | '~'));
     if plain && !value.starts_with('-') {
         Ok(Some(value))
     } else {
@@ -608,6 +610,12 @@ mod tests {
         assert_eq!(
             validate_token(Some("opencode/grok-code-fast-1".to_owned()), "model").unwrap(),
             Some("opencode/grok-code-fast-1".to_owned())
+        );
+        // Cline tildes the models it routes itself; rejecting that would
+        // fail every turn on the model its own `cline auth` selected.
+        assert_eq!(
+            validate_token(Some("~z-ai/glm-latest".to_owned()), "model").unwrap(),
+            Some("~z-ai/glm-latest".to_owned())
         );
     }
 
