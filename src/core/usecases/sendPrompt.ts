@@ -29,6 +29,7 @@ import {
 } from "../entities/provider";
 import { delegatedSubagent, subagentExists } from "../entities/subagent";
 import { estimateTokens } from "../entities/tokens";
+import { isRunningToolStatus } from "../entities/toolRun";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
@@ -77,11 +78,48 @@ interface DeltaBuffer {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * How long a stretch may stay open on the strength of an unfinished tool
+ * call alone. The quiet window above reads silence as "the agent
+ * stopped", which a long tool breaks — a build says nothing for minutes,
+ * and its terminal output is polled client-side, so none of that traffic
+ * gets anywhere near this timer.
+ *
+ * Bounded rather than open-ended because a stretch that never settles
+ * also never drains the queue: a prompt typed behind it would wait
+ * forever, and the Stop that frees the tab DISCARDS it. Fifteen minutes
+ * outlasts any build worth watching and still fails safe.
+ */
+export const FOLLOWUP_TOOL_GRACE_MS = 15 * 60_000;
+
 /** One agent-initiated stretch, open until the events stop coming. */
 interface Followup {
   timer: ReturnType<typeof setTimeout>;
   /** Something the user would want to look at landed, not just usage. */
   notable: boolean;
+  /**
+   * Tool calls THIS stretch started that have not reported back. Scoped
+   * to the stretch on purpose: a cancelled turn can leave an
+   * `in_progress` row in the transcript for good, and reading the
+   * transcript instead would let that stale row wedge every later
+   * stretch.
+   */
+  openTools: Set<string>;
+  /** When the last event arrived, which bounds the grace above. */
+  lastEventAt: number;
+}
+
+/** The tool call an event opens or closes, when it says. */
+function toolCallLifecycle(
+  event: AgentTurnEvent,
+): { id: string; running: boolean } | null {
+  if (event.kind === "toolCall") {
+    return { id: event.toolCallId, running: isRunningToolStatus(event.status) };
+  }
+  if (event.kind === "toolCallUpdate" && event.status !== undefined) {
+    return { id: event.toolCallId, running: isRunningToolStatus(event.status) };
+  }
+  return null;
 }
 
 /**
@@ -429,8 +467,15 @@ export class SendPrompt {
     this.dispatchEvent(tabId, event);
 
     if (open) clearTimeout(open.timer);
+    const openTools = open?.openTools ?? new Set<string>();
+    const lifecycle = toolCallLifecycle(event);
+    if (lifecycle?.running) openTools.add(lifecycle.id);
+    else if (lifecycle) openTools.delete(lifecycle.id);
+
     this.followups.set(tabId, {
       notable: (open?.notable ?? false) || showsUpInTheChat(event),
+      openTools,
+      lastEventAt: Date.now(),
       timer: setTimeout(() => this.settleFollowup(tabId), FOLLOWUP_SETTLE_MS),
     });
   }
@@ -444,12 +489,30 @@ export class SendPrompt {
   private settleFollowup(tabId: string): void {
     const open = this.followups.get(tabId);
     if (!open) return;
-    this.followups.delete(tabId);
     this.flushDeltas(tabId);
     // A turn of ours started in the meantime: it owns the busy flag now,
     // and its own completion does the telling, saving and draining.
-    if (this.inflight.has(tabId)) return;
+    if (this.inflight.has(tabId)) {
+      this.followups.delete(tabId);
+      return;
+    }
 
+    // A tool this stretch started has not reported back, so the quiet is
+    // the tool working, not the agent finishing. Settling here is what
+    // marked a tab "done" — green, notification and all — while the
+    // build it was waiting on still had minutes to run.
+    if (
+      open.openTools.size > 0 &&
+      Date.now() - open.lastEventAt < FOLLOWUP_TOOL_GRACE_MS
+    ) {
+      this.followups.set(tabId, {
+        ...open,
+        timer: setTimeout(() => this.settleFollowup(tabId), FOLLOWUP_SETTLE_MS),
+      });
+      return;
+    }
+
+    this.followups.delete(tabId);
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
     // Anything typed while the follow-up held the tab queued behind it,
     // and no completion is coming to release it.

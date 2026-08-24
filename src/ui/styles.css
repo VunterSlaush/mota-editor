@@ -2179,15 +2179,18 @@ body {
 /* One slash command and the settings it applies to its tab. */
 .command-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 10px 0;
   border-top: 1px solid var(--border);
 }
 
+/* Keeps a floor: with a basis of 0 the name collapsed to nothing before
+   the controls beside it gave up any width. */
 .command-row__text {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 220px;
+  min-width: 160px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2207,14 +2210,29 @@ body {
   white-space: nowrap;
 }
 
+/* Wraps rather than overflows: five controls plus a command name do not
+   fit a narrow modal, and the body scrolls on Y — which makes any X
+   overflow a second, horizontal scrollbar across the whole panel. */
 .command-row__controls {
-  flex: none;
+  flex: 1 1 auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
+/* Narrow enough that all five fit one line at the modal's own width, and
+   free to wrap onto a second when the window is smaller. The body scrolls
+   on Y, so any overflow on X becomes a second scrollbar across the whole
+   panel — which is what five controls used to cause. */
 .command-row__picker {
-  min-width: 104px;
+  min-width: 96px;
+}
+
+/* The one control that says WHERE a command runs rather than how, so it
+   holds an agent's name and earns the extra width. */
+.command-row__picker--where {
+  min-width: 124px;
 }
 
 /* ---- Tools section (MCP servers) ---- */

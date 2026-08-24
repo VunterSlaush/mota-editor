@@ -1,3 +1,4 @@
+import { ArrowBendUpRight, Chat, WarningCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
 import type { CommandInfo, CommandSource } from "../../core/entities/command";
@@ -12,7 +13,11 @@ import {
   PROVIDERS,
   type ProviderId,
 } from "../../core/entities/provider";
-import { isNeverDelegated, type SubagentInfo } from "../../core/entities/subagent";
+import {
+  isNeverDelegated,
+  type SubagentInfo,
+  subagentExists,
+} from "../../core/entities/subagent";
 import type { AppSettings } from "../../core/state/appState";
 import { OptionPicker } from "./OptionPicker";
 
@@ -25,6 +30,24 @@ interface Props {
 
 /** Empty id = "leave this alone", which is every command's default. */
 const INHERIT = "";
+
+/**
+ * The configured sub-agent as a picker option when it is no longer among
+ * the discovered ones — deleted, renamed, or written for another
+ * machine. Shown so the row states its own broken setting rather than
+ * looking untouched.
+ */
+function missingAgent(configured: string | undefined, known: readonly SubagentInfo[]) {
+  if (!configured || subagentExists(known, configured)) return [];
+  return [
+    {
+      id: configured,
+      label: configured,
+      description: "Not found. This command will not run until you choose another.",
+      icon: <WarningCircle size={14} />,
+    },
+  ];
+}
 
 /** The origin groups, in display order, with what each one means. */
 const SOURCE_GROUPS: readonly { source: CommandSource; label: string; hint: string }[] = [
@@ -102,11 +125,16 @@ export function SettingsCommands({
         the agent, which re-sends the whole conversation.
       </p>
       <p className="settings-section__hint">
-        Run as hands the command to a sub-agent instead. That is where the saving is — the
-        sub-agent works in its own context, so everything it reads stays out of this chat
-        and the turns after it stop paying to re-read it. It is also the only way the
-        model and effort above take effect mid-conversation, since a sub-agent starts
-        fresh: whatever its own definition pins is what it runs on.
+        <strong>Runs in</strong> decides where the work happens. In this chat is normal.
+        Choose a sub-agent instead and the command goes to a separate agent that reads and
+        edits on its own and sends back only the result — what it read never enters this
+        conversation, so every message after it costs less.
+      </p>
+      <p className="settings-section__hint">
+        Sub-agents are the ones your agent ships with, plus any you have written in its
+        agents folder. Mota only reads them, so a sub-agent is also where you pin a
+        cheaper model or a lower effort for a command: put it in that sub-agent's own
+        definition.
       </p>
 
       <div className="settings-field">
@@ -151,6 +179,7 @@ export function SettingsCommands({
                   <OptionPicker
                     ariaLabel={`Mode for ${command.name}`}
                     placement="bottom"
+                    align="end"
                     className="command-row__picker"
                     disabled={false}
                     placeholder="Mode"
@@ -164,6 +193,7 @@ export function SettingsCommands({
                   <OptionPicker
                     ariaLabel={`Permissions for ${command.name}`}
                     placement="bottom"
+                    align="end"
                     className="command-row__picker"
                     disabled={false}
                     placeholder="Permissions"
@@ -179,6 +209,7 @@ export function SettingsCommands({
                   <OptionPicker
                     ariaLabel={`Model for ${command.name}`}
                     placement="bottom"
+                    align="end"
                     className="command-row__picker"
                     disabled={false}
                     placeholder="Model"
@@ -195,6 +226,7 @@ export function SettingsCommands({
                     <OptionPicker
                       ariaLabel={`Effort for ${command.name}`}
                       placement="bottom"
+                      align="end"
                       className="command-row__picker"
                       disabled={false}
                       placeholder="Effort"
@@ -216,17 +248,30 @@ export function SettingsCommands({
                     <OptionPicker
                       ariaLabel={`Where ${command.name} runs`}
                       placement="bottom"
-                      className="command-row__picker"
+                      align="end"
+                      className="command-row__picker command-row__picker--where"
                       disabled={false}
-                      placeholder="Run as"
+                      placeholder="Runs in"
                       value={configFor(command.name).agent ?? INHERIT}
                       options={[
-                        { id: INHERIT, label: "In this chat" },
+                        {
+                          id: INHERIT,
+                          label: "In this chat",
+                          description:
+                            "Normal. Everything it reads stays in the conversation.",
+                          icon: <Chat size={14} />,
+                        },
                         ...subagents.map((agent) => ({
                           id: agent.name,
                           label: agent.name,
                           description: agent.description,
+                          icon: <ArrowBendUpRight size={14} />,
                         })),
+                        // A name that no longer matches anything would
+                        // otherwise fall back to the placeholder and read
+                        // as unset — while still being set, and still
+                        // refused when the command is run.
+                        ...missingAgent(configFor(command.name).agent, subagents),
                       ]}
                       onChange={(agent) =>
                         update(command.name, { agent: agent || undefined })
