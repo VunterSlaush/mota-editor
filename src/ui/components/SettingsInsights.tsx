@@ -11,6 +11,7 @@ interface Props {
 }
 
 const RANGES: readonly { id: InsightsRange; label: string }[] = [
+  { id: "today", label: "Today" },
   { id: "7d", label: "7 days" },
   { id: "30d", label: "30 days" },
   { id: "all", label: "All time" },

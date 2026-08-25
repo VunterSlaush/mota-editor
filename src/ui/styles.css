@@ -2235,6 +2235,31 @@ body {
   min-width: 124px;
 }
 
+/* What delegating this command actually bought, measured. Sits under the
+   command's own description, because it is a fact about the command and
+   not another thing to set. */
+.command-row__saving {
+  font-size: 12px;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-row__saving--cheaper {
+  color: var(--success);
+}
+
+.command-row__saving--dearer {
+  color: var(--warning);
+}
+
+/* The evidence, dimmed: the headline is the claim, this is the sample it
+   rests on, and it must never read as loudly as the number. */
+.command-row__saving-detail {
+  color: var(--text-dim);
+}
+
 /* ---- Tools section (MCP servers) ---- */
 .tool-row {
   display: flex;

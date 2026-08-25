@@ -2,16 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { BilledRequest } from "./billing";
 import {
   buildInsights,
+  delegationSaving,
   type InsightsOptions,
   type SessionStats,
   type TurnStat,
 } from "./insights";
 
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
 /** Midnight UTC, so day arithmetic is exact under the injected keys. */
 const NOW = 1_000 * DAY;
 
 const utcDayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const utcStartOfDay = (ms: number) => Math.floor(ms / DAY) * DAY;
 const utcHour = (ms: number) => new Date(ms).getUTCHours();
 const utcWeekday = (ms: number) => new Date(ms).getUTCDay();
 
@@ -47,6 +50,7 @@ function build(
     now: NOW,
     autoCompactThreshold: 0.85,
     dayKey: utcDayKey,
+    startOfDay: utcStartOfDay,
     hourOf: utcHour,
     weekdayOf: utcWeekday,
     ...overrides,
@@ -79,6 +83,28 @@ describe("buildInsights", () => {
     const month = build([s], { range: "30d" });
     expect(month.totalTurns).toBe(2);
     expect(month.activity.days).toHaveLength(30);
+  });
+
+  it("counts today as the calendar day, not the last 24 hours", () => {
+    // 09:00. A rolling window would still be counting yesterday evening.
+    const morning = NOW + 9 * HOUR;
+    const s = session({
+      turns: [
+        turn({ sentAt: morning - 11 * HOUR }), // yesterday, 22:00
+        turn({ sentAt: morning - HOUR }), // today, 08:00
+      ],
+    });
+
+    const today = build([s], { range: "today", now: morning });
+
+    expect(today.totalTurns).toBe(1);
+    expect(today.activity.days).toHaveLength(1);
+    expect(today.activity.days[0].day).toBe(utcDayKey(morning));
+  });
+
+  it("shows an empty today rather than yesterday's work", () => {
+    const s = session({ turns: [turn({ sentAt: NOW - HOUR })] });
+    expect(build([s], { range: "today", now: NOW + HOUR }).totalTurns).toBe(0);
   });
 
   it("drops sessions with no in-range turns from session counts", () => {
@@ -735,5 +761,56 @@ describe("buildInsights billed spend", () => {
       "claude-haiku-4-5-20251001",
     ]);
     expect(report.billed?.byModel[1].costUsd).toBeCloseTo(1); // haiku $1/M
+  });
+});
+
+describe("delegation savings", () => {
+  const row = (command: string) =>
+    build([
+      session({
+        turns: [
+          turn({ command, tokens: 30_000 }),
+          turn({ command, tokens: 30_000 }),
+          turn({ command, tokens: 2_000, agent: "mota-commit-push" }),
+        ],
+      }),
+    ]).tokens.byCommand.find((c) => c.command === command);
+
+  it("splits a command's runs by where they ran", () => {
+    const found = row("/commit-push");
+    expect(found?.turns).toBe(3);
+    expect(found?.inChat).toEqual({ turns: 2, tokens: 60_000 });
+    expect(found?.delegated).toEqual({ turns: 1, tokens: 2_000 });
+  });
+
+  it("reports the saving per run, not per total", () => {
+    // 30k a run in the chat against 2k delegated: the two-to-one run
+    // count must not make delegating look worse than it is.
+    const saving = delegationSaving(row("/commit-push")!);
+    expect(saving).toBeCloseTo(1 - 2_000 / 30_000, 5);
+  });
+
+  it("says nothing when one side was never tried", () => {
+    const onlyChat = build([
+      session({ turns: [turn({ command: "/review", tokens: 10_000 })] }),
+    ]).tokens.byCommand[0];
+    expect(delegationSaving(onlyChat)).toBeNull();
+
+    const onlyDelegated = build([
+      session({ turns: [turn({ command: "/review", tokens: 10, agent: "a" })] }),
+    ]).tokens.byCommand[0];
+    expect(delegationSaving(onlyDelegated)).toBeNull();
+  });
+
+  it("admits when delegating cost more", () => {
+    const worse = build([
+      session({
+        turns: [
+          turn({ command: "/tiny", tokens: 500 }),
+          turn({ command: "/tiny", tokens: 4_000, agent: "a" }),
+        ],
+      }),
+    ]).tokens.byCommand[0];
+    expect(delegationSaving(worse)).toBeLessThan(0);
   });
 });

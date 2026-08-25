@@ -182,6 +182,7 @@ export function SettingsModal({
               onChange={onChange}
               loadCommands={loadCommands}
               loadSubagents={loadSubagents}
+              loadInsights={loadInsights}
             />
           )}
           {section === "tools" && (

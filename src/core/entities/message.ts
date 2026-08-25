@@ -143,6 +143,13 @@ export interface TurnMeta {
   readonly effort?: string;
   /** Leading slash command, when the prompt was one (e.g. "/review"). */
   readonly command?: string;
+  /**
+   * Sub-agent the command was handed to, when it was. Recorded because
+   * it is the only way to tell afterwards what delegating actually
+   * bought: without it a delegated run and an ordinary one look
+   * identical in the stats, and "is this saving tokens?" has no answer.
+   */
+  readonly agent?: string;
   // — patched at completion; durationMs presence gates the details icon —
   /** Turn wall time in ms. */
   readonly durationMs?: number;

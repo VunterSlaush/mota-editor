@@ -304,6 +304,7 @@ export class SendPrompt {
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(command ? { command } : {}),
+      ...(delegateTo ? { agent: delegateTo } : {}),
     });
     this.inflight.set(tabId, {
       messageId: message.id,

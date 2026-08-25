@@ -1663,6 +1663,29 @@ describe("SendPrompt — handing a command to a sub-agent", () => {
     expect(messages[0].text).toBe("/commit-push fix the parser");
   });
 
+  it("records the sub-agent on the turn, so the saving can be measured later", async () => {
+    const { store, useCase } = setup();
+    delegate(store, "/commit-push", "mota-commit-push");
+
+    await useCase.execute("t1", "/commit-push");
+
+    // Insights compares a command's delegated runs against its in-chat
+    // ones. Without this stamp the two are indistinguishable and the
+    // Commands screen has nothing to report.
+    const sent = store.getState().tabs[0].messages.find((m) => m.role === "user");
+    expect(sent?.turn?.agent).toBe("mota-commit-push");
+    expect(sent?.turn?.command).toBe("/commit-push");
+  });
+
+  it("leaves the turn unstamped when the command ran in the chat", async () => {
+    const { store, useCase } = setup();
+
+    await useCase.execute("t1", "/commit-push");
+
+    const sent = store.getState().tabs[0].messages.find((m) => m.role === "user");
+    expect(sent?.turn?.agent).toBeUndefined();
+  });
+
   it("says out loud that the work went elsewhere", async () => {
     const { store, useCase } = setup();
     delegate(store, "/commit-push", "mota-commit-push");

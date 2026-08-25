@@ -8,6 +8,12 @@ import {
   isEmptyCommandConfig,
 } from "../../core/entities/commandConfig";
 import {
+  type CommandTokenRow,
+  delegationSaving,
+  type InsightsRange,
+  type InsightsReport,
+} from "../../core/entities/insights";
+import {
   EFFORT_OPTIONS,
   MODEL_SUGGESTIONS,
   PROVIDERS,
@@ -18,6 +24,7 @@ import {
   type SubagentInfo,
   subagentExists,
 } from "../../core/entities/subagent";
+import { formatTokens } from "../../core/entities/tokens";
 import type { AppSettings } from "../../core/state/appState";
 import { OptionPicker } from "./OptionPicker";
 
@@ -26,10 +33,49 @@ interface Props {
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
   loadSubagents: (provider: ProviderId) => Promise<SubagentInfo[]>;
+  loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
+}
+
+/**
+ * What delegating a command actually bought, from the saved sessions.
+ *
+ * Only rendered once a command has run BOTH ways: the whole point is the
+ * comparison, and a number with nothing to compare against would be a
+ * claim rather than a measurement. Run counts are always shown beside
+ * the percentage so a lopsided sample reads as one.
+ */
+function DelegationSaving({ row }: { row: CommandTokenRow }) {
+  const saving = delegationSaving(row);
+  if (saving === null) return null;
+
+  const perRun = (split: { turns: number; tokens: number }) =>
+    formatTokens(Math.round(split.tokens / split.turns));
+  const percent = Math.round(Math.abs(saving) * 100);
+  const approx = row.estimated ? "≈" : "";
+
+  return (
+    <span
+      className={`command-row__saving ${
+        saving > 0 ? "command-row__saving--cheaper" : "command-row__saving--dearer"
+      }`}
+    >
+      {saving > 0 ? `${percent}% cheaper delegated` : `${percent}% dearer delegated`}
+      <span className="command-row__saving-detail">
+        {` — ${approx}${perRun(row.delegated)}/run over ${row.delegated.turns} vs `}
+        {`${approx}${perRun(row.inChat)} over ${row.inChat.turns} in chat`}
+      </span>
+    </span>
+  );
 }
 
 /** Empty id = "leave this alone", which is every command's default. */
 const INHERIT = "";
+
+/** The savings line for one command, when there is one to show. */
+function savingsFor(rows: readonly CommandTokenRow[], command: string) {
+  const row = rows.find((r) => r.command === command);
+  return row ? <DelegationSaving row={row} /> : null;
+}
 
 /**
  * The configured sub-agent as a picker option when it is no longer among
@@ -73,12 +119,35 @@ export function SettingsCommands({
   onChange,
   loadCommands,
   loadSubagents,
+  loadInsights,
 }: Props) {
   const [provider, setProvider] = useState<ProviderId>(settings.defaultProvider);
   const [commands, setCommands] = useState<readonly CommandInfo[]>([]);
   const [subagents, setSubagents] = useState<readonly SubagentInfo[]>([]);
+  const [savings, setSavings] = useState<readonly CommandTokenRow[]>([]);
   const efforts = EFFORT_OPTIONS[provider];
   const models = MODEL_SUGGESTIONS[provider];
+
+  // Reading every saved session is not free, so it is only done for
+  // someone who actually delegates something — otherwise there is
+  // nothing here to measure and no reason to make them wait for it.
+  const delegatesAnything = Object.values(settings.commandConfigs).some((c) => c.agent);
+
+  useEffect(() => {
+    if (!delegatesAnything) {
+      setSavings([]);
+      return;
+    }
+    let cancelled = false;
+    loadInsights("all")
+      .then((report) => {
+        if (!cancelled) setSavings(report.tokens.byCommand);
+      })
+      .catch(() => undefined); // a measurement nobody asked for stays quiet
+    return () => {
+      cancelled = true;
+    };
+  }, [delegatesAnything, loadInsights]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,6 +243,7 @@ export function SettingsCommands({
                 <div className="command-row__text">
                   <span className="command-row__name">{command.name}</span>
                   <span className="command-row__description">{command.description}</span>
+                  {savingsFor(savings, command.name)}
                 </div>
                 <div className="command-row__controls">
                   <OptionPicker
