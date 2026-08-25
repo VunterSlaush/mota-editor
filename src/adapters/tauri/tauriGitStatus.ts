@@ -36,10 +36,6 @@ export class TauriGitStatus implements GitPort {
     return invoke<GitDivergence | null>("git_upstream", { projectPath });
   }
 
-  async listFiles(projectPath: string): Promise<string[]> {
-    return invoke<string[]>("git_list_files", { projectPath });
-  }
-
   async diff(
     projectPath: string,
     path: string,

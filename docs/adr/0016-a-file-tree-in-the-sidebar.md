@@ -1,6 +1,7 @@
 # ADR-0016 — A file tree in the sidebar, listed by git first
 
-- Status: accepted
+- Status: accepted; the listing decision superseded by ADR-0017 (the disk is
+  the listing, ignored files included)
 - Date: 2026-08-21
 - Relates to: ADR-0013 (declarative sidebar panels — the slot this fills),
   ADR-0001 (lightweight is the product)

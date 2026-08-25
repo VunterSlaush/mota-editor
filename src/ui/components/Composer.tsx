@@ -44,10 +44,10 @@ const MAX_INPUT_LINES = 4;
 const LINE_HEIGHT_PX = 22;
 
 /**
- * How long a fetched file list is reused before "@" asks git again. Long
- * enough that a burst of typing costs one `git ls-files`, short enough
- * that a file the agent just wrote shows up while you are still reading
- * about it.
+ * How long a fetched file list is reused before "@" reads the project
+ * again. Long enough that a burst of typing costs one walk of the disk,
+ * short enough that a file the agent just wrote shows up while you are
+ * still reading about it.
  */
 const FILE_LIST_TTL_MS = 30_000;
 

@@ -88,7 +88,6 @@ pub fn run() {
             git::git_log,
             git::git_remote_url,
             git::git_current_branch,
-            git::git_list_files,
             project_files::list_folder_files,
             git::git_diff,
             git::git_stage,

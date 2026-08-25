@@ -35,9 +35,6 @@ class FakeGit implements GitPort {
   async upstream(): Promise<GitDivergence | null> {
     return this.divergence;
   }
-  async listFiles(): Promise<string[]> {
-    return this.files.map((f) => f.path);
-  }
   async diff(
     _p: string,
     path: string,

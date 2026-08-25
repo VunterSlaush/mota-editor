@@ -300,7 +300,7 @@ export function createAppContext(): AppContext {
     respondPermission: new RespondPermission(store, agentGateway),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
-    listProjectFiles: new ListProjectFiles(store, gitPort, projectFiles),
+    listProjectFiles: new ListProjectFiles(store, projectFiles),
     manageExtensions: new ManageExtensions(store, extensionHost, notifications),
     extensionPanels: new ExtensionPanels(extensionHost),
     shells: new Shells(store, shellPort, shellHistory),

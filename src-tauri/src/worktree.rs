@@ -445,9 +445,9 @@ const MAX_CANDIDATES: usize = 500;
 /// Folders inside a project that could be provisioned into a worktree,
 /// repo-relative and sorted, for the settings section's suggestions.
 ///
-/// Unlike `git_list_files` this reads the disk, because the folders worth
-/// naming here — `node_modules`, a build target — are exactly the ones
-/// git ignores and would never report.
+/// This looks inside the folders `project_files::SKIPPED_FOLDERS` walks
+/// past, because the folders worth naming here — `node_modules`, a build
+/// target — are exactly the heavy ones a file tree has no reason to list.
 #[tauri::command]
 pub async fn worktree_folder_candidates(project_path: String) -> Result<Vec<String>, String> {
     if !Path::new(&project_path).is_absolute() {

@@ -1,11 +1,10 @@
 /**
  * Port — the files in a folder, read from the disk itself.
  *
- * Git answers this faster and better wherever it can: `git ls-files` already
- * knows what is ignored, so the listing costs no ignore rules of our own.
- * This is the answer for the folder git knows nothing about — a project that
- * was never a repository — where the alternative is showing the user an
- * empty tree of their own files.
+ * This is the listing, for a repository and a plain folder alike. Git could
+ * answer it, and once did, but it answers with `.gitignore` applied: no
+ * `.env`, nothing under `dist/`, and no way to ask again. The disk knows
+ * what is actually there.
  */
 export interface ProjectFiles {
   /**
