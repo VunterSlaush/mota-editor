@@ -13,7 +13,6 @@ import {
   delegationReport,
   type InsightsRange,
   type InsightsReport,
-  type PerRun,
 } from "../../core/entities/insights";
 import {
   EFFORT_OPTIONS,
@@ -39,13 +38,19 @@ interface Props {
 }
 
 /**
- * What delegating this command has bought so far, from the saved
- * sessions.
+ * What delegating this command has done to the conversation, in plain
+ * words.
  *
- * A command someone has deliberately pointed at a sub-agent always says
- * something here, even before there is anything to compare: silence on a
- * setting you just made reads as a broken feature, not as "no data yet".
- * Run counts sit beside every figure so a lopsided sample reads as one.
+ * Says how much of the chat's context the command eats, because that is
+ * the thing a sub-agent removes and the thing every later message pays
+ * to re-read. Deliberately NOT a percentage of the turn's billed tokens:
+ * that number is mostly a measure of how deep in the chat the command
+ * happened to run, and it read as a verdict while being a coincidence.
+ *
+ * A command pointed at a sub-agent always says something, even with
+ * nothing to compare yet — silence on a setting you just made reads as a
+ * broken feature. Run counts sit beside every figure so a thin sample
+ * reads as one.
  */
 function DelegationSaving({
   report,
@@ -56,43 +61,44 @@ function DelegationSaving({
 }) {
   if (report.kind === "silent") return null;
 
-  const approx = estimated ? "≈" : "";
-  const rate = ({ perRun, turns }: PerRun) =>
-    `${approx}${formatTokens(Math.round(perRun))}/run over ${turns}`;
+  const approx = estimated ? "~" : "";
+  const size = (n: number) => `${approx}${formatTokens(Math.round(n))}`;
+  const runs = (n: number) => `${n} run${n === 1 ? "" : "s"}`;
+  const pending = "command-row__saving command-row__saving--pending";
 
   if (report.kind === "noRuns") {
+    return <span className={pending}>Runs in a sub-agent. Not used yet.</span>;
+  }
+  if (report.kind === "baseline") {
     return (
-      <span className="command-row__saving command-row__saving--pending">
-        Delegated — no runs recorded yet.
+      <span className={pending}>
+        {`Adds ${size(report.inChat.perRun)} to this chat each time it runs here `}
+        {`(${runs(report.inChat.turns)}). A sub-agent keeps that out.`}
       </span>
     );
   }
-  if (report.kind === "awaitingDelegated") {
+  if (report.kind === "delegatedOnly") {
     return (
-      <span className="command-row__saving command-row__saving--pending">
-        {`Delegated — not run in a sub-agent yet. In chat it costs ${rate(report.inChat)}.`}
-      </span>
-    );
-  }
-  if (report.kind === "awaitingInChat") {
-    return (
-      <span className="command-row__saving command-row__saving--pending">
-        {`${rate(report.delegated)} delegated — nothing in chat to compare against.`}
+      <span className={pending}>
+        {`Adds ${size(report.delegated.perRun)} to this chat per run in a sub-agent `}
+        {`(${runs(report.delegated.turns)}). Never run here, so nothing to compare.`}
       </span>
     );
   }
 
-  const cheaper = report.saving > 0;
-  const percent = Math.round(Math.abs(report.saving) * 100);
+  const helping = report.keptOut > 0;
   return (
     <span
       className={`command-row__saving ${
-        cheaper ? "command-row__saving--cheaper" : "command-row__saving--dearer"
+        helping ? "command-row__saving--cheaper" : "command-row__saving--dearer"
       }`}
     >
-      {cheaper ? `${percent}% cheaper delegated` : `${percent}% dearer delegated`}
+      {helping
+        ? `Keeps ${size(report.keptOut)} out of this chat each run`
+        : `Adds ${size(-report.keptOut)} MORE to this chat than running it here`}
       <span className="command-row__saving-detail">
-        {` — ${rate(report.delegated)} vs ${rate(report.inChat)} in chat`}
+        {` — ${size(report.delegated.perRun)} over ${runs(report.delegated.turns)} `}
+        {`in a sub-agent vs ${size(report.inChat.perRun)} over ${runs(report.inChat.turns)} here`}
       </span>
     </span>
   );

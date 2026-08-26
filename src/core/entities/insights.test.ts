@@ -3,7 +3,6 @@ import type { BilledRequest } from "./billing";
 import {
   buildInsights,
   delegationReport,
-  delegationSaving,
   type InsightsOptions,
   type SessionStats,
   type TurnStat,
@@ -765,100 +764,99 @@ describe("buildInsights billed spend", () => {
   });
 });
 
-describe("delegation savings", () => {
-  const row = (command: string) =>
-    build([
-      session({
-        turns: [
-          turn({ command, tokens: 30_000 }),
-          turn({ command, tokens: 30_000 }),
-          turn({ command, tokens: 2_000, agent: "mota-commit-push" }),
-        ],
-      }),
-    ]).tokens.byCommand.find((c) => c.command === command);
-
-  it("splits a command's runs by where they ran", () => {
-    const found = row("/commit-push");
-    expect(found?.turns).toBe(3);
-    expect(found?.inChat).toEqual({ turns: 2, tokens: 60_000 });
-    expect(found?.delegated).toEqual({ turns: 1, tokens: 2_000 });
-  });
-
-  it("reports the saving per run, not per total", () => {
-    // 30k a run in the chat against 2k delegated: the two-to-one run
-    // count must not make delegating look worse than it is.
-    const saving = delegationSaving(row("/commit-push")!);
-    expect(saving).toBeCloseTo(1 - 2_000 / 30_000, 5);
-  });
-
-  it("says nothing when one side was never tried", () => {
-    const onlyChat = build([
-      session({ turns: [turn({ command: "/review", tokens: 10_000 })] }),
-    ]).tokens.byCommand[0];
-    expect(delegationSaving(onlyChat)).toBeNull();
-
-    const onlyDelegated = build([
-      session({ turns: [turn({ command: "/review", tokens: 10, agent: "a" })] }),
-    ]).tokens.byCommand[0];
-    expect(delegationSaving(onlyDelegated)).toBeNull();
-  });
-
-  it("admits when delegating cost more", () => {
-    const worse = build([
-      session({
-        turns: [
-          turn({ command: "/tiny", tokens: 500 }),
-          turn({ command: "/tiny", tokens: 4_000, agent: "a" }),
-        ],
-      }),
-    ]).tokens.byCommand[0];
-    expect(delegationSaving(worse)).toBeLessThan(0);
-  });
-});
-
-describe("what can be said about a delegation setting yet", () => {
+describe("delegation, measured in the context it leaves behind", () => {
   const rowFor = (turns: readonly TurnStat[]) =>
     build([session({ turns })]).tokens.byCommand[0];
 
+  it("splits a command's runs by where they ran", () => {
+    const row = rowFor([
+      turn({ command: "/x", tokens: 30_000 }),
+      turn({ command: "/x", tokens: 30_000 }),
+      turn({ command: "/x", tokens: 2_000, agent: "a" }),
+    ]);
+    expect(row.turns).toBe(3);
+    expect(row.inChat.turns).toBe(2);
+    expect(row.inChat.contextAdded).toBe(60_000);
+    expect(row.delegated.turns).toBe(1);
+    expect(row.delegated.contextAdded).toBe(2_000);
+  });
+
   it("says nothing for a command nobody chose to delegate", () => {
-    const row = rowFor([turn({ command: "/review", tokens: 100 })]);
-    expect(delegationReport(row, false)).toEqual({ kind: "silent" });
+    expect(delegationReport(rowFor([turn({ command: "/x", tokens: 1 })]), false)).toEqual(
+      {
+        kind: "silent",
+      },
+    );
   });
 
   it("admits it has no runs at all rather than showing a blank", () => {
-    // Configured today, never run. Silence here would be read as broken.
     expect(delegationReport(undefined, true)).toEqual({ kind: "noRuns" });
   });
 
-  it("shows the in-chat baseline while waiting for a first delegated run", () => {
-    const row = rowFor([
-      turn({ command: "/review", tokens: 30_000 }),
-      turn({ command: "/review", tokens: 10_000 }),
-    ]);
-    const report = delegationReport(row, true);
-    expect(report.kind).toBe("awaitingDelegated");
-    if (report.kind !== "awaitingDelegated") throw new Error("wrong kind");
+  it("shows what the command costs the chat before it is ever delegated", () => {
+    const report = delegationReport(
+      rowFor([
+        turn({ command: "/x", tokens: 30_000 }),
+        turn({ command: "/x", tokens: 10_000 }),
+      ]),
+      true,
+    );
+    expect(report.kind).toBe("baseline");
+    if (report.kind !== "baseline") throw new Error("wrong kind");
     expect(report.inChat).toEqual({ perRun: 20_000, turns: 2 });
   });
 
   it("says so when only the delegated side has been measured", () => {
-    const row = rowFor([turn({ command: "/review", tokens: 2_000, agent: "a" })]);
-    const report = delegationReport(row, true);
-    expect(report.kind).toBe("awaitingInChat");
-    if (report.kind !== "awaitingInChat") throw new Error("wrong kind");
+    const report = delegationReport(
+      rowFor([turn({ command: "/x", tokens: 2_000, agent: "a" })]),
+      true,
+    );
+    expect(report.kind).toBe("delegatedOnly");
+    if (report.kind !== "delegatedOnly") throw new Error("wrong kind");
     expect(report.delegated).toEqual({ perRun: 2_000, turns: 1 });
   });
 
-  it("compares once both sides exist", () => {
-    const row = rowFor([
-      turn({ command: "/review", tokens: 20_000 }),
-      turn({ command: "/review", tokens: 2_000, agent: "a" }),
-    ]);
-    const report = delegationReport(row, true);
+  it("reports what delegating keeps out of the chat, per run", () => {
+    const report = delegationReport(
+      rowFor([
+        turn({ command: "/x", tokens: 20_000 }),
+        turn({ command: "/x", tokens: 20_000 }),
+        turn({ command: "/x", tokens: 2_000, agent: "a" }),
+      ]),
+      true,
+    );
     expect(report.kind).toBe("compared");
     if (report.kind !== "compared") throw new Error("wrong kind");
-    expect(report.saving).toBeCloseTo(0.9, 5);
-    expect(report.delegated.turns).toBe(1);
-    expect(report.inChat.turns).toBe(1);
+    // Per run, so running it in the chat twice as often cannot flip the
+    // answer the way comparing totals would.
+    expect(report.keptOut).toBe(18_000);
+  });
+
+  it("admits when delegating left MORE behind than running it here", () => {
+    // Observed for real: a delegated run can add more than an inline one
+    // if the child's tool calls reach the parent transcript anyway.
+    const report = delegationReport(
+      rowFor([
+        turn({ command: "/x", tokens: 57_000 }),
+        turn({ command: "/x", tokens: 86_000, agent: "a" }),
+      ]),
+      true,
+    );
+    if (report.kind !== "compared") throw new Error("wrong kind");
+    expect(report.keptOut).toBeLessThan(0);
+  });
+
+  it("is not swayed by how deep in a conversation each side ran", () => {
+    // Billed tokens would be: the deep run re-reads far more context.
+    // Context ADDED is the same either way, and that is the point.
+    const shallow = rowFor([turn({ command: "/x", tokens: 10_000 })]);
+    const deep = build([
+      session({
+        turns: [...Array(40)]
+          .map(() => turn({ command: "/y", tokens: 1_000 }))
+          .concat(turn({ command: "/x", tokens: 10_000 })),
+      }),
+    ]).tokens.byCommand.find((r) => r.command === "/x");
+    expect(deep?.inChat.contextAdded).toBe(shallow.inChat.contextAdded);
   });
 });

@@ -133,6 +133,17 @@ export interface BilledSessionRow {
 export interface CommandSplit {
   readonly turns: number;
   readonly tokens: number;
+  /**
+   * Context-window growth these runs left behind, summed.
+   *
+   * This — not `tokens` — is what delegating is meant to change. A run's
+   * BILLED total is dominated by the conversation it re-read, so it is
+   * mostly a measure of how deep in the chat the command happened to be
+   * run; comparing those across the two sides compares turn positions,
+   * not the setting. What the command ADDS is the thing every later turn
+   * re-reads, and it does not move with depth.
+   */
+  readonly contextAdded: number;
 }
 
 /** One slash command's total token spend. */
@@ -149,53 +160,44 @@ export interface CommandTokenRow {
 }
 
 /**
- * How much a run of this command saves by being delegated, as a fraction
- * of what the same command costs in the chat (0.9 = 90% cheaper). A
- * negative number is a real answer: delegating can cost MORE for a
- * command that adds little context, because the child pays its own cold
- * start.
+ * What can honestly be said about a command's delegation setting yet,
+ * measured in the context it leaves behind in the conversation.
  *
- * Null when the comparison would be dishonest — nothing measured on one
- * side, or nothing spent in the chat to compare against. Sample sizes
- * are deliberately not judged here: the caller shows the run counts
- * next to this, so the number is never read without them.
- */
-export function delegationSaving(row: CommandTokenRow): number | null {
-  if (row.delegated.turns === 0 || row.inChat.turns === 0) return null;
-  const inChatPerRun = row.inChat.tokens / row.inChat.turns;
-  if (inChatPerRun <= 0) return null;
-  const delegatedPerRun = row.delegated.tokens / row.delegated.turns;
-  return (inChatPerRun - delegatedPerRun) / inChatPerRun;
-}
-
-/**
- * What can honestly be said about a command's delegation setting yet.
+ * Context added is the right yardstick and a run's BILLED total is not:
+ * billed is dominated by the conversation the turn re-read, so comparing
+ * it across the two sides mostly compares how deep in a chat each side
+ * happened to run. What a command ADDS is what every later turn re-reads,
+ * it is the thing delegating is supposed to change, and it does not move
+ * with depth.
  *
  * Every state is named, including the ones with nothing to compare —
- * because a command someone has deliberately pointed at a sub-agent and
- * that then says NOTHING is indistinguishable from a broken feature. The
- * shape carries numbers only; how to word each case is the view's
- * business.
+ * because a command someone deliberately pointed at a sub-agent that then
+ * says NOTHING is indistinguishable from a broken feature. The shape
+ * carries numbers only; wording each case is the view's business.
  */
 export type DelegationReport =
   | { readonly kind: "silent" }
   | { readonly kind: "noRuns" }
-  | { readonly kind: "awaitingDelegated"; readonly inChat: PerRun }
-  | { readonly kind: "awaitingInChat"; readonly delegated: PerRun }
+  /** Run in the chat, never yet delegated: this is what it costs the chat. */
+  | { readonly kind: "baseline"; readonly inChat: PerRun }
+  /** Delegated, with no in-chat history to hold it against. */
+  | { readonly kind: "delegatedOnly"; readonly delegated: PerRun }
+  /** Both measured. `keptOut` is NEGATIVE when delegating added more. */
   | {
       readonly kind: "compared";
-      readonly saving: number;
+      readonly keptOut: number;
       readonly delegated: PerRun;
       readonly inChat: PerRun;
     };
 
+/** One side's mean context added per run, and how many runs said so. */
 export interface PerRun {
   readonly perRun: number;
   readonly turns: number;
 }
 
 const perRunOf = (split: CommandSplit): PerRun => ({
-  perRun: split.tokens / split.turns,
+  perRun: split.contextAdded / split.turns,
   turns: split.turns,
 });
 
@@ -205,18 +207,16 @@ export function delegationReport(
 ): DelegationReport {
   if (!isDelegated) return { kind: "silent" };
   if (!row || row.turns === 0) return { kind: "noRuns" };
-  if (row.delegated.turns === 0)
-    return { kind: "awaitingDelegated", inChat: perRunOf(row.inChat) };
-  if (row.inChat.turns === 0) {
-    return { kind: "awaitingInChat", delegated: perRunOf(row.delegated) };
-  }
-  const saving = delegationSaving(row);
-  if (saving === null) return { kind: "awaitingDelegated", inChat: perRunOf(row.inChat) };
+
+  const delegated = row.delegated.turns > 0 ? perRunOf(row.delegated) : null;
+  const inChat = row.inChat.turns > 0 ? perRunOf(row.inChat) : null;
+  if (!delegated) return { kind: "baseline", inChat: inChat as PerRun };
+  if (!inChat) return { kind: "delegatedOnly", delegated };
   return {
     kind: "compared",
-    saving,
-    delegated: perRunOf(row.delegated),
-    inChat: perRunOf(row.inChat),
+    keptOut: inChat.perRun - delegated.perRun,
+    delegated,
+    inChat,
   };
 }
 
@@ -801,8 +801,8 @@ export function buildInsights(
       turns: number;
       tokens: number;
       estimated: boolean;
-      delegated: { turns: number; tokens: number };
-      inChat: { turns: number; tokens: number };
+      delegated: { turns: number; tokens: number; contextAdded: number };
+      inChat: { turns: number; tokens: number; contextAdded: number };
     }
   >();
   const coldStarts = new Map<
@@ -819,8 +819,8 @@ export function buildInsights(
         turns: 0,
         tokens: 0,
         estimated: false,
-        delegated: { turns: 0, tokens: 0 },
-        inChat: { turns: 0, tokens: 0 },
+        delegated: { turns: 0, tokens: 0, contextAdded: 0 },
+        inChat: { turns: 0, tokens: 0, contextAdded: 0 },
       };
       row.turns += 1;
       row.tokens += cost.tokens;
@@ -830,6 +830,7 @@ export function buildInsights(
       const side = turn.agent ? row.delegated : row.inChat;
       side.turns += 1;
       side.tokens += cost.tokens;
+      side.contextAdded += turn.tokens ?? 0;
       commandTokens.set(turn.command, row);
     }
   }
