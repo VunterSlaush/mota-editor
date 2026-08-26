@@ -9,9 +9,11 @@ import {
 } from "../../core/entities/commandConfig";
 import {
   type CommandTokenRow,
-  delegationSaving,
+  type DelegationReport,
+  delegationReport,
   type InsightsRange,
   type InsightsReport,
+  type PerRun,
 } from "../../core/entities/insights";
 import {
   EFFORT_OPTIONS,
@@ -37,32 +39,60 @@ interface Props {
 }
 
 /**
- * What delegating a command actually bought, from the saved sessions.
+ * What delegating this command has bought so far, from the saved
+ * sessions.
  *
- * Only rendered once a command has run BOTH ways: the whole point is the
- * comparison, and a number with nothing to compare against would be a
- * claim rather than a measurement. Run counts are always shown beside
- * the percentage so a lopsided sample reads as one.
+ * A command someone has deliberately pointed at a sub-agent always says
+ * something here, even before there is anything to compare: silence on a
+ * setting you just made reads as a broken feature, not as "no data yet".
+ * Run counts sit beside every figure so a lopsided sample reads as one.
  */
-function DelegationSaving({ row }: { row: CommandTokenRow }) {
-  const saving = delegationSaving(row);
-  if (saving === null) return null;
+function DelegationSaving({
+  report,
+  estimated,
+}: {
+  report: DelegationReport;
+  estimated: boolean;
+}) {
+  if (report.kind === "silent") return null;
 
-  const perRun = (split: { turns: number; tokens: number }) =>
-    formatTokens(Math.round(split.tokens / split.turns));
-  const percent = Math.round(Math.abs(saving) * 100);
-  const approx = row.estimated ? "≈" : "";
+  const approx = estimated ? "≈" : "";
+  const rate = ({ perRun, turns }: PerRun) =>
+    `${approx}${formatTokens(Math.round(perRun))}/run over ${turns}`;
 
+  if (report.kind === "noRuns") {
+    return (
+      <span className="command-row__saving command-row__saving--pending">
+        Delegated — no runs recorded yet.
+      </span>
+    );
+  }
+  if (report.kind === "awaitingDelegated") {
+    return (
+      <span className="command-row__saving command-row__saving--pending">
+        {`Delegated — not run in a sub-agent yet. In chat it costs ${rate(report.inChat)}.`}
+      </span>
+    );
+  }
+  if (report.kind === "awaitingInChat") {
+    return (
+      <span className="command-row__saving command-row__saving--pending">
+        {`${rate(report.delegated)} delegated — nothing in chat to compare against.`}
+      </span>
+    );
+  }
+
+  const cheaper = report.saving > 0;
+  const percent = Math.round(Math.abs(report.saving) * 100);
   return (
     <span
       className={`command-row__saving ${
-        saving > 0 ? "command-row__saving--cheaper" : "command-row__saving--dearer"
+        cheaper ? "command-row__saving--cheaper" : "command-row__saving--dearer"
       }`}
     >
-      {saving > 0 ? `${percent}% cheaper delegated` : `${percent}% dearer delegated`}
+      {cheaper ? `${percent}% cheaper delegated` : `${percent}% dearer delegated`}
       <span className="command-row__saving-detail">
-        {` — ${approx}${perRun(row.delegated)}/run over ${row.delegated.turns} vs `}
-        {`${approx}${perRun(row.inChat)} over ${row.inChat.turns} in chat`}
+        {` — ${rate(report.delegated)} vs ${rate(report.inChat)} in chat`}
       </span>
     </span>
   );
@@ -70,12 +100,6 @@ function DelegationSaving({ row }: { row: CommandTokenRow }) {
 
 /** Empty id = "leave this alone", which is every command's default. */
 const INHERIT = "";
-
-/** The savings line for one command, when there is one to show. */
-function savingsFor(rows: readonly CommandTokenRow[], command: string) {
-  const row = rows.find((r) => r.command === command);
-  return row ? <DelegationSaving row={row} /> : null;
-}
 
 /**
  * The configured sub-agent as a picker option when it is no longer among
@@ -243,7 +267,15 @@ export function SettingsCommands({
                 <div className="command-row__text">
                   <span className="command-row__name">{command.name}</span>
                   <span className="command-row__description">{command.description}</span>
-                  {savingsFor(savings, command.name)}
+                  <DelegationSaving
+                    report={delegationReport(
+                      savings.find((r) => r.command === command.name),
+                      Boolean(configFor(command.name).agent),
+                    )}
+                    estimated={
+                      savings.find((r) => r.command === command.name)?.estimated ?? true
+                    }
+                  />
                 </div>
                 <div className="command-row__controls">
                   <OptionPicker

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BilledRequest } from "./billing";
 import {
   buildInsights,
+  delegationReport,
   delegationSaving,
   type InsightsOptions,
   type SessionStats,
@@ -812,5 +813,52 @@ describe("delegation savings", () => {
       }),
     ]).tokens.byCommand[0];
     expect(delegationSaving(worse)).toBeLessThan(0);
+  });
+});
+
+describe("what can be said about a delegation setting yet", () => {
+  const rowFor = (turns: readonly TurnStat[]) =>
+    build([session({ turns })]).tokens.byCommand[0];
+
+  it("says nothing for a command nobody chose to delegate", () => {
+    const row = rowFor([turn({ command: "/review", tokens: 100 })]);
+    expect(delegationReport(row, false)).toEqual({ kind: "silent" });
+  });
+
+  it("admits it has no runs at all rather than showing a blank", () => {
+    // Configured today, never run. Silence here would be read as broken.
+    expect(delegationReport(undefined, true)).toEqual({ kind: "noRuns" });
+  });
+
+  it("shows the in-chat baseline while waiting for a first delegated run", () => {
+    const row = rowFor([
+      turn({ command: "/review", tokens: 30_000 }),
+      turn({ command: "/review", tokens: 10_000 }),
+    ]);
+    const report = delegationReport(row, true);
+    expect(report.kind).toBe("awaitingDelegated");
+    if (report.kind !== "awaitingDelegated") throw new Error("wrong kind");
+    expect(report.inChat).toEqual({ perRun: 20_000, turns: 2 });
+  });
+
+  it("says so when only the delegated side has been measured", () => {
+    const row = rowFor([turn({ command: "/review", tokens: 2_000, agent: "a" })]);
+    const report = delegationReport(row, true);
+    expect(report.kind).toBe("awaitingInChat");
+    if (report.kind !== "awaitingInChat") throw new Error("wrong kind");
+    expect(report.delegated).toEqual({ perRun: 2_000, turns: 1 });
+  });
+
+  it("compares once both sides exist", () => {
+    const row = rowFor([
+      turn({ command: "/review", tokens: 20_000 }),
+      turn({ command: "/review", tokens: 2_000, agent: "a" }),
+    ]);
+    const report = delegationReport(row, true);
+    expect(report.kind).toBe("compared");
+    if (report.kind !== "compared") throw new Error("wrong kind");
+    expect(report.saving).toBeCloseTo(0.9, 5);
+    expect(report.delegated.turns).toBe(1);
+    expect(report.inChat.turns).toBe(1);
   });
 });

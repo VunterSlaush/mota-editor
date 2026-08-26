@@ -2254,6 +2254,13 @@ body {
   color: var(--warning);
 }
 
+/* Configured, but with nothing measured to compare yet. Dim: it is a
+   status, not a result — but it is said, because a setting that shows
+   nothing at all reads as one that does nothing at all. */
+.command-row__saving--pending {
+  color: var(--text-dim);
+}
+
 /* The evidence, dimmed: the headline is the claim, this is the sample it
    rests on, and it must never read as loudly as the number. */
 .command-row__saving-detail {

@@ -169,6 +169,58 @@ export function delegationSaving(row: CommandTokenRow): number | null {
 }
 
 /**
+ * What can honestly be said about a command's delegation setting yet.
+ *
+ * Every state is named, including the ones with nothing to compare —
+ * because a command someone has deliberately pointed at a sub-agent and
+ * that then says NOTHING is indistinguishable from a broken feature. The
+ * shape carries numbers only; how to word each case is the view's
+ * business.
+ */
+export type DelegationReport =
+  | { readonly kind: "silent" }
+  | { readonly kind: "noRuns" }
+  | { readonly kind: "awaitingDelegated"; readonly inChat: PerRun }
+  | { readonly kind: "awaitingInChat"; readonly delegated: PerRun }
+  | {
+      readonly kind: "compared";
+      readonly saving: number;
+      readonly delegated: PerRun;
+      readonly inChat: PerRun;
+    };
+
+export interface PerRun {
+  readonly perRun: number;
+  readonly turns: number;
+}
+
+const perRunOf = (split: CommandSplit): PerRun => ({
+  perRun: split.tokens / split.turns,
+  turns: split.turns,
+});
+
+export function delegationReport(
+  row: CommandTokenRow | undefined,
+  isDelegated: boolean,
+): DelegationReport {
+  if (!isDelegated) return { kind: "silent" };
+  if (!row || row.turns === 0) return { kind: "noRuns" };
+  if (row.delegated.turns === 0)
+    return { kind: "awaitingDelegated", inChat: perRunOf(row.inChat) };
+  if (row.inChat.turns === 0) {
+    return { kind: "awaitingInChat", delegated: perRunOf(row.delegated) };
+  }
+  const saving = delegationSaving(row);
+  if (saving === null) return { kind: "awaitingDelegated", inChat: perRunOf(row.inChat) };
+  return {
+    kind: "compared",
+    saving,
+    delegated: perRunOf(row.delegated),
+    inChat: perRunOf(row.inChat),
+  };
+}
+
+/**
  * What it costs to OPEN a conversation in one project.
  *
  * The first turn of a chat pays for everything the agent has to be told
