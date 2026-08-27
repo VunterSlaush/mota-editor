@@ -54,9 +54,9 @@ describe("buildFileTree", () => {
     );
   });
 
-  it("does not care what order git listed the paths in", () => {
-    // git ls-files appends --others after --cached, so the input really is
-    // unsorted: the sort is what makes the tree stable, not the input.
+  it("does not care what order the paths arrived in", () => {
+    // The walk sorts, but the tree does not lean on that: the sort here is
+    // what makes it stable, not the listing's.
     const paths = ["src/ui/App.tsx", "README.md", "src/core/store.ts", "docs/adr.md"];
 
     expect(buildFileTree(paths)).toEqual(buildFileTree([...paths].reverse()));

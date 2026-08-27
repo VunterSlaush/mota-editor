@@ -1,4 +1,4 @@
-# ADR-0017 — Slash commands in sub-agents
+# ADR-0018 — Slash commands in sub-agents
 
 - Status: accepted
 - Date: 2026-08-24

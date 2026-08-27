@@ -131,22 +131,6 @@ pub async fn git_current_branch(project_path: String) -> Result<String, String> 
     Ok(out.trim().to_owned())
 }
 
-/// Every file git knows about — tracked plus untracked-and-not-ignored,
-/// which is the file the agent just wrote — for the composer's "@" menu.
-/// A folder that is not a repository yields an empty menu, not an error.
-#[tauri::command]
-pub async fn git_list_files(project_path: String) -> Result<Vec<String>, String> {
-    // -z is load-bearing: without it git quotes and octal-escapes any
-    // path with a space or a non-ASCII character.
-    let out = run_git(
-        &project_path,
-        &["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-    )
-    .await
-    .unwrap_or_default();
-    Ok(vcs::parse_ls_files(&out))
-}
-
 /// A unified diff for one file. Untracked files have nothing to diff
 /// against, so they are compared with the null device instead, which
 /// renders the whole file as added.

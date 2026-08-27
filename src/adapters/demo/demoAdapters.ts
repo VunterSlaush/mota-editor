@@ -383,17 +383,6 @@ export class DemoGit implements GitPort {
   async upstream(): Promise<GitDivergence> {
     return { behind: 1, ahead: 2 };
   }
-  async listFiles(): Promise<string[]> {
-    return [
-      "README.md",
-      "docs/ARCHITECTURE.md",
-      "src/ui/App.tsx",
-      "src/ui/components/Composer.tsx",
-      "src/core/entities/fileMention.ts",
-      "src/core/state/appState.ts",
-      "src-tauri/src/git.rs",
-    ];
-  }
   async diff(_p: string, path: string): Promise<string> {
     return [
       `diff --git a/${path} b/${path}`,
@@ -542,13 +531,22 @@ export class DemoGit implements GitPort {
 }
 
 /**
- * The disk walk, without a disk. Never reached in the browser preview —
- * the demo repository always answers — so it stands in only for the shape
- * of the port.
+ * The disk walk, without a disk. A small project, `.env` included, so the
+ * browser preview shows a tree with the shape the real one has: nesting,
+ * a few kinds of file, and the ignored file git would have hidden.
  */
 export class DemoProjectFiles implements ProjectFiles {
   async walk(): Promise<string[]> {
-    return [];
+    return [
+      ".env",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "src/ui/App.tsx",
+      "src/ui/components/Composer.tsx",
+      "src/core/entities/fileMention.ts",
+      "src/core/state/appState.ts",
+      "src-tauri/src/git.rs",
+    ];
   }
 }
 
