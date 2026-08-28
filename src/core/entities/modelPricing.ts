@@ -78,6 +78,11 @@ const DEFAULT_MODEL_MATCH: Readonly<Record<ProviderId, string>> = {
   // Empty on purpose: nothing matches, so an unset Cline model prices as
   // unknown rather than guessing at an account we cannot see.
   cline: "",
+  // Also empty, for a different reason: Copilot's default is `auto`,
+  // which routes each turn to a model it chooses at send time. There is
+  // no default family to assume, so a turn prices as unknown unless the
+  // user pinned a model.
+  copilot: "",
 };
 
 /**

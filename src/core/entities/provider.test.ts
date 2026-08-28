@@ -71,6 +71,7 @@ describe("PROVIDERS", () => {
       "gemini",
       "opencode",
       "cline",
+      "copilot",
     ]);
   });
 

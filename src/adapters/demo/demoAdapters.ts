@@ -1168,6 +1168,15 @@ export class DemoProviderProbe implements ProviderProbe {
         signInCommand: "cline auth",
       };
     }
+    if (provider === "copilot") {
+      return {
+        provider,
+        readiness: "ready",
+        detail: "GitHub Copilot CLI 1.0.81. ACP is a public preview there.",
+        installHint: "npm i -g @github/copilot",
+        signInCommand: "copilot login",
+      };
+    }
     return {
       provider,
       readiness: "notInstalled",

@@ -1,6 +1,7 @@
 use crate::event::AgentEvent;
 use crate::providers::{
-    claude::Claude, cline::Cline, codex::Codex, gemini::Gemini, opencode::Opencode,
+    claude::Claude, cline::Cline, codex::Codex, copilot::Copilot, gemini::Gemini,
+    opencode::Opencode,
 };
 use crate::turn::TurnRequest;
 
@@ -51,12 +52,14 @@ pub fn provider_for(id: &str) -> Option<&'static dyn Provider> {
     static GEMINI: Gemini = Gemini;
     static OPENCODE: Opencode = Opencode;
     static CLINE: Cline = Cline;
+    static COPILOT: Copilot = Copilot;
     match id {
         "claude" => Some(&CLAUDE),
         "codex" => Some(&CODEX),
         "gemini" => Some(&GEMINI),
         "opencode" => Some(&OPENCODE),
         "cline" => Some(&CLINE),
+        "copilot" => Some(&COPILOT),
         _ => None,
     }
 }

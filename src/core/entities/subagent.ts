@@ -92,6 +92,16 @@ export const BUILTIN_SUBAGENTS: Readonly<Record<ProviderId, readonly SubagentInf
   // every command runs in the chat, which is what an empty list means
   // everywhere else in this file.
   cline: [],
+  // Also empty, and also verified rather than assumed. Copilot does have
+  // custom agents — `.github/agents/<name>.agent.md`, with the same
+  // `name`/`description` front matter the other vendors use — but it
+  // ships none: `--agent general-purpose` is refused with "No such
+  // agent: general-purpose, available:" on a project that defines none.
+  // Discovery is off for it too (see `agent_discovery.rs`), because no
+  // way to address an agent from prompt text could be confirmed, and a
+  // mention that does not resolve runs the command inline while looking
+  // delegated.
+  copilot: [],
 };
 
 /**

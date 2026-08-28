@@ -54,6 +54,15 @@ fn agent_dirs(
         "claude" => (".claude", Format::Markdown),
         "codex" => (".codex", Format::Toml),
         "gemini" => (".gemini", Format::Markdown),
+        // Copilot is a deliberate omission, not a gap. Its custom agents
+        // do exist and would parse — `.github/agents/<name>.agent.md`,
+        // with the same `name`/`description` front matter — but nothing
+        // in the CLI could be shown to resolve an agent from prompt text,
+        // and `delegate.rs` needs that to hand a command over. Listing
+        // them here would fill the "Runs in" picker with names that make
+        // a command look delegated while it ran inline at full price.
+        // The layout is recorded so adding it later is a small change:
+        // project `.github/agents`, personal `~/.copilot/agents`.
         _ => return Vec::new(),
     };
     let mut dirs = vec![(project.join(vendor_dir).join("agents"), AgentOrigin::Project, format)];

@@ -2,7 +2,7 @@
  * Entities layer — AI agent providers the workbench can drive.
  * Pure domain vocabulary; knows nothing about CLIs, HTTP, or Tauri.
  */
-export type ProviderId = "claude" | "codex" | "gemini" | "opencode" | "cline";
+export type ProviderId = "claude" | "codex" | "gemini" | "opencode" | "cline" | "copilot";
 
 export interface ProviderDescriptor {
   readonly id: ProviderId;
@@ -57,6 +57,18 @@ export const PROVIDERS: readonly ProviderDescriptor[] = [
     supportsResume: true,
     contextWindow: 200_000,
   },
+  // Copilot's free individual tier is why it sits with these two. It
+  // advertises `loadSession` at the handshake (verified 2026-08 against
+  // CLI 1.0.81). Its window moves with whichever model `auto` routes to,
+  // so the descriptor states the smallest prompt budget seen on a free
+  // account and real `usage_update`s correct it on the first turn.
+  {
+    id: "copilot",
+    displayName: "Copilot",
+    vendor: "GitHub",
+    supportsResume: true,
+    contextWindow: 128_000,
+  },
 ];
 
 export function providerById(id: ProviderId): ProviderDescriptor {
@@ -110,6 +122,17 @@ export const MODEL_SUGGESTIONS: Readonly<Record<ProviderId, readonly string[]>> 
   // field, so any id the account accepts (`~z-ai/glm-latest`) can be
   // typed and is then remembered per tab like any other.
   cline: [],
+  // Just `auto`, and only after checking. The obvious list to write here
+  // is the one Copilot's own router reports it is choosing between
+  // (`session.auto_mode_resolved.availableModels` named gpt-5-mini and
+  // claude-haiku-4.5 on a free account) — and every one of those is
+  // refused by `--model` with "Model \"gpt-5-mini\" from --model flag is
+  // not available", because what the router may pick and what the
+  // account may pin are different entitlements. `auto` is the only id
+  // verified to be accepted on a free plan, and it is also the CLI's own
+  // default. A paid plan pins real ids, which the picker takes as typed
+  // text and remembers per tab.
+  copilot: ["auto"],
 };
 
 interface ContextWindowEntry {
@@ -194,6 +217,11 @@ export const EFFORT_OPTIONS: Readonly<Record<ProviderId, readonly string[]>> = {
   opencode: [],
   // Cline's `--thinking`, which it takes alongside `--acp`.
   cline: ["none", "low", "medium", "high", "xhigh"],
+  // Copilot's `--effort`, whose choices its own `--help` enumerates.
+  // Note this is the CLI's vocabulary, not the model's: the capture
+  // showed gpt-5-mini supporting only low/medium/high underneath, so an
+  // outer level is a request the router narrows, not a guarantee.
+  copilot: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
 };
 
 /**
@@ -206,4 +234,5 @@ export const COMPACT_COMMAND: Readonly<Record<ProviderId, string>> = {
   gemini: "/compress",
   opencode: "/compact",
   cline: "/compact",
+  copilot: "/compact",
 };
