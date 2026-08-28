@@ -36,10 +36,6 @@ export class TauriGitStatus implements GitPort {
     return invoke<GitDivergence | null>("git_upstream", { projectPath });
   }
 
-  async listFiles(projectPath: string): Promise<string[]> {
-    return invoke<string[]>("git_list_files", { projectPath });
-  }
-
   async diff(
     projectPath: string,
     path: string,
@@ -71,6 +67,14 @@ export class TauriGitStatus implements GitPort {
 
   async unstageAll(projectPath: string): Promise<void> {
     await invoke("git_unstage_all", { projectPath });
+  }
+
+  async discard(projectPath: string, path: string): Promise<void> {
+    await invoke("git_discard", { projectPath, path });
+  }
+
+  async discardAll(projectPath: string): Promise<void> {
+    await invoke("git_discard_all", { projectPath });
   }
 
   async push(projectPath: string): Promise<string> {

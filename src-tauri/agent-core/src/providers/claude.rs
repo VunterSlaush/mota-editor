@@ -29,7 +29,7 @@ impl Provider for Claude {
     fn build_command(&self, request: &TurnRequest) -> TurnCommand {
         let mut args = vec![
             "-p".to_owned(),
-            effective_prompt(request, true),
+            effective_prompt(request, "claude", true),
             "--output-format".to_owned(),
             "stream-json".to_owned(),
             "--verbose".to_owned(),

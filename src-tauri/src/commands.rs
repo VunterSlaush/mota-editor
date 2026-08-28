@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager, State};
 use tokio::process::Child;
 
 use crate::acp_session::{self, AcpSessions, AcpStartError, SessionSpec};
+use crate::agent_discovery;
 use crate::command_discovery;
 use crate::runner;
 use crate::workspace_file;
@@ -52,6 +53,12 @@ pub struct StartTurnArgs {
     pub mcp_servers: Vec<agent_core::acp::McpServer>,
     #[serde(default)]
     pub subtask: Option<agent_core::SubtaskScope>,
+    /// Sub-agent this turn's slash command is handed off to, if any.
+    #[serde(default)]
+    pub delegate_to: Option<String>,
+    /// Recent conversation carried into that sub-agent.
+    #[serde(default)]
+    pub handoff: Option<String>,
 }
 
 #[tauri::command]
@@ -95,6 +102,8 @@ pub async fn start_turn(
         model: validate_token(args.model, "model")?,
         effort: validate_token(args.effort, "effort")?,
         subtask: args.subtask,
+        delegate_to: validate_agent_name(args.delegate_to)?,
+        handoff: args.handoff,
     };
 
     // Preferred transport: a persistent ACP session (interactive
@@ -214,6 +223,27 @@ fn validate_token(value: Option<String>, what: &str) -> Result<Option<String>, S
         Ok(Some(value))
     } else {
         Err(format!("Invalid {what} name: {value}"))
+    }
+}
+
+/// A sub-agent name, confined to what every provider's mention grammar
+/// accepts (Claude's is the narrowest: `[\w:.@-]`). The domain refuses
+/// anything else too — this is the boundary's own check, because a name
+/// that reaches a prompt unvalidated could carry a quote and change what
+/// the rest of the delegation says.
+fn validate_agent_name(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(value) = value else { return Ok(None) };
+    let value = value.trim().to_owned();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let addressable = value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '@'));
+    if addressable {
+        Ok(Some(value))
+    } else {
+        Err(format!("Invalid sub-agent name: {value}"))
     }
 }
 
@@ -417,6 +447,18 @@ pub async fn list_custom_commands(
 ) -> Result<Vec<command_discovery::CustomCommand>, String> {
     run_blocking(move || Ok(command_discovery::discover(&app, &project_path, &provider_id)))
         .await
+}
+
+/// The sub-agents a command can be handed off to: whatever the provider
+/// ships plus whatever the user has defined. Read-only — Mota never
+/// writes into a vendor's agent folder.
+#[tauri::command]
+pub async fn list_subagents(
+    app: AppHandle,
+    project_path: String,
+    provider_id: String,
+) -> Result<Vec<agent_discovery::DiscoveredAgent>, String> {
+    run_blocking(move || Ok(agent_discovery::discover(&app, &project_path, &provider_id))).await
 }
 
 #[tauri::command]

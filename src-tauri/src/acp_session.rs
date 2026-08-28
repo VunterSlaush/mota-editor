@@ -1354,6 +1354,9 @@ async fn ask_in_session(
         model: None,
         effort: None,
         subtask: Some(agent_core::SubtaskScope::ReadOnly),
+        // Mota's own internal question, not a user's command turn.
+        delegate_to: None,
+        handoff: None,
     };
     let id = session.request_id();
     session

@@ -178,6 +178,10 @@ export function App({ context }: { context: AppContext }) {
     (provider: ProviderId) => context.listCommands.forProvider(projectPath, provider),
     [context, projectPath],
   );
+  const loadSubagentsFor = useCallback(
+    (provider: ProviderId) => context.listSubagents.forProvider(projectPath, provider),
+    [context, projectPath],
+  );
   const probeProvider = useCallback(
     (provider: ProviderId) => context.providerProbe.probe(provider, projectPath),
     [context, projectPath],
@@ -213,6 +217,13 @@ export function App({ context }: { context: AppContext }) {
       setRightPanels((all) => ({ ...all, [activeProjectId]: panel }));
     },
     [activeProjectId],
+  );
+  // Stable for a third reason: both the Files panel and the composer's "@"
+  // menu fetch this from an effect, and a fresh arrow every render would
+  // have them re-listing the whole project on every keystroke.
+  const loadProjectFiles = useCallback(
+    () => context.listProjectFiles.execute(activeProjectId),
+    [context, activeProjectId],
   );
   const respondPermission = useCallback(
     (requestId: string, optionId: string) =>
@@ -389,6 +400,8 @@ export function App({ context }: { context: AppContext }) {
           onGitUnstage={(path) => context.gitActions.unstage(tab.project.id, path)}
           onGitStageAll={() => context.gitActions.stageAll(tab.project.id)}
           onGitUnstageAll={() => context.gitActions.unstageAll(tab.project.id)}
+          onGitDiscard={(path) => context.gitActions.discard(tab.project.id, path)}
+          onGitDiscardAll={() => context.gitActions.discardAll(tab.project.id)}
           onGitCommitPush={(message) =>
             context.gitActions.commitAndPush(tab.project.id, message)
           }
@@ -438,7 +451,7 @@ export function App({ context }: { context: AppContext }) {
           onPasteImage={(bytes, mimeType) =>
             context.pastedImages.saveImage(bytes, mimeType)
           }
-          loadProjectFiles={() => context.listProjectFiles.execute(tab.project.id)}
+          loadProjectFiles={loadProjectFiles}
         />
       ) : (
         <EmptyState onOpenProject={() => void context.openProject.execute()} />
@@ -448,6 +461,7 @@ export function App({ context }: { context: AppContext }) {
           settings={state.settings}
           onChange={(patch) => void context.updateSettings.execute(patch)}
           loadCommands={loadCommandsFor}
+          loadSubagents={loadSubagentsFor}
           probeProvider={probeProvider}
           signInProvider={signInProvider}
           loadInsights={context.loadInsights}

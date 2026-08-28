@@ -685,10 +685,11 @@ pub fn prompt_request_for_provider(
     if let Some(scope) = crate::scope::scope_preamble(request.subtask.as_ref()) {
         preambles.push(scope);
     }
+    let outgoing = crate::delegate::outgoing_prompt(provider_id, request);
     let text = if preambles.is_empty() {
-        request.prompt.clone()
+        outgoing
     } else {
-        format!("{}\n\n{}", preambles.join("\n\n"), request.prompt)
+        format!("{}\n\n{}", preambles.join("\n\n"), outgoing)
     };
     let mut blocks = vec![json!({ "type": "text", "text": text })];
     for path in &request.attachments {

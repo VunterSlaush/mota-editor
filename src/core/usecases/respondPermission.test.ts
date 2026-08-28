@@ -172,6 +172,29 @@ describe("RespondPermission", () => {
 
     expect(gateway.responses).toHaveLength(0);
   });
+
+  // A restarted agent counts request ids from zero again, so the same id
+  // can sit on a card answered an hour ago. The click belongs to the card
+  // still waiting, not to that one.
+  it("answers the live card when an older one wears the same request id", async () => {
+    const { store, gateway, useCase } = setup();
+    await useCase.execute("t1", "9", "allow");
+    store.dispatch({
+      type: "chat/messageAppended",
+      tabId: "t1",
+      message: approvalMessage("Run npm run build", {
+        requestId: "9",
+        options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+      }),
+    });
+
+    await useCase.execute("t1", "9", "reject");
+
+    expect(gateway.responses).toHaveLength(2);
+    const [older, live] = tabOf(store).messages;
+    expect(older.approval?.resolvedOptionId).toBe("allow");
+    expect(live.approval?.resolvedOptionId).toBe("reject");
+  });
 });
 
 function questionSetup() {
@@ -228,6 +251,37 @@ describe("RespondQuestion", () => {
     await useCase.execute("t1", "12", { question_0: "SQLite" });
 
     expect(gateway.answers).toHaveLength(1);
+  });
+
+  // The bug this guards: request ids belong to the agent process, and a
+  // restarted session hands out "0" again while the answered card from
+  // the last one is still in the transcript. Matching the first card left
+  // the live one unanswerable — the Answer button did nothing at all.
+  it("answers the live card when an older one wears the same request id", async () => {
+    const { store, gateway, useCase } = questionSetup();
+    await useCase.execute("t1", "12", { question_0: "Postgres" });
+    store.dispatch({
+      type: "chat/messageAppended",
+      tabId: "t1",
+      message: questionMessage("Which extras?", "12", [
+        {
+          field: "question_0",
+          text: "Which extras?",
+          multiSelect: true,
+          options: [
+            { value: "lint", label: "lint" },
+            { value: "test", label: "test" },
+          ],
+        },
+      ]),
+    });
+
+    await useCase.execute("t1", "12", { question_0: "lint, test" });
+
+    expect(gateway.answers).toHaveLength(2);
+    const [older, live] = tabOf(store).messages;
+    expect(older.question?.answers).toEqual({ question_0: "Postgres" });
+    expect(live.question?.answers).toEqual({ question_0: "lint, test" });
   });
 
   it("ignores answers once the turn stranded the question", async () => {

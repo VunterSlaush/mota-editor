@@ -193,6 +193,9 @@ pub struct TurnStat {
     pub effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Sub-agent the command was handed to; absent when it ran in the chat.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -351,6 +354,7 @@ fn extract_turn(turn: &Value) -> Option<TurnStat> {
         model: turn.get("model").and_then(Value::as_str).map(str::to_owned),
         effort: turn.get("effort").and_then(Value::as_str).map(str::to_owned),
         command: turn.get("command").and_then(Value::as_str).map(str::to_owned),
+        agent: turn.get("agent").and_then(Value::as_str).map(str::to_owned),
         duration_ms: turn.get("durationMs").and_then(Value::as_u64),
         // Negative deltas (compaction) are dropped at save time, but old
         // files could carry them — treat them as unknown here too.

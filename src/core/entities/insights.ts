@@ -38,6 +38,8 @@ export interface TurnStat {
   readonly effort?: string;
   /** Leading slash command, e.g. "/review". */
   readonly command?: string;
+  /** Sub-agent the command was handed to; absent when it ran in the chat. */
+  readonly agent?: string;
   readonly durationMs?: number;
   /** Context-usage delta; absent when unknown or a compaction shrank it. */
   readonly tokens?: number;
@@ -70,7 +72,7 @@ export interface SessionStats {
   readonly touchedFiles: Readonly<Record<string, number>>;
 }
 
-export type InsightsRange = "7d" | "30d" | "all";
+export type InsightsRange = "today" | "7d" | "30d" | "all";
 
 export interface InsightsOptions {
   readonly range: InsightsRange;
@@ -87,6 +89,13 @@ export interface InsightsOptions {
   readonly billed?: readonly BilledRequest[];
   /** Local-date bucketing, injectable for timezone-stable tests. */
   readonly dayKey?: (epochMs: number) => string;
+  /**
+   * Midnight that starts the local day containing `epochMs`. "Today"
+   * means the calendar day, not the last 24 hours — the difference shows
+   * at 09:00, when a rolling window would still be counting yesterday
+   * evening's work as today's.
+   */
+  readonly startOfDay?: (epochMs: number) => number;
   readonly hourOf?: (epochMs: number) => number;
   readonly weekdayOf?: (epochMs: number) => number;
 }
@@ -120,6 +129,23 @@ export interface BilledSessionRow {
   readonly costUsd: number;
 }
 
+/** One command's runs and spend on one side of the delegation choice. */
+export interface CommandSplit {
+  readonly turns: number;
+  readonly tokens: number;
+  /**
+   * Context-window growth these runs left behind, summed.
+   *
+   * This — not `tokens` — is what delegating is meant to change. A run's
+   * BILLED total is dominated by the conversation it re-read, so it is
+   * mostly a measure of how deep in the chat the command happened to be
+   * run; comparing those across the two sides compares turn positions,
+   * not the setting. What the command ADDS is the thing every later turn
+   * re-reads, and it does not move with depth.
+   */
+  readonly contextAdded: number;
+}
+
 /** One slash command's total token spend. */
 export interface CommandTokenRow {
   readonly command: string;
@@ -127,6 +153,71 @@ export interface CommandTokenRow {
   readonly tokens: number;
   /** True when any contributing turn had no vendor log to read. */
   readonly estimated: boolean;
+  /** Runs handed to a sub-agent. */
+  readonly delegated: CommandSplit;
+  /** Runs that stayed in the conversation. */
+  readonly inChat: CommandSplit;
+}
+
+/**
+ * What can honestly be said about a command's delegation setting yet,
+ * measured in the context it leaves behind in the conversation.
+ *
+ * Context added is the right yardstick and a run's BILLED total is not:
+ * billed is dominated by the conversation the turn re-read, so comparing
+ * it across the two sides mostly compares how deep in a chat each side
+ * happened to run. What a command ADDS is what every later turn re-reads,
+ * it is the thing delegating is supposed to change, and it does not move
+ * with depth.
+ *
+ * Every state is named, including the ones with nothing to compare —
+ * because a command someone deliberately pointed at a sub-agent that then
+ * says NOTHING is indistinguishable from a broken feature. The shape
+ * carries numbers only; wording each case is the view's business.
+ */
+export type DelegationReport =
+  | { readonly kind: "silent" }
+  | { readonly kind: "noRuns" }
+  /** Run in the chat, never yet delegated: this is what it costs the chat. */
+  | { readonly kind: "baseline"; readonly inChat: PerRun }
+  /** Delegated, with no in-chat history to hold it against. */
+  | { readonly kind: "delegatedOnly"; readonly delegated: PerRun }
+  /** Both measured. `keptOut` is NEGATIVE when delegating added more. */
+  | {
+      readonly kind: "compared";
+      readonly keptOut: number;
+      readonly delegated: PerRun;
+      readonly inChat: PerRun;
+    };
+
+/** One side's mean context added per run, and how many runs said so. */
+export interface PerRun {
+  readonly perRun: number;
+  readonly turns: number;
+}
+
+const perRunOf = (split: CommandSplit): PerRun => ({
+  perRun: split.contextAdded / split.turns,
+  turns: split.turns,
+});
+
+export function delegationReport(
+  row: CommandTokenRow | undefined,
+  isDelegated: boolean,
+): DelegationReport {
+  if (!isDelegated) return { kind: "silent" };
+  if (!row || row.turns === 0) return { kind: "noRuns" };
+
+  const delegated = row.delegated.turns > 0 ? perRunOf(row.delegated) : null;
+  const inChat = row.inChat.turns > 0 ? perRunOf(row.inChat) : null;
+  if (!delegated) return { kind: "baseline", inChat: inChat as PerRun };
+  if (!inChat) return { kind: "delegatedOnly", delegated };
+  return {
+    kind: "compared",
+    keptOut: inChat.perRun - delegated.perRun,
+    delegated,
+    inChat,
+  };
 }
 
 /**
@@ -294,10 +385,28 @@ export interface InsightsReport {
 
 const DAY_MS = 86_400_000;
 const RANGE_MS: Readonly<Record<InsightsRange, number>> = {
+  // "today" is bounded by the calendar, not by a duration — see
+  // `rangeCutoff`. The day's worth here is only what the chart needs.
+  today: DAY_MS,
   "7d": 7 * DAY_MS,
   "30d": 30 * DAY_MS,
   all: Number.POSITIVE_INFINITY,
 };
+
+/** The earliest `sentAt` a range includes. */
+function rangeCutoff(
+  range: InsightsRange,
+  now: number,
+  startOfDay: (epochMs: number) => number,
+): number {
+  return range === "today" ? startOfDay(now) : now - RANGE_MS[range];
+}
+
+function localStartOfDay(epochMs: number): number {
+  const date = new Date(epochMs);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
 /** The "all" heatmap covers at most a year of day buckets. */
 const MAX_ALL_DAYS = 365;
 
@@ -558,7 +667,8 @@ export function buildInsights(
   const dayKey = options.dayKey ?? localDayKey;
   const hourOf = options.hourOf ?? ((ms: number) => new Date(ms).getHours());
   const weekdayOf = options.weekdayOf ?? ((ms: number) => new Date(ms).getDay());
-  const cutoff = options.now - RANGE_MS[options.range];
+  const startOfDay = options.startOfDay ?? localStartOfDay;
+  const cutoff = rangeCutoff(options.range, options.now, startOfDay);
   const inRange = (t: TurnStat) => t.sentAt >= cutoff;
 
   // Sessions restricted to their in-range turns; empty ones drop out.
@@ -687,7 +797,13 @@ export function buildInsights(
   const billedRequests = options.billed ?? [];
   const commandTokens = new Map<
     string,
-    { turns: number; tokens: number; estimated: boolean }
+    {
+      turns: number;
+      tokens: number;
+      estimated: boolean;
+      delegated: { turns: number; tokens: number; contextAdded: number };
+      inChat: { turns: number; tokens: number; contextAdded: number };
+    }
   >();
   const coldStarts = new Map<
     string,
@@ -703,10 +819,18 @@ export function buildInsights(
         turns: 0,
         tokens: 0,
         estimated: false,
+        delegated: { turns: 0, tokens: 0, contextAdded: 0 },
+        inChat: { turns: 0, tokens: 0, contextAdded: 0 },
       };
       row.turns += 1;
       row.tokens += cost.tokens;
       row.estimated = row.estimated || cost.estimated;
+      // Which side of the delegation choice this run landed on, so the
+      // setting can be judged by what it actually did.
+      const side = turn.agent ? row.delegated : row.inChat;
+      side.turns += 1;
+      side.tokens += cost.tokens;
+      side.contextAdded += turn.tokens ?? 0;
       commandTokens.set(turn.command, row);
     }
   }
@@ -922,6 +1046,8 @@ function buildDaySeries(
   } else {
     count = RANGE_MS[range] / DAY_MS;
   }
+  // One bucket: yesterday is a different day, not the tail of this one.
+  if (range === "today") count = 1;
   const keys = new Map<string, true>();
   for (let i = count - 1; i >= 0; i -= 1) {
     keys.set(dayKey(now - i * DAY_MS), true);

@@ -1,47 +1,56 @@
 import { describe, expect, it } from "vitest";
 import { newProject } from "../entities/project";
-import type { GitPort } from "../ports/gitPort";
+import type { ProjectFiles } from "../ports/projectFiles";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { ListProjectFiles } from "./listProjectFiles";
 
-class FakeGit {
+class FakeDisk {
   paths: string[] = ["README.md", "src/main.ts"];
   failWith: string | null = null;
   asked: string | null = null;
 
-  async listFiles(projectPath: string): Promise<string[]> {
+  async walk(projectPath: string): Promise<string[]> {
     this.asked = projectPath;
     if (this.failWith) throw new Error(this.failWith);
     return this.paths;
   }
 }
 
-const setup = (git: FakeGit) => {
+const setup = (disk: FakeDisk) => {
   const store = new Store();
   store.dispatch({
     type: "tab/opened",
     project: newProject("t1", "/work/alpha", projectDefaults(defaultSettings)),
   });
-  return new ListProjectFiles(store, git as unknown as GitPort);
+  return new ListProjectFiles(store, disk as unknown as ProjectFiles);
 };
 
 describe("ListProjectFiles", () => {
   it("lists the files in the tab's project folder", async () => {
-    const git = new FakeGit();
-    expect(await setup(git).execute("t1")).toEqual(["README.md", "src/main.ts"]);
-    expect(git.asked).toBe("/work/alpha");
+    const disk = new FakeDisk();
+    expect(await setup(disk).execute("t1")).toEqual(["README.md", "src/main.ts"]);
+    expect(disk.asked).toBe("/work/alpha");
+  });
+
+  // The whole point of reading the disk: git would have hidden these.
+  it("keeps the files a .gitignore would have hidden", async () => {
+    const disk = new FakeDisk();
+    disk.paths = [".env", "README.md"];
+
+    expect(await setup(disk).execute("t1")).toEqual([".env", "README.md"]);
   });
 
   it("returns nothing for an unknown tab", async () => {
-    const git = new FakeGit();
-    expect(await setup(git).execute("nope")).toEqual([]);
-    expect(git.asked).toBeNull();
+    const disk = new FakeDisk();
+    expect(await setup(disk).execute("nope")).toEqual([]);
+    expect(disk.asked).toBeNull();
   });
 
-  it("returns nothing when the folder is not a git repository", async () => {
-    const git = new FakeGit();
-    git.failWith = "not a git repository";
-    expect(await setup(git).execute("t1")).toEqual([]);
+  it("returns nothing when the folder cannot be read", async () => {
+    const disk = new FakeDisk();
+    disk.failWith = "permission denied";
+
+    expect(await setup(disk).execute("t1")).toEqual([]);
   });
 });

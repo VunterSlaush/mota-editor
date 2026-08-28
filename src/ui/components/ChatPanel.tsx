@@ -32,6 +32,7 @@ import { Composer } from "./Composer";
 import { ContextFullBar } from "./ContextFullBar";
 import { DiffModal } from "./DiffModal";
 import { ExtensionPanel, type ExtensionPanelsView } from "./ExtensionPanel";
+import { FilesPanel } from "./FilesPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MessageList } from "./MessageList";
 import { PendingSpecBar } from "./PendingSpecBar";
@@ -160,6 +161,9 @@ interface Props {
   onGitUnstage: (path: string) => Promise<GitActionResult>;
   onGitStageAll: () => Promise<GitActionResult>;
   onGitUnstageAll: () => Promise<GitActionResult>;
+  /** Throw away one file's unstaged changes, or all of them. */
+  onGitDiscard: (path: string) => Promise<GitActionResult>;
+  onGitDiscardAll: () => Promise<GitActionResult>;
   onGitCommitPush: (message: string) => Promise<GitActionResult>;
   onGitCheckout: (branch: string) => Promise<GitActionResult>;
   onGitPush: () => Promise<GitActionResult>;
@@ -250,6 +254,8 @@ export function ChatPanel({
   onGitUnstage,
   onGitStageAll,
   onGitUnstageAll,
+  onGitDiscard,
+  onGitDiscardAll,
   onGitCommitPush,
   onGitCheckout,
   onGitPush,
@@ -589,6 +595,9 @@ export function ChatPanel({
         {shownSidebarView && (
           <>
             <div style={{ width: sidebar.width }} className="changes-container">
+              {shownSidebarView === "files" && (
+                <FilesPanel loadProjectFiles={loadProjectFiles} onOpenFile={onOpenFile} />
+              )}
               {shownSidebarView === "changes" && (
                 <ChangesPanel
                   changes={changes}
@@ -601,6 +610,8 @@ export function ChatPanel({
                   onUnstage={onGitUnstage}
                   onStageAll={onGitStageAll}
                   onUnstageAll={onGitUnstageAll}
+                  onDiscard={onGitDiscard}
+                  onDiscardAll={onGitDiscardAll}
                   onCommitPush={onGitCommitPush}
                   onOpenBranchPicker={() => setBranchPickerOpen(true)}
                   onPush={onGitPush}

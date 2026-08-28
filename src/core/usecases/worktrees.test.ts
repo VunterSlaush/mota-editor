@@ -97,9 +97,6 @@ class FakeGit implements GitPort {
   async currentBranch() {
     return "";
   }
-  async listFiles() {
-    return [];
-  }
   async diff() {
     return "";
   }
@@ -107,6 +104,8 @@ class FakeGit implements GitPort {
   async unstage() {}
   async stageAll() {}
   async unstageAll() {}
+  async discard() {}
+  async discardAll() {}
   async commit() {
     return "";
   }
