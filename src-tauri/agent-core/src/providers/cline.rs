@@ -50,7 +50,7 @@ impl Provider for Cline {
         }
         // Prompt last: it is a positional, and anything after it would be
         // read as more of the message.
-        args.push(effective_prompt(request, false));
+        args.push(effective_prompt(request, "cline", false));
         TurnCommand { program: "cline".to_owned(), args }
     }
 

@@ -351,41 +351,46 @@ export function SettingsCommands({
                   {/* Commands Mota answers itself, and the one that
                       compacts THIS conversation, have nowhere else to
                       run — offering the choice would be offering a
-                      setting that quietly does nothing. */}
-                  {!isNeverDelegated(provider, command.name) && (
-                    <OptionPicker
-                      ariaLabel={`Where ${command.name} runs`}
-                      placement="bottom"
-                      align="end"
-                      className="command-row__picker command-row__picker--where"
-                      disabled={false}
-                      placeholder="Runs in"
-                      value={configFor(command.name).agent ?? INHERIT}
-                      options={[
-                        {
-                          id: INHERIT,
-                          label: "In this chat",
-                          description:
-                            "Normal. Everything it reads stays in the conversation.",
-                          icon: <Chat size={14} />,
-                        },
-                        ...subagents.map((agent) => ({
-                          id: agent.name,
-                          label: agent.name,
-                          description: agent.description,
-                          icon: <ArrowBendUpRight size={14} />,
-                        })),
-                        // A name that no longer matches anything would
-                        // otherwise fall back to the placeholder and read
-                        // as unset — while still being set, and still
-                        // refused when the command is run.
-                        ...missingAgent(configFor(command.name).agent, subagents),
-                      ]}
-                      onChange={(agent) =>
-                        update(command.name, { agent: agent || undefined })
-                      }
-                    />
-                  )}
+                      setting that quietly does nothing. Same for a
+                      provider that names no agent at all: the picker
+                      would hold one option, "In this chat", which is
+                      where the command was already going. A stale name
+                      still shows, so it can be cleared. */}
+                  {!isNeverDelegated(provider, command.name) &&
+                    (subagents.length > 0 || configFor(command.name).agent) && (
+                      <OptionPicker
+                        ariaLabel={`Where ${command.name} runs`}
+                        placement="bottom"
+                        align="end"
+                        className="command-row__picker command-row__picker--where"
+                        disabled={false}
+                        placeholder="Runs in"
+                        value={configFor(command.name).agent ?? INHERIT}
+                        options={[
+                          {
+                            id: INHERIT,
+                            label: "In this chat",
+                            description:
+                              "Normal. Everything it reads stays in the conversation.",
+                            icon: <Chat size={14} />,
+                          },
+                          ...subagents.map((agent) => ({
+                            id: agent.name,
+                            label: agent.name,
+                            description: agent.description,
+                            icon: <ArrowBendUpRight size={14} />,
+                          })),
+                          // A name that no longer matches anything would
+                          // otherwise fall back to the placeholder and read
+                          // as unset — while still being set, and still
+                          // refused when the command is run.
+                          ...missingAgent(configFor(command.name).agent, subagents),
+                        ]}
+                        onChange={(agent) =>
+                          update(command.name, { agent: agent || undefined })
+                        }
+                      />
+                    )}
                 </div>
               </div>
             ))}

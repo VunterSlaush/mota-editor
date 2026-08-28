@@ -71,6 +71,27 @@ export const BUILTIN_SUBAGENTS: Readonly<Record<ProviderId, readonly SubagentInf
       source: "builtin",
     },
   ],
+  // `opencode agent list` marks these two `(subagent)`; the rest of its
+  // agents are `(primary)` — the ones it runs a session as, not ones a
+  // turn can hand work to.
+  opencode: [
+    {
+      name: "general",
+      description: "General-purpose agent for multi-step tasks",
+      source: "builtin",
+    },
+    {
+      name: "explore",
+      description: "Read-only search across the codebase",
+      source: "builtin",
+    },
+  ],
+  // Empty on purpose. Cline spawns sub-agents, but it names none: there
+  // is no `cline agent list`, no agents folder it reads, and nothing in
+  // the CLI that resolves an agent by name. With nothing to address,
+  // every command runs in the chat, which is what an empty list means
+  // everywhere else in this file.
+  cline: [],
 };
 
 /**

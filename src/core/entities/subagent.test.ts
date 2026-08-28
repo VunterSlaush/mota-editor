@@ -22,10 +22,18 @@ const VENDOR_MENTION = /(^|[\s。、？！])@"([\w:.@-]+) \(agent\)"/;
 const configs = (entries: Record<string, CommandConfig>) => entries;
 
 describe("BUILTIN_SUBAGENTS", () => {
-  it("gives every provider at least one agent to hand off to", () => {
-    for (const provider of PROVIDERS) {
-      expect(BUILTIN_SUBAGENTS[provider.id].length).toBeGreaterThan(0);
+  it("gives the providers that name their agents something to hand off to", () => {
+    for (const id of ["claude", "codex", "gemini", "opencode"] as const) {
+      expect(BUILTIN_SUBAGENTS[id].length).toBeGreaterThan(0);
     }
+  });
+
+  // Not an oversight, and not a gap to fill in later: Cline spawns
+  // sub-agents but exposes no name for one, so there is nothing a
+  // mention could resolve. Empty is the honest answer, and it makes
+  // every Cline command run in the chat.
+  it("leaves a provider that names no agent empty rather than inventing one", () => {
+    expect(BUILTIN_SUBAGENTS.cline).toEqual([]);
   });
 
   it("names every built-in so the vendor's mention grammar accepts it", () => {

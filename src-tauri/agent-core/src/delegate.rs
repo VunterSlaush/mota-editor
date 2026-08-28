@@ -62,14 +62,15 @@ pub fn delegation_prompt(
 ) -> String {
     let mut prompt = String::new();
 
-    // Codex has no mention grammar; it takes the agent's name in prose.
+    // Codex and opencode have no mention grammar — each resolves an
+    // agent by name inside its own task tool, so the name goes in prose.
     match provider_id {
         "claude" => prompt.push_str(&format!("@\"{agent} (agent)\" ")),
         "gemini" => prompt.push_str(&format!("@{agent} ")),
         _ => {}
     }
 
-    if provider_id == "codex" {
+    if matches!(provider_id, "codex" | "opencode") {
         prompt.push_str(&format!("Have the {agent} agent carry out this project's "));
     } else {
         prompt.push_str("Carry out this project's ");
@@ -128,6 +129,15 @@ mod tests {
         let prompt = delegation_prompt("codex", "worker", "/commit-push", "", None);
         assert!(!prompt.starts_with('@'));
         assert!(prompt.contains("Have the worker agent"));
+    }
+
+    #[test]
+    fn opencode_names_the_agent_in_prose_too() {
+        // Its `@` is for files, not agents — a mention here would be
+        // read as a path and the delegation would quietly not happen.
+        let prompt = delegation_prompt("opencode", "general", "/commit-push", "", None);
+        assert!(!prompt.starts_with('@'));
+        assert!(prompt.contains("Have the general agent"));
     }
 
     #[test]
