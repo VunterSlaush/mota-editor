@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { commandConfigKey } from "../entities/commandConfig";
 import { newProject } from "../entities/project";
+import type { SubagentInfo } from "../entities/subagent";
+import { tabStatus } from "../entities/tabStatus";
+import type { AgentCatalog } from "../ports/agentCatalog";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -14,7 +18,8 @@ import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort"
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { ApplyCommandConfig } from "./applyCommandConfig";
-import { FOLLOWUP_SETTLE_MS, SendPrompt } from "./sendPrompt";
+import { ListSubagents } from "./listSubagents";
+import { FOLLOWUP_SETTLE_MS, FOLLOWUP_TOOL_GRACE_MS, SendPrompt } from "./sendPrompt";
 import { SelectEffort, SelectMode, SelectModel, SelectPermission } from "./switchTab";
 
 /** Test double — a scripted agent, per the case study's in-memory gateways. */
@@ -146,6 +151,7 @@ function setup(script: AgentTurnEvent[] = []) {
     new SelectEffort(store, workspace, gateway),
     new SelectModel(store, workspace, gateway),
   );
+  const agentCatalog = new FakeAgentCatalog();
   const useCase = new SendPrompt(
     store,
     gateway,
@@ -154,8 +160,27 @@ function setup(script: AgentTurnEvent[] = []) {
     notifications,
     applyCommandConfig,
     () => `s${++counter}`,
+    undefined,
+    new ListSubagents(store, agentCatalog),
   );
-  return { store, gateway, workspace, transcripts, notifications, useCase };
+  return { store, gateway, workspace, transcripts, notifications, agentCatalog, useCase };
+}
+
+class FakeAgentCatalog implements AgentCatalog {
+  discovered: SubagentInfo[] = [
+    { name: "mota-commit-push", description: "Commits", source: "user" },
+  ];
+  async listSubagents(): Promise<SubagentInfo[]> {
+    return this.discovered;
+  }
+}
+
+/** Configure a command to run in a sub-agent. */
+function delegate(store: Store, command: string, agent: string) {
+  store.dispatch({
+    type: "settings/changed",
+    patch: { commandConfigs: { [commandConfigKey("claude", command)]: { agent } } },
+  });
 }
 
 const DEFAULTS = projectDefaults(defaultSettings);
@@ -1353,6 +1378,43 @@ describe("a follow-up the agent starts on its own", () => {
     expect(tabOf(store).busy).toBe(false);
   });
 
+  it("stays busy while a tool it started is still running", async () => {
+    const { store, say } = await afterATurn();
+
+    say({ kind: "assistant", text: "Building." });
+    say({
+      kind: "toolCall",
+      toolCallId: "c1",
+      toolKind: "execute",
+      title: "cargo build",
+      status: "in_progress",
+    });
+    // A build says nothing for minutes. Silence here is the tool working,
+    // not the agent finishing.
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
+
+    expect(tabOf(store).busy).toBe(true);
+    expect(tabStatus(tabOf(store))).not.toBe("done");
+  });
+
+  it("goes idle once that tool reports back and the agent falls quiet", async () => {
+    const { store, say } = await afterATurn();
+
+    say({ kind: "assistant", text: "Building." });
+    say({
+      kind: "toolCall",
+      toolCallId: "c1",
+      toolKind: "execute",
+      title: "cargo build",
+      status: "in_progress",
+    });
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
+    say({ kind: "toolCallUpdate", toolCallId: "c1", status: "completed" });
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_SETTLE_MS + 1000);
+
+    expect(tabOf(store).busy).toBe(false);
+  });
+
   it("delivers what the user typed while the follow-up held the tab", async () => {
     const { gateway, useCase, say } = await afterATurn();
 
@@ -1478,6 +1540,7 @@ describe("a follow-up the agent starts on its own", () => {
 
     // The 2.4s gap the real cycle has here must not release it.
     await vi.advanceTimersByTimeAsync(2400);
+    say({ kind: "toolCallUpdate", toolCallId: "c1", status: "completed" });
     say({ kind: "assistant", text: "It finished." });
     expect(gateway.requests).toHaveLength(1);
 
@@ -1485,6 +1548,28 @@ describe("a follow-up the agent starts on its own", () => {
 
     expect(gateway.requests).toHaveLength(2);
     expect(gateway.requests[1].prompt).toBe("and then deploy");
+  });
+
+  it("releases a queued prompt even if a tool never reports back", async () => {
+    const { store, gateway, useCase, say } = await afterATurn();
+
+    say({
+      kind: "toolCall",
+      toolCallId: "c1",
+      toolKind: "execute",
+      title: "cargo build",
+      status: "in_progress",
+    });
+    await useCase.execute("t1", "and then deploy");
+
+    // Waiting on an open tool is bounded: a stretch that never settled
+    // would hold this prompt forever, and the Stop that frees the tab
+    // discards it.
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_TOOL_GRACE_MS + FOLLOWUP_SETTLE_MS + 1000);
+
+    expect(gateway.requests).toHaveLength(2);
+    expect(gateway.requests[1].prompt).toBe("and then deploy");
+    expect(tabOf(store).busy).toBe(false);
   });
 
   it("ignores a follow-up for a tab that is no longer open", async () => {
@@ -1560,5 +1645,128 @@ describe("/clear", () => {
 
     expect(transcripts.saved.at(-1)?.messages.some((m) => m.text === "Hello")).toBe(true);
     expect(store.getState().tabs[0].messages.some((m) => m.text === "Hello")).toBe(false);
+  });
+});
+
+describe("SendPrompt — handing a command to a sub-agent", () => {
+  it("sends the typed text plus the agent, and keeps the typed text in the transcript", async () => {
+    const { store, gateway, useCase } = setup();
+    delegate(store, "/commit-push", "mota-commit-push");
+
+    await useCase.execute("t1", "/commit-push fix the parser");
+
+    expect(gateway.requests[0].delegateTo).toBe("mota-commit-push");
+    // The adapter splits the command from its arguments to compose the
+    // provider's own mention, so the typed text is what it needs.
+    expect(gateway.requests[0].prompt).toBe("/commit-push fix the parser");
+    const messages = store.getState().tabs[0].messages;
+    expect(messages[0].text).toBe("/commit-push fix the parser");
+  });
+
+  it("records the sub-agent on the turn, so the saving can be measured later", async () => {
+    const { store, useCase } = setup();
+    delegate(store, "/commit-push", "mota-commit-push");
+
+    await useCase.execute("t1", "/commit-push");
+
+    // Insights compares a command's delegated runs against its in-chat
+    // ones. Without this stamp the two are indistinguishable and the
+    // Commands screen has nothing to report.
+    const sent = store.getState().tabs[0].messages.find((m) => m.role === "user");
+    expect(sent?.turn?.agent).toBe("mota-commit-push");
+    expect(sent?.turn?.command).toBe("/commit-push");
+  });
+
+  it("leaves the turn unstamped when the command ran in the chat", async () => {
+    const { store, useCase } = setup();
+
+    await useCase.execute("t1", "/commit-push");
+
+    const sent = store.getState().tabs[0].messages.find((m) => m.role === "user");
+    expect(sent?.turn?.agent).toBeUndefined();
+  });
+
+  it("says out loud that the work went elsewhere", async () => {
+    const { store, useCase } = setup();
+    delegate(store, "/commit-push", "mota-commit-push");
+
+    await useCase.execute("t1", "/commit-push");
+
+    // The child's report arrives as a tool row, which the transcript
+    // hides while Verbose is off — without this the turn looks empty.
+    const notice = store.getState().tabs[0].messages.find((m) => m.role === "info");
+    expect(notice?.text).toContain("mota-commit-push");
+  });
+
+  it("carries recent conversation so 'this' still means something", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    await useCase.execute("t1", "the parser drops escapes");
+    delegate(store, "/commit-push", "mota-commit-push");
+
+    await useCase.execute("t1", "/commit-push");
+
+    expect(gateway.requests[1].handoff).toContain("the parser drops escapes");
+  });
+
+  it("does not delegate a command with no sub-agent configured", async () => {
+    const { gateway, useCase } = setup();
+    await useCase.execute("t1", "/commit-push");
+    expect(gateway.requests[0].delegateTo).toBeUndefined();
+    expect(gateway.requests[0].handoff).toBeUndefined();
+  });
+
+  it("refuses, loudly and before spending anything, when the agent is gone", async () => {
+    const { store, gateway, agentCatalog, useCase } = setup();
+    agentCatalog.discovered = [];
+    delegate(store, "/commit-push", "mota-commit-push");
+
+    await useCase.execute("t1", "/commit-push");
+
+    // Silence here would be the one outcome that turns this feature into
+    // a bill: the mention is dropped without error and the command runs
+    // inline, costing MORE than not delegating at all.
+    expect(gateway.requests).toHaveLength(0);
+    const messages = store.getState().tabs[0].messages;
+    expect(messages[0].text).toBe("/commit-push");
+    expect(messages[1].role).toBe("error");
+    expect(messages[1].text).toContain("mota-commit-push");
+    expect(store.getState().tabs[0].busy).toBe(false);
+  });
+
+  it("never delegates compaction, whatever the settings say", async () => {
+    const { store, gateway, useCase } = setup();
+    delegate(store, "/compact", "mota-commit-push");
+
+    await useCase.execute("t1", "/compact");
+
+    // Compacting in a child would free nothing here while the tab kept
+    // growing — and auto-compact sends this command itself.
+    expect(gateway.requests[0].delegateTo).toBeUndefined();
+  });
+
+  it("never delegates a command Mota answers itself", async () => {
+    const { store, gateway, useCase } = setup();
+    delegate(store, "/clear", "mota-commit-push");
+
+    await useCase.execute("t1", "/clear");
+
+    expect(gateway.requests).toHaveLength(0);
+    expect(store.getState().tabs[0].messages.some((m) => m.role === "error")).toBe(false);
+  });
+
+  it("does not read another provider's setting", async () => {
+    const { store, gateway, useCase } = setup();
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        commandConfigs: {
+          [commandConfigKey("codex", "/commit-push")]: { agent: "mota-commit-push" },
+        },
+      },
+    });
+
+    await useCase.execute("t1", "/commit-push");
+
+    expect(gateway.requests[0].delegateTo).toBeUndefined();
   });
 });

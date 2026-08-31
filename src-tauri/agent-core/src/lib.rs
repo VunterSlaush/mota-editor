@@ -10,6 +10,7 @@ pub mod acp;
 pub mod badge;
 pub mod billing;
 pub mod commands;
+pub mod delegate;
 pub mod event;
 pub mod extension;
 pub mod history;

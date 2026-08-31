@@ -5,7 +5,9 @@ import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type { ProviderId } from "../../core/entities/provider";
+import type { SubagentInfo } from "../../core/entities/subagent";
 import type { ProvisionEntry } from "../../core/entities/worktree";
+import type { AgentCatalog } from "../../core/ports/agentCatalog";
 import type {
   AgentGateway,
   AgentTurnEvent,
@@ -31,6 +33,7 @@ import type {
 } from "../../core/ports/gitPort";
 import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
 import type { NotificationPort } from "../../core/ports/notificationPort";
+import type { ProjectFiles } from "../../core/ports/projectFiles";
 import type { ProviderProbe, ProviderStatus } from "../../core/ports/providerProbe";
 import type { ShellHistorySource } from "../../core/ports/shellHistorySource";
 import type {
@@ -317,6 +320,18 @@ export class DemoCommandCatalog implements CommandCatalog {
   }
 }
 
+export class DemoAgentCatalog implements AgentCatalog {
+  async listSubagents(): Promise<SubagentInfo[]> {
+    return [
+      {
+        name: "mota-commit-push",
+        description: "Commits and pushes on a cheaper model",
+        source: "user",
+      },
+    ];
+  }
+}
+
 export class DemoGit implements GitPort {
   private staged = new Set(["src/core/state/appState.ts"]);
   private unstaged = new Set(["src/ui/App.tsx", "README.md"]);
@@ -368,17 +383,6 @@ export class DemoGit implements GitPort {
   async upstream(): Promise<GitDivergence> {
     return { behind: 1, ahead: 2 };
   }
-  async listFiles(): Promise<string[]> {
-    return [
-      "README.md",
-      "docs/ARCHITECTURE.md",
-      "src/ui/App.tsx",
-      "src/ui/components/Composer.tsx",
-      "src/core/entities/fileMention.ts",
-      "src/core/state/appState.ts",
-      "src-tauri/src/git.rs",
-    ];
-  }
   async diff(_p: string, path: string): Promise<string> {
     return [
       `diff --git a/${path} b/${path}`,
@@ -408,6 +412,15 @@ export class DemoGit implements GitPort {
     for (const path of this.staged) this.unstaged.add(path);
     this.staged.clear();
   }
+  // Discard drops the change without staging it — the demo's whole
+  // model of a file is "which list is it in", and discarding is the one
+  // verb that answers "neither".
+  async discard(_p: string, path: string) {
+    this.unstaged.delete(path);
+  }
+  async discardAll() {
+    this.unstaged.clear();
+  }
   async commit(): Promise<string> {
     this.staged.clear();
     return "1 file changed";
@@ -415,14 +428,28 @@ export class DemoGit implements GitPort {
   async checkout(_p: string, branch: string): Promise<string> {
     return `Switched to branch '${branch}'`;
   }
+  // The remote verbs answer in the shape the real backend does — a
+  // sentence, a blank line, then git's own report — so the browser
+  // preview renders the notice the desktop app renders.
   async push(): Promise<string> {
-    return "Everything up-to-date";
+    return [
+      "Pushed main to monalee-inc/mota-editor.",
+      "",
+      "To github.com:monalee-inc/mota-editor.git",
+      "   3c5f926..b169a7c  main -> main",
+    ].join("\n");
   }
   async pull(): Promise<string> {
-    return "Already up to date.";
+    return [
+      "Pulled — 2 files changed, 18 insertions(+), 4 deletions(-).",
+      "",
+      "Updating 3c5f926..b169a7c",
+      "Fast-forward",
+      " 2 files changed, 18 insertions(+), 4 deletions(-)",
+    ].join("\n");
   }
   async fetch(): Promise<string> {
-    return "Fetched origin.";
+    return "Already up to date — nothing to fetch.";
   }
 
   // Linked worktrees only — the main entry is derived per call, echoing
@@ -500,6 +527,26 @@ export class DemoGit implements GitPort {
 
   async branchesMerged(): Promise<GitBranch[]> {
     return [{ name: "dev", current: false, remote: false }];
+  }
+}
+
+/**
+ * The disk walk, without a disk. A small project, `.env` included, so the
+ * browser preview shows a tree with the shape the real one has: nesting,
+ * a few kinds of file, and the ignored file git would have hidden.
+ */
+export class DemoProjectFiles implements ProjectFiles {
+  async walk(): Promise<string[]> {
+    return [
+      ".env",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "src/ui/App.tsx",
+      "src/ui/components/Composer.tsx",
+      "src/core/entities/fileMention.ts",
+      "src/core/state/appState.ts",
+      "src-tauri/src/git.rs",
+    ];
   }
 }
 
@@ -1119,6 +1166,15 @@ export class DemoProviderProbe implements ProviderProbe {
         detail: "no launch candidate found on PATH",
         installHint: "npm i -g cline",
         signInCommand: "cline auth",
+      };
+    }
+    if (provider === "copilot") {
+      return {
+        provider,
+        readiness: "ready",
+        detail: "GitHub Copilot CLI 1.0.81. ACP is a public preview there.",
+        installHint: "npm i -g @github/copilot",
+        signInCommand: "copilot login",
       };
     }
     return {

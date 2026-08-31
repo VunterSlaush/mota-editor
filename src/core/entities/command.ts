@@ -106,6 +106,29 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
       source: "builtin",
     },
   ],
+  // Copilot advertises a far longer list over ACP (34 commands at CLI
+  // 1.0.81), which ListCommands merges in at runtime. Only the few worth
+  // having before that arrives are named here, each taken verbatim from
+  // that handshake rather than from the vendor's docs.
+  copilot: [
+    CREATE_EXTENSION,
+    CLEAR,
+    {
+      name: "/init",
+      description: "Initialize Copilot instructions for this repository",
+      source: "builtin",
+    },
+    {
+      name: "/compact",
+      description: "Summarize the conversation to free context",
+      source: "builtin",
+    },
+    {
+      name: "/review",
+      description: "Run code review agent to analyze changes",
+      source: "builtin",
+    },
+  ],
 };
 
 /**

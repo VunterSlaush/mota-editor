@@ -3,6 +3,7 @@
 //! process runner, and workspace persistence.
 
 mod acp_session;
+mod agent_discovery;
 mod app_badge;
 mod billing_log;
 mod boundary_suggest;
@@ -14,6 +15,7 @@ mod fs_confine;
 mod mcp_probe;
 mod git;
 mod history_file;
+mod project_files;
 mod provider_probe;
 mod runner;
 mod session_index;
@@ -75,6 +77,7 @@ pub fn run() {
             commands::end_session,
             commands::get_terminal_output,
             commands::list_custom_commands,
+            commands::list_subagents,
             app_badge::set_app_badge,
             commands::open_external,
             commands::open_extensions_dir,
@@ -87,12 +90,14 @@ pub fn run() {
             git::git_log,
             git::git_remote_url,
             git::git_current_branch,
-            git::git_list_files,
+            project_files::list_folder_files,
             git::git_diff,
             git::git_stage,
             git::git_unstage,
             git::git_stage_all,
             git::git_unstage_all,
+            git::git_discard,
+            git::git_discard_all,
             git::git_commit,
             git::git_branches,
             git::git_upstream,

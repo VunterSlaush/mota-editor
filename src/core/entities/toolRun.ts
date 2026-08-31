@@ -21,13 +21,23 @@ export interface Row {
   readonly status?: RowStatus;
 }
 
+/**
+ * Whether a reported tool-call status means the call is still out.
+ *
+ * Unknown strings count as running: a status nobody here recognises is
+ * one the vendor added, and the safe reading of "I don't know" is "not
+ * finished yet".
+ */
+export function isRunningToolStatus(status: string): boolean {
+  return status !== "completed" && status !== "failed";
+}
+
 /** One tool call's contribution to its row's aggregate status. */
 function statusOf(message: ChatMessage): RowStatus | undefined {
   const status = message.toolCall?.status;
   if (!status) return undefined;
   if (status === "failed") return "failed";
-  if (status === "completed") return "completed";
-  return "running"; // pending, in_progress, and unknown strings
+  return isRunningToolStatus(status) ? "running" : "completed";
 }
 
 /** Failed beats running beats completed: the group shows its worst news. */

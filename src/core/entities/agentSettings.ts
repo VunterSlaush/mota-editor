@@ -145,14 +145,28 @@ export const COST_PRESETS: readonly CostPreset[] = [
     // The free-tier agents are already at zero cost, so their presets
     // trade speed against capability rather than price. Cline's model is
     // whatever `cline auth` chose, so every preset leaves it alone.
+    // Copilot lands on `auto` at every tier, which is not laziness: which
+    // ids `--model` accepts is decided by the account's entitlement, and
+    // a free plan accepts none of them by name. A pinned model here would
+    // fail at send time for exactly the users most likely to be on it, so
+    // the presets move effort and let Copilot's own router answer — which
+    // it does partly FROM the effort, so the tiers still differ.
     model: {
       claude: "haiku",
       codex: "gpt-5.4-mini",
       gemini: "gemini-2.5-flash",
       opencode: "opencode/nemotron-3.5-lightning-free",
       cline: "",
+      copilot: "auto",
     },
-    effort: { claude: "low", codex: "low", gemini: "", opencode: "", cline: "low" },
+    effort: {
+      claude: "low",
+      codex: "low",
+      gemini: "",
+      opencode: "",
+      cline: "low",
+      copilot: "low",
+    },
   },
   {
     id: "balanced",
@@ -164,6 +178,7 @@ export const COST_PRESETS: readonly CostPreset[] = [
       gemini: "gemini-3-flash-preview",
       opencode: "opencode/big-pickle",
       cline: "",
+      copilot: "auto",
     },
     effort: {
       claude: "medium",
@@ -171,6 +186,7 @@ export const COST_PRESETS: readonly CostPreset[] = [
       gemini: "",
       opencode: "",
       cline: "medium",
+      copilot: "medium",
     },
   },
   {
@@ -184,8 +200,16 @@ export const COST_PRESETS: readonly CostPreset[] = [
       gemini: "gemini-3.1-pro-preview",
       opencode: "opencode/nemotron-3-ultra-free",
       cline: "",
+      copilot: "auto",
     },
-    effort: { claude: "high", codex: "high", gemini: "", opencode: "", cline: "high" },
+    effort: {
+      claude: "high",
+      codex: "high",
+      gemini: "",
+      opencode: "",
+      cline: "high",
+      copilot: "high",
+    },
   },
 ];
 

@@ -75,6 +75,11 @@ pub fn agent_commands(provider_id: &str) -> Vec<AcpAgentCommand> {
             args: vec!["--acp".to_owned()],
             install_hint: "npm i -g cline",
         }],
+        "copilot" => vec![AcpAgentCommand {
+            program: "copilot".to_owned(),
+            args: vec!["--acp".to_owned()],
+            install_hint: "npm i -g @github/copilot",
+        }],
         _ => vec![],
     }
 }
@@ -142,21 +147,24 @@ pub fn agent_env(
 /// Command-line arguments that select the model and reasoning effort for
 /// a provider's ACP agent, appended after the launch candidate's own args.
 ///
-/// The sibling of [`agent_env`]: same job, different transport. Cline
-/// takes both selectors as top-level flags that sit alongside `--acp`;
-/// every other provider configures itself through the environment and
-/// returns nothing here.
+/// The sibling of [`agent_env`]: same job, different transport. Cline and
+/// Copilot take both selectors as top-level flags that sit alongside
+/// `--acp` (verified against both binaries, 2026-08); every other
+/// provider configures itself through the environment and returns
+/// nothing here. Only the effort flag's spelling differs.
 pub fn agent_args(provider_id: &str, model: Option<&str>, effort: Option<&str>) -> Vec<String> {
+    let effort_flag = match provider_id {
+        "cline" => "--thinking",
+        "copilot" => "--effort",
+        _ => return Vec::new(),
+    };
     let mut args = Vec::new();
-    if provider_id != "cline" {
-        return args;
-    }
     if let Some(model) = model {
         args.push("--model".to_owned());
         args.push(model.to_owned());
     }
     if let Some(effort) = effort {
-        args.push("--thinking".to_owned());
+        args.push(effort_flag.to_owned());
         args.push(effort.to_owned());
     }
     args
@@ -225,6 +233,13 @@ pub fn sign_in_command(provider_id: &str) -> Option<SignInCommand> {
             args: &["auth"],
             hint: "Opens a terminal to sign in to Cline and pick its model.",
         }),
+        // The command Copilot's own ACP handshake names in `authMethods`
+        // (`copilot-login`, terminal-auth `copilot login`).
+        "copilot" => Some(SignInCommand {
+            program: "copilot",
+            args: &["login"],
+            hint: "Opens a terminal and your browser to sign in to GitHub Copilot.",
+        }),
         _ => None,
     }
 }
@@ -273,9 +288,20 @@ pub fn native_mode_id(
         ("claude", _) => Some("default"),
         ("codex", Mode::Plan | Mode::Ask) => Some("read-only"),
         ("codex", _) => Some("agent"),
+        // Copilot names its modes with the protocol's own URLs rather
+        // than bare ids (captured from `session/new`, CLI 1.0.81). It
+        // advertises a third, `#autopilot`, which is deliberately never
+        // chosen: its own description says it "enables allow-all", so
+        // selecting it would auto-approve every tool no matter what the
+        // tab's permission is set to.
+        ("copilot", Mode::Plan | Mode::Ask) => Some(COPILOT_PLAN_MODE),
+        ("copilot", _) => Some(COPILOT_AGENT_MODE),
         _ => None,
     }
 }
+
+const COPILOT_PLAN_MODE: &str = "https://agentclientprotocol.com/protocol/session-modes#plan";
+const COPILOT_AGENT_MODE: &str = "https://agentclientprotocol.com/protocol/session-modes#agent";
 
 /// Whether plan mode is natively enforced over ACP for this provider.
 pub fn plan_is_native(provider_id: &str) -> bool {
@@ -685,10 +711,11 @@ pub fn prompt_request_for_provider(
     if let Some(scope) = crate::scope::scope_preamble(request.subtask.as_ref()) {
         preambles.push(scope);
     }
+    let outgoing = crate::delegate::outgoing_prompt(provider_id, request);
     let text = if preambles.is_empty() {
-        request.prompt.clone()
+        outgoing
     } else {
-        format!("{}\n\n{}", preambles.join("\n\n"), request.prompt)
+        format!("{}\n\n{}", preambles.join("\n\n"), outgoing)
     };
     let mut blocks = vec![json!({ "type": "text", "text": text })];
     for path in &request.attachments {
@@ -1466,6 +1493,7 @@ fn display_name(provider_id: &str) -> &str {
         "gemini" => "Gemini",
         "opencode" => "OpenCode",
         "cline" => "Cline",
+        "copilot" => "Copilot",
         other => other,
     }
 }
@@ -1477,7 +1505,7 @@ mod tests {
 
     #[test]
     fn every_provider_has_acp_launch_candidates_fastest_first() {
-        for provider in ["claude", "codex", "gemini", "opencode", "cline"] {
+        for provider in ["claude", "codex", "gemini", "opencode", "cline", "copilot"] {
             assert!(!agent_commands(provider).is_empty(), "{provider}");
         }
         // Global binary is tried before npx for the adapter-based agents.
@@ -1488,9 +1516,9 @@ mod tests {
 
     #[test]
     fn same_binary_agents_enter_acp_without_an_npx_fallback() {
-        // opencode and cline ship ACP in the binary the user already
-        // installed. An npx candidate here would download a whole coding
-        // agent the moment the local one was missing.
+        // opencode, cline and copilot ship ACP in the binary the user
+        // already installed. An npx candidate here would download a whole
+        // coding agent the moment the local one was missing.
         let opencode = agent_commands("opencode");
         assert_eq!(opencode.len(), 1);
         assert_eq!(opencode[0].program, "opencode");
@@ -1500,6 +1528,11 @@ mod tests {
         assert_eq!(cline.len(), 1);
         assert_eq!(cline[0].program, "cline");
         assert_eq!(cline[0].args, vec!["--acp".to_owned()]);
+
+        let copilot = agent_commands("copilot");
+        assert_eq!(copilot.len(), 1);
+        assert_eq!(copilot[0].program, "copilot");
+        assert_eq!(copilot[0].args, vec!["--acp".to_owned()]);
     }
 
     #[test]
@@ -1510,6 +1543,15 @@ mod tests {
         );
         assert_eq!(agent_args("cline", Some("kimi-k2.5"), None), vec!["--model", "kimi-k2.5"]);
         assert!(agent_args("cline", None, None).is_empty());
+    }
+
+    #[test]
+    fn copilot_takes_both_selectors_too_but_spells_effort_differently() {
+        assert_eq!(
+            agent_args("copilot", Some("gpt-5-mini"), Some("high")),
+            vec!["--model", "gpt-5-mini", "--effort", "high"]
+        );
+        assert!(agent_args("copilot", None, None).is_empty());
     }
 
     #[test]
@@ -1555,8 +1597,10 @@ mod tests {
                 "{\"model\":\"opencode/big-pickle\"}".to_owned()
             )]
         );
-        // Cline configures itself on the command line, never the env.
+        // Cline and Copilot configure themselves on the command line,
+        // never the env.
         assert!(agent_env("cline", Some("kimi-k2.5"), Some("high")).is_empty());
+        assert!(agent_env("copilot", Some("gpt-5-mini"), Some("high")).is_empty());
         assert!(agent_env("claude", None, None).is_empty());
         assert!(agent_env("codex", None, None).is_empty());
         assert!(agent_env("opencode", None, None).is_empty());
@@ -1571,6 +1615,29 @@ mod tests {
             assert!(native_mode_id(provider, Mode::Plan, Permission::Manual).is_none());
             assert!(native_mode_id(provider, Mode::Agent, Permission::Auto).is_none());
             assert!(!plan_is_native(provider), "{provider}");
+        }
+    }
+
+    #[test]
+    fn copilot_enforces_plan_natively_and_is_never_put_into_autopilot() {
+        // Its mode ids are the protocol's URLs, captured from
+        // `session/new` (CLI 1.0.81) rather than assumed to be bare words.
+        assert_eq!(
+            native_mode_id("copilot", Mode::Plan, Permission::Manual),
+            Some("https://agentclientprotocol.com/protocol/session-modes#plan")
+        );
+        assert_eq!(
+            native_mode_id("copilot", Mode::Ask, Permission::Bypass),
+            Some("https://agentclientprotocol.com/protocol/session-modes#plan")
+        );
+        assert!(plan_is_native("copilot"));
+        // The third advertised mode enables allow-all by its own
+        // description, so no combination may ever select it.
+        for mode in [Mode::Agent, Mode::Plan, Mode::Ask, Mode::Debug] {
+            for permission in [Permission::Manual, Permission::Auto, Permission::Bypass] {
+                let id = native_mode_id("copilot", mode, permission).unwrap();
+                assert!(!id.contains("autopilot"), "{mode:?}/{permission:?} chose {id}");
+            }
         }
     }
 

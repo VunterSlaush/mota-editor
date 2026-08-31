@@ -72,10 +72,15 @@ the boundary breaking, and it is the thing this list exists to catch.
 `ProviderId` is a closed union on purpose. Widen it and `tsc` lists every
 table still missing a value; that list *is* the checklist, and today it
 is `PROVIDERS`, `MODEL_SUGGESTIONS`, `EFFORT_OPTIONS`, `COMPACT_COMMAND`,
-`BUILTIN_COMMANDS`, `DEFAULT_MODEL_MATCH` and `COST_PRESETS`. On the Rust
-side the equivalent is the `match provider_id` arms in `acp.rs`
-(`agent_commands`, `agent_env`, `agent_args`, `sign_in_command`,
-`display_name`) plus `command_discovery.rs`. `MODEL_PRICES` and
+`BUILTIN_COMMANDS`, `BUILTIN_SUBAGENTS`, `DEFAULT_MODEL_MATCH` and
+`COST_PRESETS` (which needs a model AND an effort per preset). Trust the
+compiler over this sentence — it is the list that goes stale, not the
+type. On the Rust side the equivalent is the `match provider_id` arms in
+`acp.rs` (`agent_commands`, `agent_env`, `agent_args`, `sign_in_command`,
+`native_mode_id`, `display_name`) plus `command_discovery.rs` and
+`agent_discovery.rs`. Those two and `native_mode_id` fall through to
+"nothing" rather than failing to compile, so an omission there is silent:
+say in a comment that you meant it. `MODEL_PRICES` and
 `MODEL_CONTEXT_WINDOWS` take rows only where you know the numbers —
 absent means "n/a", which is the honest answer.
 

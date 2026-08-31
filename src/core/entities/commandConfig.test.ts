@@ -26,4 +26,10 @@ describe("command config entity", () => {
     expect(isEmptyCommandConfig({ mode: "plan" })).toBe(false);
     expect(isEmptyCommandConfig({ effort: "high" })).toBe(false);
   });
+
+  it("counts a sub-agent on its own as a real setting", () => {
+    // Miss this and the settings screen deletes the row on save, because
+    // an all-inherit row is an absent row.
+    expect(isEmptyCommandConfig({ agent: "mota-commit-push" })).toBe(false);
+  });
 });

@@ -12,28 +12,52 @@ pub fn command_name_from_file(file_name: &str) -> Option<String> {
 /// Description of a Markdown command file: the `description:` field of a
 /// YAML frontmatter block when present, otherwise the first content line.
 pub fn markdown_description(content: &str) -> Option<String> {
-    frontmatter_description(content)
+    frontmatter_field(content, "description")
         .or_else(|| first_content_line(content))
         .map(|d| tidy(&d))
 }
 
-/// Description of a TOML command file (Gemini): its `description = "..."`.
-pub fn toml_description(content: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        if key.trim() != "description" {
-            return None;
-        }
-        Some(tidy(value.trim().trim_matches(['"', '\''])))
-    })
+/// An agent definition's own name. The `name:` field is the source of
+/// truth — the file may be called anything, and Claude scans agent
+/// folders recursively, so two files in different subfolders can only be
+/// told apart by what they declare.
+pub fn markdown_agent_name(content: &str) -> Option<String> {
+    non_empty(frontmatter_field(content, "name")?)
 }
 
-fn frontmatter_description(content: &str) -> Option<String> {
+/// The same for Codex's TOML agent definitions.
+pub fn toml_agent_name(content: &str) -> Option<String> {
+    non_empty(toml_field(content, "name")?)
+}
+
+fn non_empty(value: String) -> Option<String> {
+    (!value.trim().is_empty()).then(|| value.trim().to_owned())
+}
+
+/// Description of a TOML command file (Gemini): its `description = "..."`.
+pub fn toml_description(content: &str) -> Option<String> {
+    toml_field(content, "description").map(|d| tidy(&d))
+}
+
+/// One raw scalar out of a leading `---` YAML frontmatter block. Shared
+/// with agent definitions, whose format is the same and whose `name:` is
+/// the source of truth for what the agent is called. Raw on purpose:
+/// `tidy` truncates, which is right for a description and wrong for a
+/// name that has to match exactly.
+pub fn frontmatter_field(content: &str, key: &str) -> Option<String> {
     let rest = content.strip_prefix("---")?;
     let (frontmatter, _) = rest.split_once("---")?;
     frontmatter.lines().find_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        (key.trim() == "description").then(|| value.trim().trim_matches('"').to_owned())
+        let (found, value) = line.split_once(':')?;
+        (found.trim() == key).then(|| value.trim().trim_matches('"').to_owned())
+    })
+}
+
+/// One raw scalar out of a flat TOML file (Codex agent definitions).
+pub fn toml_field(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let (found, value) = line.split_once('=')?;
+        (found.trim() == key).then(|| value.trim().trim_matches(['"', '\'']).to_owned())
     })
 }
 

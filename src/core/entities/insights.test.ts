@@ -2,16 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { BilledRequest } from "./billing";
 import {
   buildInsights,
+  delegationReport,
   type InsightsOptions,
   type SessionStats,
   type TurnStat,
 } from "./insights";
 
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
 /** Midnight UTC, so day arithmetic is exact under the injected keys. */
 const NOW = 1_000 * DAY;
 
 const utcDayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const utcStartOfDay = (ms: number) => Math.floor(ms / DAY) * DAY;
 const utcHour = (ms: number) => new Date(ms).getUTCHours();
 const utcWeekday = (ms: number) => new Date(ms).getUTCDay();
 
@@ -47,6 +50,7 @@ function build(
     now: NOW,
     autoCompactThreshold: 0.85,
     dayKey: utcDayKey,
+    startOfDay: utcStartOfDay,
     hourOf: utcHour,
     weekdayOf: utcWeekday,
     ...overrides,
@@ -79,6 +83,28 @@ describe("buildInsights", () => {
     const month = build([s], { range: "30d" });
     expect(month.totalTurns).toBe(2);
     expect(month.activity.days).toHaveLength(30);
+  });
+
+  it("counts today as the calendar day, not the last 24 hours", () => {
+    // 09:00. A rolling window would still be counting yesterday evening.
+    const morning = NOW + 9 * HOUR;
+    const s = session({
+      turns: [
+        turn({ sentAt: morning - 11 * HOUR }), // yesterday, 22:00
+        turn({ sentAt: morning - HOUR }), // today, 08:00
+      ],
+    });
+
+    const today = build([s], { range: "today", now: morning });
+
+    expect(today.totalTurns).toBe(1);
+    expect(today.activity.days).toHaveLength(1);
+    expect(today.activity.days[0].day).toBe(utcDayKey(morning));
+  });
+
+  it("shows an empty today rather than yesterday's work", () => {
+    const s = session({ turns: [turn({ sentAt: NOW - HOUR })] });
+    expect(build([s], { range: "today", now: NOW + HOUR }).totalTurns).toBe(0);
   });
 
   it("drops sessions with no in-range turns from session counts", () => {
@@ -735,5 +761,102 @@ describe("buildInsights billed spend", () => {
       "claude-haiku-4-5-20251001",
     ]);
     expect(report.billed?.byModel[1].costUsd).toBeCloseTo(1); // haiku $1/M
+  });
+});
+
+describe("delegation, measured in the context it leaves behind", () => {
+  const rowFor = (turns: readonly TurnStat[]) =>
+    build([session({ turns })]).tokens.byCommand[0];
+
+  it("splits a command's runs by where they ran", () => {
+    const row = rowFor([
+      turn({ command: "/x", tokens: 30_000 }),
+      turn({ command: "/x", tokens: 30_000 }),
+      turn({ command: "/x", tokens: 2_000, agent: "a" }),
+    ]);
+    expect(row.turns).toBe(3);
+    expect(row.inChat.turns).toBe(2);
+    expect(row.inChat.contextAdded).toBe(60_000);
+    expect(row.delegated.turns).toBe(1);
+    expect(row.delegated.contextAdded).toBe(2_000);
+  });
+
+  it("says nothing for a command nobody chose to delegate", () => {
+    expect(delegationReport(rowFor([turn({ command: "/x", tokens: 1 })]), false)).toEqual(
+      {
+        kind: "silent",
+      },
+    );
+  });
+
+  it("admits it has no runs at all rather than showing a blank", () => {
+    expect(delegationReport(undefined, true)).toEqual({ kind: "noRuns" });
+  });
+
+  it("shows what the command costs the chat before it is ever delegated", () => {
+    const report = delegationReport(
+      rowFor([
+        turn({ command: "/x", tokens: 30_000 }),
+        turn({ command: "/x", tokens: 10_000 }),
+      ]),
+      true,
+    );
+    expect(report.kind).toBe("baseline");
+    if (report.kind !== "baseline") throw new Error("wrong kind");
+    expect(report.inChat).toEqual({ perRun: 20_000, turns: 2 });
+  });
+
+  it("says so when only the delegated side has been measured", () => {
+    const report = delegationReport(
+      rowFor([turn({ command: "/x", tokens: 2_000, agent: "a" })]),
+      true,
+    );
+    expect(report.kind).toBe("delegatedOnly");
+    if (report.kind !== "delegatedOnly") throw new Error("wrong kind");
+    expect(report.delegated).toEqual({ perRun: 2_000, turns: 1 });
+  });
+
+  it("reports what delegating keeps out of the chat, per run", () => {
+    const report = delegationReport(
+      rowFor([
+        turn({ command: "/x", tokens: 20_000 }),
+        turn({ command: "/x", tokens: 20_000 }),
+        turn({ command: "/x", tokens: 2_000, agent: "a" }),
+      ]),
+      true,
+    );
+    expect(report.kind).toBe("compared");
+    if (report.kind !== "compared") throw new Error("wrong kind");
+    // Per run, so running it in the chat twice as often cannot flip the
+    // answer the way comparing totals would.
+    expect(report.keptOut).toBe(18_000);
+  });
+
+  it("admits when delegating left MORE behind than running it here", () => {
+    // Observed for real: a delegated run can add more than an inline one
+    // if the child's tool calls reach the parent transcript anyway.
+    const report = delegationReport(
+      rowFor([
+        turn({ command: "/x", tokens: 57_000 }),
+        turn({ command: "/x", tokens: 86_000, agent: "a" }),
+      ]),
+      true,
+    );
+    if (report.kind !== "compared") throw new Error("wrong kind");
+    expect(report.keptOut).toBeLessThan(0);
+  });
+
+  it("is not swayed by how deep in a conversation each side ran", () => {
+    // Billed tokens would be: the deep run re-reads far more context.
+    // Context ADDED is the same either way, and that is the point.
+    const shallow = rowFor([turn({ command: "/x", tokens: 10_000 })]);
+    const deep = build([
+      session({
+        turns: [...Array(40)]
+          .map(() => turn({ command: "/y", tokens: 1_000 }))
+          .concat(turn({ command: "/x", tokens: 10_000 })),
+      }),
+    ]).tokens.byCommand.find((r) => r.command === "/x");
+    expect(deep?.inChat.contextAdded).toBe(shallow.inChat.contextAdded);
   });
 });

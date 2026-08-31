@@ -75,12 +75,6 @@ export interface GitPort {
    */
   upstream(projectPath: string): Promise<GitDivergence | null>;
   /**
-   * Every file git knows about — tracked plus untracked-and-not-ignored
-   * — as project-relative paths. Empty for a folder that is not a
-   * repository: a normal state, not an error.
-   */
-  listFiles(projectPath: string): Promise<string[]>;
-  /**
    * A unified diff for one file. `untracked` files have no index entry
    * to diff against and come back rendered wholly as additions.
    */
@@ -96,6 +90,17 @@ export interface GitPort {
   stageAll(projectPath: string): Promise<void>;
   /** Empty the index, leaving the working tree untouched. */
   unstageAll(projectPath: string): Promise<void>;
+  /**
+   * Throw away one file's unstaged changes: a tracked file goes back to
+   * the index, an untracked one is deleted. Irreversible — nothing
+   * stashes it first.
+   */
+  discard(projectPath: string, path: string): Promise<void>;
+  /**
+   * The same for every unstaged change at once. Staged work survives,
+   * and so do ignored files.
+   */
+  discardAll(projectPath: string): Promise<void>;
   /** Commit staged changes. Resolves with a short summary. */
   commit(projectPath: string, message: string): Promise<string>;
   checkout(projectPath: string, branch: string): Promise<string>;

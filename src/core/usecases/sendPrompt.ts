@@ -6,6 +6,7 @@ import {
   createExtensionPrompt,
 } from "../entities/createExtensionGuide";
 import { expandPromptCommand, findExtensionCommand } from "../entities/extension";
+import { buildHandoff } from "../entities/handoff";
 import {
   AUTH_REQUIRED_CONTEXT,
   approvalMessage,
@@ -20,8 +21,15 @@ import {
   userMessage,
 } from "../entities/message";
 import { tabLabel } from "../entities/project";
-import { COMPACT_COMMAND, contextWindowFor, providerById } from "../entities/provider";
+import {
+  COMPACT_COMMAND,
+  contextWindowFor,
+  type ProviderId,
+  providerById,
+} from "../entities/provider";
+import { delegatedSubagent, subagentExists } from "../entities/subagent";
 import { estimateTokens } from "../entities/tokens";
+import { isRunningToolStatus } from "../entities/toolRun";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
@@ -30,6 +38,7 @@ import { type TabState, tabById } from "../state/appState";
 import type { Store } from "../state/store";
 import { agentServers } from "./agentServers";
 import type { ApplyCommandConfig } from "./applyCommandConfig";
+import type { ListSubagents } from "./listSubagents";
 import { persistWorkspace } from "./persistWorkspace";
 import { declineParkedPlan } from "./planApproval";
 import type { RunExtensionCommand } from "./runExtensionCommand";
@@ -69,11 +78,48 @@ interface DeltaBuffer {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * How long a stretch may stay open on the strength of an unfinished tool
+ * call alone. The quiet window above reads silence as "the agent
+ * stopped", which a long tool breaks — a build says nothing for minutes,
+ * and its terminal output is polled client-side, so none of that traffic
+ * gets anywhere near this timer.
+ *
+ * Bounded rather than open-ended because a stretch that never settles
+ * also never drains the queue: a prompt typed behind it would wait
+ * forever, and the Stop that frees the tab DISCARDS it. Fifteen minutes
+ * outlasts any build worth watching and still fails safe.
+ */
+export const FOLLOWUP_TOOL_GRACE_MS = 15 * 60_000;
+
 /** One agent-initiated stretch, open until the events stop coming. */
 interface Followup {
   timer: ReturnType<typeof setTimeout>;
   /** Something the user would want to look at landed, not just usage. */
   notable: boolean;
+  /**
+   * Tool calls THIS stretch started that have not reported back. Scoped
+   * to the stretch on purpose: a cancelled turn can leave an
+   * `in_progress` row in the transcript for good, and reading the
+   * transcript instead would let that stale row wedge every later
+   * stretch.
+   */
+  openTools: Set<string>;
+  /** When the last event arrived, which bounds the grace above. */
+  lastEventAt: number;
+}
+
+/** The tool call an event opens or closes, when it says. */
+function toolCallLifecycle(
+  event: AgentTurnEvent,
+): { id: string; running: boolean } | null {
+  if (event.kind === "toolCall") {
+    return { id: event.toolCallId, running: isRunningToolStatus(event.status) };
+  }
+  if (event.kind === "toolCallUpdate" && event.status !== undefined) {
+    return { id: event.toolCallId, running: isRunningToolStatus(event.status) };
+  }
+  return null;
 }
 
 /**
@@ -92,10 +138,32 @@ export class SendPrompt {
     private readonly applyCommandConfig: ApplyCommandConfig,
     private readonly newId: IdGenerator,
     private readonly extensionCommands?: RunExtensionCommand,
+    private readonly subagents?: ListSubagents,
   ) {
     agentGateway.subscribeAgentInitiated((tabId, event) =>
       this.onAgentInitiated(tabId, event),
     );
+  }
+
+  /**
+   * Whether a sub-agent by this name exists to hand the command to.
+   *
+   * The check has to happen here rather than after the fact: the
+   * providers resolve a mention against their own agent list and drop a
+   * miss SILENTLY, so a deleted or renamed definition produces no error
+   * anywhere — just an ordinary, expensive inline run that looks like it
+   * worked. Nothing to report means we cannot tell, and the delegation
+   * goes ahead: the point of the check is to catch a name we KNOW is
+   * wrong, not to add a second way for this to fail.
+   */
+  private async canDelegate(
+    path: string,
+    provider: ProviderId,
+    agent: string,
+  ): Promise<boolean> {
+    if (!this.subagents) return true;
+    const known = await this.subagents.forProvider(path, provider).catch(() => null);
+    return known === null || subagentExists(known, agent);
   }
 
   async execute(
@@ -189,6 +257,46 @@ export class SendPrompt {
           ? expandPromptCommand(extensionHit.command.template, commandArgs)
           : trimmed;
 
+    // A command can be configured to run in a sub-agent instead of here,
+    // which is where the saving is: the child's tool output never enters
+    // this conversation, so none of the turns after it pay to re-read it.
+    // Checked last, because everything above either never reaches an
+    // agent or has already rewritten what does.
+    const delegateTo = extensionHit
+      ? null
+      : delegatedSubagent(
+          this.store.getState().settings.commandConfigs,
+          provider,
+          command,
+        );
+    if (delegateTo && !(await this.canDelegate(path, provider, delegateTo))) {
+      // Loud, and before anything is spent. A mention the provider
+      // cannot resolve is dropped silently, so the command would have
+      // run here anyway — at MORE than it costs today, since it would
+      // also leave its output behind. Saying nothing is the one outcome
+      // that turns this feature into a bill.
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: userMessage(trimmed, attachments, {
+          sentAt,
+          mode,
+          permission,
+          ...(command ? { command } : {}),
+        }),
+      });
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: errorMessage(
+          `${command} is set to run in the “${delegateTo}” sub-agent, but there is no ` +
+            `sub-agent by that name. Nothing was sent. Choose another in Settings → ` +
+            `Commands, or add a definition for it.`,
+        ),
+      });
+      return;
+    }
+
     const message = userMessage(trimmed, attachments, {
       sentAt,
       mode,
@@ -196,6 +304,7 @@ export class SendPrompt {
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(command ? { command } : {}),
+      ...(delegateTo ? { agent: delegateTo } : {}),
     });
     this.inflight.set(tabId, {
       messageId: message.id,
@@ -205,6 +314,19 @@ export class SendPrompt {
     });
 
     this.store.dispatch({ type: "chat/messageAppended", tabId, message });
+    // Said out loud, because what was sent is not what was typed — and
+    // because the child's whole report arrives as a tool row, which the
+    // transcript hides while Verbose is off. Without this the turn would
+    // look like it did nothing.
+    if (delegateTo) {
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: infoMessage(
+          `Running ${command} in the ${delegateTo} sub-agent — its work stays out of this conversation.`,
+        ),
+      });
+    }
     // The clock comes from here, not the reducer, which stays pure.
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: true, at: sentAt });
 
@@ -215,7 +337,10 @@ export class SendPrompt {
       tabId,
       provider,
       projectPath: path,
-      prompt: outgoing,
+      // A delegated turn sends the typed text: the adapter splits the
+      // command from its arguments to build the hand-off, and every
+      // rewrite above is on a path that is never delegated.
+      prompt: delegateTo ? trimmed : outgoing,
       mode,
       permission,
       model,
@@ -228,6 +353,15 @@ export class SendPrompt {
         configured.project.mcpOverrides,
       ),
       subtask: configured.project.subtask,
+      ...(delegateTo
+        ? {
+            delegateTo,
+            // Built from the conversation as it stands BEFORE this
+            // prompt: the child needs what "this" refers to, and this
+            // prompt is the one thing it is already being told.
+            handoff: buildHandoff(configured.messages) || undefined,
+          }
+        : {}),
     };
 
     let failure = await this.tryStart(tabId, request, turn);
@@ -334,8 +468,15 @@ export class SendPrompt {
     this.dispatchEvent(tabId, event);
 
     if (open) clearTimeout(open.timer);
+    const openTools = open?.openTools ?? new Set<string>();
+    const lifecycle = toolCallLifecycle(event);
+    if (lifecycle?.running) openTools.add(lifecycle.id);
+    else if (lifecycle) openTools.delete(lifecycle.id);
+
     this.followups.set(tabId, {
       notable: (open?.notable ?? false) || showsUpInTheChat(event),
+      openTools,
+      lastEventAt: Date.now(),
       timer: setTimeout(() => this.settleFollowup(tabId), FOLLOWUP_SETTLE_MS),
     });
   }
@@ -349,12 +490,30 @@ export class SendPrompt {
   private settleFollowup(tabId: string): void {
     const open = this.followups.get(tabId);
     if (!open) return;
-    this.followups.delete(tabId);
     this.flushDeltas(tabId);
     // A turn of ours started in the meantime: it owns the busy flag now,
     // and its own completion does the telling, saving and draining.
-    if (this.inflight.has(tabId)) return;
+    if (this.inflight.has(tabId)) {
+      this.followups.delete(tabId);
+      return;
+    }
 
+    // A tool this stretch started has not reported back, so the quiet is
+    // the tool working, not the agent finishing. Settling here is what
+    // marked a tab "done" — green, notification and all — while the
+    // build it was waiting on still had minutes to run.
+    if (
+      open.openTools.size > 0 &&
+      Date.now() - open.lastEventAt < FOLLOWUP_TOOL_GRACE_MS
+    ) {
+      this.followups.set(tabId, {
+        ...open,
+        timer: setTimeout(() => this.settleFollowup(tabId), FOLLOWUP_SETTLE_MS),
+      });
+      return;
+    }
+
+    this.followups.delete(tabId);
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
     // Anything typed while the follow-up held the tab queued behind it,
     // and no completion is coming to release it.

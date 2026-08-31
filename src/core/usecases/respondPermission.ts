@@ -1,4 +1,5 @@
 import { isDecline } from "../entities/approval";
+import { pendingApproval, pendingQuestion } from "../entities/message";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
@@ -24,10 +25,8 @@ export class RespondPermission {
 
   async execute(tabId: string, requestId: string, optionId: string): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
-    const approval = tab?.messages.find(
-      (m) => m.approval?.requestId === requestId,
-    )?.approval;
-    if (!approval || approval.resolvedOptionId || approval.cancelled) return;
+    const approval = pendingApproval(tab?.messages ?? [], requestId)?.approval;
+    if (!approval) return;
 
     this.store.dispatch({ type: "chat/approvalResolved", tabId, requestId, optionId });
     await this.agentGateway.respondPermission(tabId, requestId, optionId);
@@ -64,10 +63,7 @@ export class RespondQuestion {
     answers: Readonly<Record<string, string>>,
   ): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
-    const question = tab?.messages.find(
-      (m) => m.question?.requestId === requestId,
-    )?.question;
-    if (!question || question.answers || question.skipped || question.cancelled) return;
+    if (!pendingQuestion(tab?.messages ?? [], requestId)) return;
 
     this.store.dispatch({ type: "chat/questionAnswered", tabId, requestId, answers });
     await this.agentGateway.respondQuestion(tabId, requestId, answers);

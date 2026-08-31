@@ -112,6 +112,15 @@ export interface AgentTurnRequest {
   readonly mcpServers?: readonly McpServerSpec[];
   /** The tab's subtask scope; absent for a tab with full authority. */
   readonly subtask?: SubtaskScope;
+  /**
+   * Sub-agent this turn's slash command is handed off to; absent to run
+   * it in the conversation as usual. The name only — how a provider
+   * addresses one of its sub-agents is the adapter's business, not the
+   * domain's.
+   */
+  readonly delegateTo?: string;
+  /** Recent conversation to carry into that sub-agent. */
+  readonly handoff?: string;
 }
 
 export interface AgentGateway {

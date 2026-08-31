@@ -538,10 +538,16 @@ body {
   word-break: break-word;
 }
 
+/* Right-aligned rather than colour-filled. A solid accent bubble spends
+   the loudest colour in the theme on the one message whose contents the
+   user already knows, and it leaves nothing to say the things inside it
+   with — a /command on it could only ever be a chip. Quiet surface, real
+   text colour, and the accent goes back to meaning something. */
 .msg--user {
   align-self: flex-end;
-  background: var(--accent);
-  color: #fff;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 
 /* Assistant replies read like Claude Code: plain full-width prose,
@@ -2036,6 +2042,16 @@ body {
   background: var(--bg-input);
 }
 
+/* `margin-top: auto` pins it to the bottom of the section list however
+   many sections there are. */
+.settings-modal__version {
+  margin-top: auto;
+  padding: 10px 10px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 /* The bottom padding is room for a dropdown opened on the last row: the
    scroll container clips, so a panel with nothing under it is cut off. */
 .settings-modal__body {
@@ -2163,15 +2179,18 @@ body {
 /* One slash command and the settings it applies to its tab. */
 .command-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 10px 0;
   border-top: 1px solid var(--border);
 }
 
+/* Keeps a floor: with a basis of 0 the name collapsed to nothing before
+   the controls beside it gave up any width. */
 .command-row__text {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 220px;
+  min-width: 160px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2191,14 +2210,61 @@ body {
   white-space: nowrap;
 }
 
+/* Wraps rather than overflows: five controls plus a command name do not
+   fit a narrow modal, and the body scrolls on Y — which makes any X
+   overflow a second, horizontal scrollbar across the whole panel. */
 .command-row__controls {
-  flex: none;
+  flex: 1 1 auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
+/* Narrow enough that all five fit one line at the modal's own width, and
+   free to wrap onto a second when the window is smaller. The body scrolls
+   on Y, so any overflow on X becomes a second scrollbar across the whole
+   panel — which is what five controls used to cause. */
 .command-row__picker {
-  min-width: 104px;
+  min-width: 96px;
+}
+
+/* The one control that says WHERE a command runs rather than how, so it
+   holds an agent's name and earns the extra width. */
+.command-row__picker--where {
+  min-width: 124px;
+}
+
+/* What delegating this command actually bought, measured. Sits under the
+   command's own description, because it is a fact about the command and
+   not another thing to set. */
+.command-row__saving {
+  font-size: 12px;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-row__saving--cheaper {
+  color: var(--success);
+}
+
+.command-row__saving--dearer {
+  color: var(--warning);
+}
+
+/* Configured, but with nothing measured to compare yet. Dim: it is a
+   status, not a result — but it is said, because a setting that shows
+   nothing at all reads as one that does nothing at all. */
+.command-row__saving--pending {
+  color: var(--text-dim);
+}
+
+/* The evidence, dimmed: the headline is the claim, this is the sample it
+   rests on, and it must never read as loudly as the number. */
+.command-row__saving-detail {
+  color: var(--text-dim);
 }
 
 /* ---- Tools section (MCP servers) ---- */
@@ -3140,23 +3206,77 @@ body {
   cursor: default;
 }
 
+/* The outcome of the last git verb. A column, not a paragraph: the
+   sentence, then the way to fold git's own words open under it. */
 .changes__notice {
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   font-size: 12px;
   color: var(--text-dim);
   background: var(--bg-raised);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--success);
   border-radius: 6px;
-  padding: 6px 8px;
-  white-space: pre-wrap;
+  padding: 7px 9px;
   word-break: break-word;
 }
 
+.changes__notice-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.changes__notice-icon {
+  flex: none;
+  /* Nudged onto the first line's baseline rather than its box top. */
+  margin-top: 1px;
+  color: var(--success);
+}
+
+/* The one line worth reading, so it gets the panel's real text colour —
+   the dim it used to share with git's ref hashes is what buried it. */
 .changes__notice-text {
   flex: 1;
   min-width: 0;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+/* Quiet enough to ignore when the sentence was answer enough. */
+.changes__notice-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 1px 3px;
+  margin-left: 17px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.changes__notice-more:hover {
+  color: var(--text);
+  background: var(--border);
+}
+
+/* git's own report: monospace, because it is hashes and refs, and
+   scrollable, because a rejected push can be a dozen lines. */
+.changes__notice-detail {
+  margin: 0 0 0 17px;
+  max-height: 140px;
+  overflow: auto;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
 }
 
 /* Dimmer than the message it sits beside — a git error is the thing to
@@ -3179,9 +3299,18 @@ body {
   background: var(--border);
 }
 
+/* A failure is the one notice that has to be unmissable: the stripe, the
+   icon and the sentence itself all carry it. */
 .changes__notice--error {
-  color: var(--error);
   border-color: var(--error);
+}
+
+.changes__notice--error .changes__notice-icon {
+  color: var(--error);
+}
+
+.changes__notice--error .changes__notice-text {
+  color: var(--error);
 }
 
 .changes__file-action {
@@ -3270,6 +3399,21 @@ body {
 .file-menu__option:disabled {
   opacity: 0.3;
   cursor: default;
+}
+
+/* Discard destroys work and sits under the same kebab as "Show diff".
+   Colour is what stops it being picked by muscle memory. */
+.file-menu__option--danger,
+.file-menu__option--danger .file-menu__icon {
+  color: var(--error);
+}
+
+.file-menu__option--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+}
+
+.file-menu__option--danger:hover:not(:disabled) .file-menu__icon {
+  color: var(--error);
 }
 
 .file-menu__icon {
@@ -3796,6 +3940,11 @@ body {
   color: var(--text);
 }
 
+.changes__title-action--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 20%, transparent);
+  color: var(--error);
+}
+
 .changes__title-action:disabled {
   opacity: 0.25;
   cursor: default;
@@ -3888,6 +4037,138 @@ body {
   color: var(--text-dim);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---- Files panel ----
+   The project's own files. Borrows the Changes panel's rows wholesale;
+   the indent and the folder caret are all that is its own. */
+.files {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* The search box shares the actions row with Refresh, and takes what the
+   button leaves. */
+.files__search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+}
+
+.files__search:focus-within {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.files__search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.files__search-input:focus {
+  outline: none;
+}
+
+/* Tighter than a Changes row: a tree is read as a shape, and the gaps
+   that suit a dozen changed files bury it. */
+.files__row {
+  padding: 0;
+}
+
+.files__button {
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+/* The whole row lights up, the way a file manager's does — the underline
+   the Changes panel puts on a file name reads as a link, and a tree of
+   links is a tree that looks like it is all one hover. */
+.files__button:hover {
+  background: var(--border);
+}
+
+.files__button:hover .changes__filename {
+  text-decoration: none;
+}
+
+/* Fixed width, present on every row: a file's name has to line up with
+   the folder names above it, not with their carets. */
+.files__caret {
+  flex: none;
+  width: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.files__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* File-type colour comes from the theme's own five, not from a palette
+   of this panel's own: every theme already answers what "blue" and
+   "yellow" mean in it, the light ones included. The groupings are the
+   ones an editor has taught everyone to expect — TypeScript blue,
+   JavaScript yellow, stylesheets violet, markup warm, data green. */
+.files__icon--folder,
+.files__icon--ts,
+.files__icon--tsx,
+.files__icon--python {
+  color: var(--accent);
+}
+
+.files__icon--js,
+.files__icon--jsx {
+  color: var(--warning);
+}
+
+.files__icon--style,
+.files__icon--image {
+  color: var(--tool);
+}
+
+.files__icon--markup,
+.files__icon--rust {
+  color: var(--error);
+}
+
+.files__icon--data {
+  color: var(--success);
+}
+
+/* Prose and the unrecognised stay quiet: colour should mean something,
+   and "I have no idea what this is" is not a thing to shout. */
+.files__icon--markdown,
+.files__icon--text,
+.files__icon--plain {
+  color: var(--text-dim);
+}
+
+/* The folder it lives in, after the name — only search results have one,
+   and it must give up its width to the name first. */
+.files__row .changes__dir {
+  flex: 1;
+  text-align: right;
 }
 
 /* ---- Worktrees panel ----
@@ -4242,7 +4523,8 @@ body {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--bg-input);
+  color: var(--text-dim);
   border-radius: 999px;
   padding: 1px 8px;
 }
@@ -4371,15 +4653,9 @@ body {
   font-weight: inherit;
 }
 
-/* The user's own bubble is already accent-coloured, so the same accent
-   would be invisible there. */
-.msg--user .cmd-token,
-.pinned-prompt .cmd-token {
-  color: inherit;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 4px;
-  padding: 0 3px;
-}
+/* A sent message and the pinned prompt both draw on a quiet surface, so
+   the token needs no rule of its own: the accent and the weight above
+   are what a /command looks like everywhere in the app. */
 
 .composer-card__toolbar {
   display: flex;
@@ -4647,6 +4923,15 @@ body {
   font-weight: 600;
 }
 
+/* Beside the name, not part of it: a build number should be readable
+   without competing with the word it follows. */
+.empty-state__version {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+
 .empty-state p {
   margin: 0;
   color: var(--text-dim);
@@ -4842,13 +5127,12 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  /* On the accent bubble; same contrast precedent as .msg--user .cmd-token. */
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-dim);
 }
 
 .msg__turn-toggle:hover,
 .msg__turn-toggle[aria-expanded="true"] {
-  color: rgba(255, 255, 255, 1);
+  color: var(--text);
 }
 
 .msg__turn-details {
@@ -4857,15 +5141,18 @@ body {
   gap: 3px 10px;
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  border-top: 1px solid var(--border);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--text-dim);
 }
 
+/* The command the turn ran, said the way commands are said everywhere. */
 .msg__turn-cmd {
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--bg-input);
   border-radius: 999px;
   padding: 1px 8px;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* ---- Settings: Insights section ---- */
