@@ -29,6 +29,17 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor("codex", "gpt-5.3-codex")).toBe(400_000);
   });
 
+  it("raises DeepSeek to 1M over the gateway floor, except the free variant", () => {
+    // Same containment trap as the price table: "-free" is a suffix of
+    // the paid id, so it has to be matched first or a 200k session would
+    // be gauged against 1M and never look close to full.
+    expect(contextWindowFor("opencode", "opencode/deepseek-v4-flash")).toBe(1_000_000);
+    expect(contextWindowFor("opencode", "opencode/deepseek-v4-pro")).toBe(1_000_000);
+    expect(contextWindowFor("opencode", "opencode/deepseek-v4-flash-free")).toBe(200_000);
+    // Everything else on the gateway keeps the conservative floor.
+    expect(contextWindowFor("opencode", "opencode/big-pickle")).toBe(200_000);
+  });
+
   it("falls back to the provider default for unset or unknown models", () => {
     // "" is the pickers' provider-default sentinel, undefined the unset tab.
     expect(contextWindowFor("claude", undefined)).toBe(1_000_000);

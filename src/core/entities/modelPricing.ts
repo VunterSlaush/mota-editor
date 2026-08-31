@@ -63,6 +63,22 @@ export const MODEL_PRICES: readonly PriceEntry[] = [
   // instead of being reported as free.
   { provider: "opencode", match: "-free", inputPerMTok: 0, outputPerMTok: 0 },
   { provider: "opencode", match: "big-pickle", inputPerMTok: 0, outputPerMTok: 0 },
+  // DeepSeek over the same gateway, which bills it rather than serving it
+  // free (models.dev, verified 2026-08-31). These sit BELOW the "-free"
+  // row on purpose: `deepseek-v4-flash-free` contains "-free", so the
+  // zero-price row must win for it before either of these is reached.
+  {
+    provider: "opencode",
+    match: "deepseek-v4-pro",
+    inputPerMTok: 1.74,
+    outputPerMTok: 3.84,
+  },
+  {
+    provider: "opencode",
+    match: "deepseek-v4-flash",
+    inputPerMTok: 0.14,
+    outputPerMTok: 0.28,
+  },
   // Cline is deliberately absent: its account serves both free and paid
   // models under ids we cannot read without the user's credentials, so
   // every Cline turn shows "n/a" rather than a number that might be a lie.

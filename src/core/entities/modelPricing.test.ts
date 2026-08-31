@@ -57,6 +57,19 @@ describe("free tiers", () => {
     expect(blendedRatePerMTok("opencode", "openrouter/some/paid-model")).toBeNull();
   });
 
+  it("bills DeepSeek over opencode without letting its free variant slip", () => {
+    // "deepseek-v4-flash-free" CONTAINS "deepseek-v4-flash", so the two
+    // rows are only correct while the "-free" row is matched first. Swap
+    // that order and every free DeepSeek turn silently starts billing.
+    expect(blendedRatePerMTok("opencode", "opencode/deepseek-v4-flash-free")).toBe(0);
+    expect(blendedRatePerMTok("opencode", "opencode/deepseek-v4-flash")).toBeGreaterThan(
+      0,
+    );
+    expect(blendedRatePerMTok("opencode", "opencode/deepseek-v4-pro")).toBeGreaterThan(
+      blendedRatePerMTok("opencode", "opencode/deepseek-v4-flash") as number,
+    );
+  });
+
   it("says nothing about Cline's cost either way", () => {
     // Its account mixes free and paid models under ids we cannot read.
     expect(blendedRatePerMTok("cline", undefined)).toBeNull();

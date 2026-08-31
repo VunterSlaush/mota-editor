@@ -87,20 +87,27 @@ export const MODEL_SUGGESTIONS: Readonly<Record<ProviderId, readonly string[]>> 
     "gemini-2.5-pro",
     "gemini-2.5-flash",
   ],
-  // OpenCode's own gateway, listed by `opencode models` 2026-08-20 — the
-  // models it serves at no charge and without a sign-in. The lineup
-  // rotates faster than the others, so treat a stale entry here as
-  // expected rather than surprising. Models from any other gateway the
-  // user configured in opencode are reachable by their `vendor/model`
-  // id, which the picker keeps once it has been chosen.
+  // OpenCode's own gateway. The free lineup rotates faster than any
+  // other provider's: re-check it with `opencode models`, which lists
+  // only what is being served right now. A model that has rotated out
+  // fails the turn with an opaque "Unexpected server error", so a stale
+  // entry here is a landmine rather than a cosmetic wart — three were
+  // dropped on 2026-08-31 after failing exactly that way.
+  //
+  // The DeepSeek rows are the durable ones: the gateway bills them
+  // rather than rotating them, so they stay selectable and only need
+  // `opencode auth login`. Models from any other gateway the user
+  // configured in opencode are reachable by their `vendor/model` id,
+  // which the picker keeps once it has been chosen.
   opencode: [
     "opencode/big-pickle",
+    "opencode/deepseek-v4-flash",
+    "opencode/deepseek-v4-pro",
+    "opencode/ling-3.0-flash-fin-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/muse-spark-1.2-contributor-free",
     "opencode/nemotron-3-ultra-free",
     "opencode/nemotron-3.5-lightning-free",
-    "opencode/deepseek-v4-flash-free",
-    "opencode/mimo-v2.5-free",
-    "opencode/hy3-free",
-    "opencode/x-preview-f-free",
   ],
   // Deliberately empty: `cline auth` both signs the account in and
   // chooses its model, and the account's catalogue is fetched at runtime
@@ -129,6 +136,12 @@ interface ContextWindowEntry {
 const MODEL_CONTEXT_WINDOWS: readonly ContextWindowEntry[] = [
   { provider: "claude", match: "haiku", tokens: 200_000 },
   { provider: "codex", match: "gpt-5", tokens: 400_000 },
+  // DeepSeek over opencode carries 1M, five times the conservative
+  // gateway floor the descriptor states. The free variant is the one
+  // exception at 200k, and has to precede the prefix it contains or it
+  // would inherit 1M (models.dev, verified 2026-08-31).
+  { provider: "opencode", match: "deepseek-v4-flash-free", tokens: 200_000 },
+  { provider: "opencode", match: "deepseek-v4", tokens: 1_000_000 },
 ];
 
 /**
