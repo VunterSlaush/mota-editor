@@ -6,9 +6,10 @@ import {
   Square,
   X,
 } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { PlanEntry } from "../../core/entities/plan";
 import { planTitle, planToMarkdown } from "../../core/entities/plan";
+import { useResizableModal } from "../useResizableModal";
 import { Markdown } from "./MarkdownLite";
 
 /**
@@ -110,8 +111,7 @@ export function PlanSidePanel({
 }
 
 /** A resized modal never goes below this; the CSS caps handle the top end. */
-const MIN_WIDTH_PX = 360;
-const MIN_HEIGHT_PX = 240;
+const MINIMUM = { width: 360, height: 240 };
 
 /**
  * UI — the plan in a centred modal, for reading a long plan without
@@ -127,34 +127,7 @@ export function PlanModal({
   planMarkdown?: string;
   onClose: () => void;
 }) {
-  // A size the user dragged the modal to; null means the default layout.
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-
-  // Drag the bottom-right grip. The modal is centred both ways, so each
-  // pixel of width and height is split between opposite edges — the ×2
-  // keeps the grabbed corner under the cursor. Double-click resets.
-  const startResize = (e: React.PointerEvent) => {
-    e.preventDefault();
-    const el = modalRef.current;
-    if (!el) return;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const { width, height } = el.getBoundingClientRect();
-
-    const onMove = (move: PointerEvent) => {
-      setSize({
-        width: Math.max(MIN_WIDTH_PX, width + (move.clientX - startX) * 2),
-        height: Math.max(MIN_HEIGHT_PX, height + (move.clientY - startY) * 2),
-      });
-    };
-    const stopDrag = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", stopDrag);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", stopDrag);
-  };
+  const { ref, size, startResize, resetSize } = useResizableModal(MINIMUM, "center");
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -167,7 +140,7 @@ export function PlanModal({
   return (
     <div className="modal-overlay modal-overlay--center" onMouseDown={onClose}>
       <div
-        ref={modalRef}
+        ref={ref}
         className="plan-modal"
         role="dialog"
         aria-modal="true"
@@ -199,7 +172,7 @@ export function PlanModal({
           className="plan-modal__resize"
           title="Drag to resize · double-click to reset"
           onPointerDown={startResize}
-          onDoubleClick={() => setSize(null)}
+          onDoubleClick={resetSize}
         />
       </div>
     </div>

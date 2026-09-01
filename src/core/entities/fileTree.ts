@@ -130,6 +130,18 @@ export function fileKind(name: string): FileKind {
   return KIND_BY_EXTENSION[name.slice(cut + 1).toLowerCase()] ?? "plain";
 }
 
+/**
+ * Whether this app shows the file itself rather than handing it to the OS.
+ *
+ * Markdown only, and for one reason: the renderer is already here, shipped
+ * for agent output, so showing a README costs nothing but a modal. Every
+ * other kind still leaves — the OS knows which app opens a `.ts`, and
+ * carrying an editor is the thing this app is not (ADR-0019).
+ */
+export function rendersInApp(name: string): boolean {
+  return fileKind(name) === "markdown";
+}
+
 /** A folder while it is still being built: children by name, order later. */
 interface Builder {
   readonly children: Map<string, Builder>;

@@ -14,9 +14,43 @@ export async function openFileExternally(
   projectPath: string,
   path: string,
 ): Promise<string | null> {
+  return desktopAction("open_path", projectPath, path);
+}
+
+/**
+ * UI — hand the file to the OS's "open with" chooser, for when the
+ * default app is the wrong one. Windows only: no other desktop exposes
+ * its chooser to a command line, and the backend says so rather than
+ * opening the default app and pretending it asked.
+ */
+export async function openFileWith(
+  projectPath: string,
+  path: string,
+): Promise<string | null> {
+  return desktopAction("open_path_with", projectPath, path);
+}
+
+/**
+ * UI — show the file in the OS file manager, selected where the platform
+ * can select one and in its folder where it cannot.
+ */
+export async function revealFile(
+  projectPath: string,
+  path: string,
+): Promise<string | null> {
+  return desktopAction("reveal_path", projectPath, path);
+}
+
+/** Every one of these hands a project file to the desktop and reports
+ *  back the same way: null when it worked, why not when it didn't. */
+async function desktopAction(
+  command: string,
+  projectPath: string,
+  path: string,
+): Promise<string | null> {
   if (!isTauriRuntime()) return "Opening files needs the desktop app.";
   try {
-    await invoke("open_path", { projectPath, path });
+    await invoke(command, { projectPath, path });
     return null;
   } catch (e) {
     return e instanceof Error ? e.message : String(e);

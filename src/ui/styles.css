@@ -454,9 +454,45 @@ body {
   background: transparent;
 }
 
-.tab-menu__color--on {
-  outline: 2px solid var(--text);
-  outline-offset: 1px;
+/* ---- Context menu ---- */
+/* Fixed and hidden until measured, like the tab menu above: where it goes
+   depends on how big it turned out. Above the modals' overlay, because a
+   file's menu can be opened from a panel that has one. */
+.context-menu {
+  position: fixed;
+  visibility: hidden;
+  z-index: 120;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+}
+
+.context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* `--border` is the app's hover wash — the file rows use it too, so a
+   highlighted menu item and a highlighted row read as the same thing. */
+.context-menu__item:hover,
+.context-menu__item:focus-visible {
+  background: var(--border);
 }
 
 /* ---- Chat panel ---- */
@@ -1508,6 +1544,66 @@ body {
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+}
+
+/* A project markdown file, rendered in place — see MarkdownFileModal.tsx.
+   Sized like the plan modal it sits beside; a README reads at the same
+   width a plan does. */
+.markdown-modal {
+  position: relative;
+  width: 780px;
+  max-width: 94vw;
+  height: 78vh;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.markdown-modal__header {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-modal__name {
+  font-weight: 600;
+}
+
+/* The folder is context, not the title: it yields the width first. */
+.markdown-modal__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.markdown-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 18px 18px;
+}
+
+.markdown-modal__note {
+  margin: 0;
+  padding: 18px 0;
+  color: var(--text-dim);
+}
+
+.markdown-modal__note--error {
+  color: var(--error);
+  white-space: pre-wrap;
 }
 
 /* ---- Markdown ---- */
@@ -3707,7 +3803,8 @@ body {
 /* Grab corner: drag to resize the modal. The chevron marks the spot but
    the whole 16px square is draggable. */
 .diff-modal__resize,
-.plan-modal__resize {
+.plan-modal__resize,
+.markdown-modal__resize {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -3718,7 +3815,8 @@ body {
 }
 
 .diff-modal__resize::after,
-.plan-modal__resize::after {
+.plan-modal__resize::after,
+.markdown-modal__resize::after {
   content: "";
   position: absolute;
   right: 4px;
@@ -3733,7 +3831,9 @@ body {
 .diff-modal__resize:hover::after,
 .diff-modal__resize:active::after,
 .plan-modal__resize:hover::after,
-.plan-modal__resize:active::after {
+.plan-modal__resize:active::after,
+.markdown-modal__resize:hover::after,
+.markdown-modal__resize:active::after {
   border-color: var(--text-dim);
 }
 

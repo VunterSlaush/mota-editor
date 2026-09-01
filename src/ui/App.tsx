@@ -24,7 +24,7 @@ import type { ExtensionPanelsView } from "./components/ExtensionPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { TabBar } from "./components/TabBar";
 import { TooltipLayer } from "./components/TooltipLayer";
-import { openFileExternally } from "./openFile";
+import { projectFileActions } from "./fileActions";
 import { useAppState } from "./useAppState";
 
 /**
@@ -224,6 +224,12 @@ export function App({ context }: { context: AppContext }) {
   const loadProjectFiles = useCallback(
     () => context.listProjectFiles.execute(activeProjectId),
     [context, activeProjectId],
+  );
+  // Bound once per project rather than per render: the chat memoizes a
+  // callback on this, and a fresh object each time would re-run it.
+  const fileActions = useMemo(
+    () => projectFileActions(tab?.project.path ?? ""),
+    [tab?.project.path],
   );
   const respondPermission = useCallback(
     (requestId: string, optionId: string) =>
@@ -440,7 +446,7 @@ export function App({ context }: { context: AppContext }) {
             context.subtasks.changeScope(tab.project.id, scope)
           }
           onActivateTab={(tabId) => void context.switchTab.execute(tabId)}
-          onOpenFile={(path) => openFileExternally(tab.project.path, path)}
+          fileActions={fileActions}
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}
           onRetry={retryLast}

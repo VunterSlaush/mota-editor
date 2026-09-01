@@ -19,6 +19,7 @@ import type { HistoryItem, HistoryListing } from "../../core/usecases/history";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
 import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import type { WorktreeItem } from "../../core/usecases/worktrees";
+import type { FileActions } from "../fileActions";
 import { useDragWidth } from "../useDragWidth";
 import {
   ActivityBar,
@@ -196,7 +197,8 @@ interface Props {
   onChangeSubtaskScope: (scope: SubtaskScope) => Promise<string | undefined>;
   /** Go to another open tab (a subtask row was clicked). */
   onActivateTab: (tabId: string) => void;
-  onOpenFile: (path: string) => Promise<string | null>;
+  /** Everything a file row can do to the file it names. */
+  fileActions: FileActions;
   onPickFiles: () => Promise<string[]>;
   /** Save an image pasted into the composer; returns its file path. */
   onPasteImage: (bytes: Uint8Array, mimeType: string) => Promise<string>;
@@ -273,7 +275,7 @@ export function ChatPanel({
   onNewSubtask,
   onChangeSubtaskScope,
   onActivateTab,
-  onOpenFile,
+  fileActions,
   onPickFiles,
   onPasteImage,
   loadProjectFiles,
@@ -351,8 +353,8 @@ export function ChatPanel({
     [],
   );
   const openTouchedFile = useCallback(
-    (path: string) => void onOpenFile(path),
-    [onOpenFile],
+    (path: string) => void fileActions.open(path),
+    [fileActions],
   );
 
   // Bumps every time the agent runs a tool that could touch the tree.
@@ -596,7 +598,10 @@ export function ChatPanel({
           <>
             <div style={{ width: sidebar.width }} className="changes-container">
               {shownSidebarView === "files" && (
-                <FilesPanel loadProjectFiles={loadProjectFiles} onOpenFile={onOpenFile} />
+                <FilesPanel
+                  loadProjectFiles={loadProjectFiles}
+                  fileActions={fileActions}
+                />
               )}
               {shownSidebarView === "changes" && (
                 <ChangesPanel
@@ -618,7 +623,7 @@ export function ChatPanel({
                   onPull={onGitPull}
                   onFetch={onGitFetch}
                   onRefresh={() => setChangesRefreshKey((k) => k + 1)}
-                  onOpenFile={onOpenFile}
+                  onOpenFile={fileActions.open}
                   onShowDiff={(file, staged) =>
                     setDiffTarget({
                       kind: "git",

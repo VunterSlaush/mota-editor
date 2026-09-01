@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFileTree, fileKind, visibleRows } from "./fileTree";
+import { buildFileTree, fileKind, rendersInApp, visibleRows } from "./fileTree";
 
 /** Names at the top level, in the order the tree puts them. */
 const topNames = (paths: readonly string[]) =>
@@ -134,6 +134,28 @@ describe("fileKind", () => {
   it("treats a dotfile as a name, not as an extension", () => {
     // ".gitignore" is not a gitignore-flavoured file: it has no extension.
     expect(fileKind(".gitignore")).toBe("plain");
+  });
+});
+
+describe("rendersInApp", () => {
+  it("claims the markdown the app can render itself", () => {
+    expect(rendersInApp("README.md")).toBe(true);
+    expect(rendersInApp("notes.markdown")).toBe(true);
+  });
+
+  it("spells the extension case-insensitively, as the disk does", () => {
+    expect(rendersInApp("README.MD")).toBe(true);
+  });
+
+  it("leaves every other kind to the operating system", () => {
+    expect(rendersInApp("App.tsx")).toBe(false);
+    expect(rendersInApp("icon.png")).toBe(false);
+    expect(rendersInApp("LICENSE")).toBe(false);
+  });
+
+  it("does not read a dotfile's name as an extension", () => {
+    // A file actually named ".md" is a dotfile, not a markdown document.
+    expect(rendersInApp(".md")).toBe(false);
   });
 });
 
