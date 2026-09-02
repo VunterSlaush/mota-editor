@@ -10,6 +10,20 @@ model is informed consent, not a sandbox (ADR-0012).
 
 A complete working example lives in [`examples/standup/`](../examples/standup/).
 
+## Getting one
+
+Published extensions live in the store,
+[VunterSlaush/mota-extensions](https://github.com/VunterSlaush/mota-extensions)
+— a reviewed index (`registry.json`) plus the source of everything hosted
+there. Type **`/install-extension`** in any chat to see the catalogue, or
+`/install-extension <id>` (or an https clone URL) to install one: the
+command is built into every install and expands into a brief that reads
+the index, fetches the folder, shows you the permissions the *downloaded
+manifest* declares, and asks before copying anything. It never enables
+anything — that dialog is yours.
+
+## Writing one
+
 Don't want to write it by hand? Two prompt-driven routes:
 
 - **In Mota itself** (any install): type `/create-extension` in any chat
@@ -222,7 +236,14 @@ consent — by design).
 
 ## Packaging and versioning
 
-v1 packaging is a folder — zip it, share it, drop it in. Protocol
-evolution is additive under `protocolVersion: 1`; a manifest demanding a
-newer protocol or an unknown permission is listed as incompatible rather
-than half-loaded, so targeting version 1 is always safe.
+v1 packaging is a folder — zip it, share it, drop it in. To publish it,
+open a pull request against
+[the store](https://github.com/VunterSlaush/mota-extensions): either host
+the folder there, or add an entry pointing at your own clone URL. Its
+`scripts/validate.mjs` re-applies every rule below, so a mistake fails in
+the pull request rather than on somebody's machine.
+
+Protocol evolution is additive under `protocolVersion: 1`; a manifest
+demanding a newer protocol or an unknown permission is listed as
+incompatible rather than half-loaded, so targeting version 1 is always
+safe.

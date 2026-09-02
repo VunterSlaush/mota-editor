@@ -67,8 +67,9 @@ export function SettingsExtensions({
       </p>
 
       <p className="settings-section__hint">
-        Don't want to write one by hand? Type <code>/create-extension</code> in any chat
-        and describe what you want — the agent scaffolds the folder for you.
+        Type <code>/install-extension</code> in any chat to see what the store has and
+        install one, or <code>/create-extension</code> and describe what you want — the
+        agent scaffolds the folder for you. Either way you approve it here.
       </p>
 
       <div className="settings-section__actions">

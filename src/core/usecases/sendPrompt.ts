@@ -8,6 +8,10 @@ import {
 import { expandPromptCommand, findExtensionCommand } from "../entities/extension";
 import { buildHandoff } from "../entities/handoff";
 import {
+  INSTALL_EXTENSION_COMMAND,
+  installExtensionPrompt,
+} from "../entities/installExtensionGuide";
+import {
   AUTH_REQUIRED_CONTEXT,
   approvalMessage,
   assistantMessage,
@@ -253,9 +257,11 @@ export class SendPrompt {
     const outgoing =
       command === CREATE_EXTENSION_COMMAND
         ? createExtensionPrompt(commandArgs)
-        : extensionHit?.command.kind === "prompt" && extensionHit.command.template
-          ? expandPromptCommand(extensionHit.command.template, commandArgs)
-          : trimmed;
+        : command === INSTALL_EXTENSION_COMMAND
+          ? installExtensionPrompt(commandArgs)
+          : extensionHit?.command.kind === "prompt" && extensionHit.command.template
+            ? expandPromptCommand(extensionHit.command.template, commandArgs)
+            : trimmed;
 
     // A command can be configured to run in a sub-agent instead of here,
     // which is where the saving is: the child's tool output never enters

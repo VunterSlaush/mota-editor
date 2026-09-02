@@ -2,6 +2,7 @@ import { CLEAR_COMMAND } from "./command";
 import type { CommandConfig } from "./commandConfig";
 import { commandConfigKey } from "./commandConfig";
 import { CREATE_EXTENSION_COMMAND } from "./createExtensionGuide";
+import { INSTALL_EXTENSION_COMMAND } from "./installExtensionGuide";
 import { COMPACT_COMMAND, type ProviderId } from "./provider";
 
 /**
@@ -76,17 +77,20 @@ export const BUILTIN_SUBAGENTS: Readonly<Record<ProviderId, readonly SubagentInf
 /**
  * Commands that must never be handed off, whatever the settings say.
  *
- * The first two are Mota's own and never reach an agent at all. The
- * third is the real trap: `SendPrompt.autoCompactIfNeeded` compacts by
- * sending `COMPACT_COMMAND` as an ordinary turn, and compaction only
- * means anything to the session that is actually full — delegated, it
- * would run in a child with an empty context and quietly free nothing
- * while the tab kept growing.
+ * The first three are Mota's own: `/clear` never reaches an agent, and
+ * the two extension commands expand into briefs whose whole point is a
+ * conversation with the user — a child agent cannot ask "shall I install
+ * this?" and cannot be answered. Compaction is the real trap:
+ * `SendPrompt.autoCompactIfNeeded` compacts by sending `COMPACT_COMMAND`
+ * as an ordinary turn, and compaction only means anything to the session
+ * that is actually full — delegated, it would run in a child with an
+ * empty context and quietly free nothing while the tab kept growing.
  */
 export function isNeverDelegated(provider: ProviderId, command: string): boolean {
   return (
     command === CLEAR_COMMAND ||
     command === CREATE_EXTENSION_COMMAND ||
+    command === INSTALL_EXTENSION_COMMAND ||
     command === COMPACT_COMMAND[provider]
   );
 }

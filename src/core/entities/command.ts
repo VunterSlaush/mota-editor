@@ -2,6 +2,10 @@ import {
   CREATE_EXTENSION_COMMAND,
   CREATE_EXTENSION_DESCRIPTION,
 } from "./createExtensionGuide";
+import {
+  INSTALL_EXTENSION_COMMAND,
+  INSTALL_EXTENSION_DESCRIPTION,
+} from "./installExtensionGuide";
 import type { ProviderId } from "./provider";
 
 /**
@@ -30,6 +34,15 @@ const CREATE_EXTENSION: CommandInfo = {
   source: "builtin",
 };
 
+/** Its other half, and Mota's own for the same reason: installing is
+ *  copying a folder into `~/.mota/extensions/`, which the agent can do —
+ *  approving it is a native dialog, which only the user can. */
+const INSTALL_EXTENSION: CommandInfo = {
+  name: INSTALL_EXTENSION_COMMAND,
+  description: INSTALL_EXTENSION_DESCRIPTION,
+  source: "builtin",
+};
+
 /**
  * Start a fresh conversation. Mota's own too, and for the same reason:
  * clearing is something the app does to itself. Sending it on would ask
@@ -52,6 +65,7 @@ const CLEAR: CommandInfo = {
 export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[]>> = {
   claude: [
     CREATE_EXTENSION,
+    INSTALL_EXTENSION,
     CLEAR,
     {
       name: "/init",
@@ -71,6 +85,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
   ],
   codex: [
     CREATE_EXTENSION,
+    INSTALL_EXTENSION,
     CLEAR,
     {
       name: "/init",
@@ -79,7 +94,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
-  gemini: [CREATE_EXTENSION, CLEAR],
+  gemini: [CREATE_EXTENSION, INSTALL_EXTENSION, CLEAR],
 };
 
 /**

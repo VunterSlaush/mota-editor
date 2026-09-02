@@ -53,6 +53,12 @@ optionally, a script in any language — dropped into
 your agents, and (soon) automate the workbench on events. Enabling one
 shows a native dialog listing exactly what it may do.
 
+- **Install one from the store — built into every install:** type
+  `/install-extension` in any chat to see what
+  [the store](https://github.com/VunterSlaush/mota-extensions) has, or
+  `/install-extension <id>` (or an https clone URL) to get it. The agent
+  fetches the folder, shows you the permissions its manifest actually
+  declares, and asks before copying anything; approving it stays yours.
 - **Create one from a prompt — built into every install:** type
   `/create-extension` in any chat and describe what you want (e.g.
   */create-extension a command that drafts release notes from recent
