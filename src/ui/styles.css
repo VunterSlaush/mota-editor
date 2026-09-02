@@ -1449,11 +1449,65 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* Holds the terminal and the find bar laid over it. The host below is
+   xterm's own element and cannot carry siblings inside it. */
+.terminal-side__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .terminal-side__body {
   flex: 1;
   min-height: 0;
   padding: 6px 0 6px 8px;
   overflow: hidden;
+}
+
+/* Top-right, clear of the prompt and of the scrollbar's match marks. */
+.terminal-search {
+  position: absolute;
+  top: 6px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+}
+
+.terminal-search__icon {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.terminal-search__input {
+  width: 180px;
+  padding: 3px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.terminal-search__count {
+  flex: none;
+  min-width: 62px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-search__count--none {
+  color: var(--error);
 }
 
 .terminal-view__surface {

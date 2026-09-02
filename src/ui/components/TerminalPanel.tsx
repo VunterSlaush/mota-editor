@@ -1,7 +1,8 @@
-import { Plus, X } from "@phosphor-icons/react";
+import { CaretDown, CaretUp, MagnifyingGlass, Plus, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ShellSession } from "../../core/entities/shellSession";
 import { shellExitLabel } from "../../core/entities/shellSession";
+import { terminalSearchIntent } from "../../core/entities/terminalSearch";
 import type { OpenShellRequest, OpenShellResult } from "../../core/usecases/shells";
 import {
   forgetXterm,
@@ -9,6 +10,7 @@ import {
   restyleAll,
   xtermFor,
 } from "../terminals/shellRegistry";
+import type { SearchResults } from "../terminals/xtermSession";
 import { createXtermSession } from "../terminals/xtermSession";
 
 interface Props {
@@ -32,6 +34,13 @@ interface Props {
 
 /** Before the panel has been measured, every terminal starts here. */
 const UNMEASURED = { cols: 80, rows: 24 };
+
+/** No search yet — what the bar shows before a query finds anything. */
+const NO_RESULTS: SearchResults = { current: 0, total: 0 };
+
+/** Cmd is the app's modifier on macOS; Ctrl stays the shell's there. */
+const IS_MAC = navigator.userAgent.includes("Mac");
+const SEARCH_SHORTCUT = IS_MAC ? "Cmd+F" : "Ctrl+F";
 
 /**
  * UI — the user's terminals, as a right-side section of the chat.
@@ -60,6 +69,11 @@ export function TerminalPanel({
   const [problem, setProblem] = useState<string | null>(null);
   const noticedExits = useRef(new Set<string>());
   const opening = useRef(false);
+  /** The find bar's query, or null while it is closed. */
+  const [query, setQuery] = useState<string | null>(null);
+  const [results, setResults] = useState<SearchResults>(NO_RESULTS);
+
+  const openSearch = useCallback(() => setQuery((current) => current ?? ""), []);
 
   const openTerminal = useCallback(async () => {
     // Guarded because StrictMode runs mount effects twice in development,
@@ -77,6 +91,8 @@ export function TerminalPanel({
         onAcceptSuggestion: () => {
           if (sessionId) onAcceptSuggestion(sessionId);
         },
+        onRequestSearch: openSearch,
+        onSearchResults: setResults,
       },
       fontSize,
     );
@@ -103,7 +119,7 @@ export function TerminalPanel({
     sessionId = result.sessionId;
     rememberXterm(sessionId, xterm);
     xterm.focus();
-  }, [fontSize, onOpen, onWrite, onAcceptSuggestion]);
+  }, [fontSize, onOpen, onWrite, onAcceptSuggestion, openSearch]);
 
   // The panel opens with a terminal ready; nobody wants to press "+"
   // before they can type.
@@ -141,6 +157,49 @@ export function TerminalPanel({
     if (xterm.fit()) onResize(activeShellId, xterm.size());
     xterm.focus();
   }, [activeShellId, fontSize, theme, onResize]);
+
+  // A search belongs to the buffer it ran against. Switching terminals
+  // takes the bar down, and the cleanup takes the highlights with it —
+  // otherwise coming back to this one would find it still marked up for
+  // a query that is no longer on screen anywhere.
+  useEffect(() => {
+    setQuery(null);
+    setResults(NO_RESULTS);
+    return () => {
+      if (activeShellId) xtermFor(activeShellId)?.clearSearch();
+    };
+  }, [activeShellId]);
+
+  const closeSearch = useCallback(() => {
+    const xterm = activeShellId ? xtermFor(activeShellId) : undefined;
+    xterm?.clearSearch();
+    setQuery(null);
+    setResults(NO_RESULTS);
+    // Back to the shell: the bar was opened from a keystroke there, and
+    // leaving the caret behind would send the next one nowhere.
+    xterm?.focus();
+  }, [activeShellId]);
+
+  const searchFor = useCallback(
+    (next: string) => {
+      setQuery(next);
+      if (activeShellId) xtermFor(activeShellId)?.search(next);
+      // An emptied box has no matches to report, and the addon stays
+      // quiet rather than saying so.
+      if (!next) setResults(NO_RESULTS);
+    },
+    [activeShellId],
+  );
+
+  const step = useCallback(
+    (direction: "next" | "previous") => {
+      const xterm = activeShellId ? xtermFor(activeShellId) : undefined;
+      if (!xterm || !query) return;
+      if (direction === "next") xterm.findNext(query);
+      else xterm.findPrevious(query);
+    },
+    [activeShellId, query],
+  );
 
   // The pty has to be told the new size, or programs keep drawing to the
   // old one — a resized panel with a wrapped prompt is the giveaway.
@@ -191,6 +250,15 @@ export function TerminalPanel({
           <button
             type="button"
             className="icon-button"
+            aria-label="Search the terminal"
+            title={`Search (${SEARCH_SHORTCUT})`}
+            onClick={openSearch}
+          >
+            <MagnifyingGlass />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
             aria-label="New terminal"
             title="New terminal"
             onClick={() => void openTerminal()}
@@ -209,8 +277,128 @@ export function TerminalPanel({
         </div>
       </div>
       {problem && <p className="terminal-side__problem">{problem}</p>}
-      <div className="terminal-side__body" ref={hostRef} />
+      {/* The host is xterm's alone — it calls `replaceChildren` on it —
+          so the bar is a sibling laid over it, not a child. */}
+      <div className="terminal-side__stage">
+        {query !== null && (
+          <TerminalSearchBar
+            query={query}
+            results={results}
+            onQueryChange={searchFor}
+            onNext={() => step("next")}
+            onPrevious={() => step("previous")}
+            onClose={closeSearch}
+          />
+        )}
+        <div className="terminal-side__body" ref={hostRef} />
+      </div>
     </aside>
+  );
+}
+
+/**
+ * UI — the terminal's find bar. Type to search, Enter and Shift+Enter to
+ * step through the matches, Escape to leave.
+ *
+ * Laid over the terminal rather than stacked above it: a bar that took
+ * its own row would shrink the pty by one, and every full-screen program
+ * running in it would redraw the moment someone pressed Ctrl+F.
+ */
+function TerminalSearchBar({
+  query,
+  results,
+  onQueryChange,
+  onNext,
+  onPrevious,
+  onClose,
+}: {
+  query: string;
+  results: SearchResults;
+  onQueryChange: (query: string) => void;
+  onNext: () => void;
+  onPrevious: () => void;
+  onClose: () => void;
+}) {
+  const field = useRef<HTMLInputElement>(null);
+
+  // Opened by a keystroke in the terminal, so the caret has to be moved
+  // here or the next letter typed would go to the shell.
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, []);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    // Pressed again with the bar already up, Ctrl+F selects what is in
+    // it — the same second press every editor answers this way.
+    if (terminalSearchIntent(e, { isMac: IS_MAC })) {
+      e.preventDefault();
+      field.current?.select();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (e.shiftKey) onPrevious();
+    else onNext();
+  };
+
+  const found = results.total > 0;
+  return (
+    <search className="terminal-search">
+      <MagnifyingGlass className="terminal-search__icon" size={13} />
+      <input
+        ref={field}
+        className="terminal-search__input"
+        value={query}
+        placeholder="Find in terminal"
+        aria-label="Find in terminal"
+        spellCheck={false}
+        onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={onKeyDown}
+      />
+      <span
+        className={`terminal-search__count ${
+          query && !found ? "terminal-search__count--none" : ""
+        }`}
+        aria-live="polite"
+      >
+        {!query ? "" : found ? `${results.current}/${results.total}` : "no matches"}
+      </span>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Previous match"
+        title="Previous match (Shift+Enter)"
+        disabled={!found}
+        onClick={onPrevious}
+      >
+        <CaretUp size={13} />
+      </button>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Next match"
+        title="Next match (Enter)"
+        disabled={!found}
+        onClick={onNext}
+      >
+        <CaretDown size={13} />
+      </button>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Close find bar"
+        title="Close (Escape)"
+        onClick={onClose}
+      >
+        <X size={13} />
+      </button>
+    </search>
   );
 }
 

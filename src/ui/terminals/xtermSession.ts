@@ -1,6 +1,8 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import { terminalClipboardIntent } from "../../core/entities/terminalClipboard";
+import { terminalSearchIntent } from "../../core/entities/terminalSearch";
 import type { ShellSize } from "../../core/ports/shellPort";
 import "@xterm/xterm/css/xterm.css";
 
@@ -29,7 +31,24 @@ export interface XtermSession {
   showSuggestion(suffix: string): void;
   /** A closing line the shell itself never got to print. */
   writeExitNotice(code: number | null): void;
+  /** Find the first match at or after where the last one left off —
+   *  what the user is asking for with each letter they add. An empty
+   *  query clears the search instead. */
+  search(query: string): void;
+  /** Step to the next match, wrapping at the end of the scrollback. */
+  findNext(query: string): void;
+  /** Step to the previous one. */
+  findPrevious(query: string): void;
+  /** Drop the highlights and the match the search selected. */
+  clearSearch(): void;
   dispose(): void;
+}
+
+/** Where a search got to: which match is selected, out of how many. */
+export interface SearchResults {
+  /** 1-based for display; 0 when nothing is selected yet. */
+  readonly current: number;
+  readonly total: number;
 }
 
 /** What a terminal reports back to the app. */
@@ -37,6 +56,10 @@ export interface XtermHandlers {
   readonly onData: (data: string) => void;
   /** The user pressed the accept key while a suggestion was showing. */
   readonly onAcceptSuggestion: () => void;
+  /** The user asked for the find bar (Ctrl+F, Cmd+F on macOS). */
+  readonly onRequestSearch: () => void;
+  /** A search moved, or the buffer under one changed. */
+  readonly onSearchResults: (results: SearchResults) => void;
 }
 
 export function createXtermSession(
@@ -55,6 +78,13 @@ export function createXtermSession(
   });
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
+  const searchAddon = new SearchAddon();
+  term.loadAddon(searchAddon);
+  searchAddon.onDidChangeResults(({ resultIndex, resultCount }) =>
+    // The addon counts from zero and reports -1 for "no match selected";
+    // both become the 0 that reads as "nothing yet" on screen.
+    handlers.onSearchResults({ current: resultIndex + 1, total: resultCount }),
+  );
   term.onData(handlers.onData);
 
   // xterm needs a live element to measure; it is moved between hosts as
@@ -91,6 +121,15 @@ export function createXtermSession(
       e.preventDefault();
       if (clipboard === "copy") copySelection();
       else void pasteFromClipboard();
+      return false;
+    }
+
+    // The find bar. Taken from the shell everywhere but macOS, which is
+    // the trade every terminal with a find bar makes — see
+    // `terminalSearch` for what it costs and why.
+    if (terminalSearchIntent(e, { isMac: IS_MAC })) {
+      e.preventDefault();
+      handlers.onRequestSearch();
       return false;
     }
 
@@ -174,6 +213,25 @@ export function createXtermSession(
       const detail = code === null ? "" : ` with code ${code}`;
       term.write(`\r\n\x1b[2m[process exited${detail}]\x1b[0m\r\n`);
     },
+    search(query) {
+      if (!query) {
+        searchAddon.clearDecorations();
+        return;
+      }
+      // Incremental, so a growing query keeps sitting on the match the
+      // shorter one found instead of jumping to the next one per letter.
+      searchAddon.findNext(query, { ...searchOptions(), incremental: true });
+    },
+    findNext(query) {
+      if (query) searchAddon.findNext(query, searchOptions());
+    },
+    findPrevious(query) {
+      if (query) searchAddon.findPrevious(query, searchOptions());
+    },
+    clearSearch() {
+      searchAddon.clearDecorations();
+      term.clearSelection();
+    },
     dispose() {
       ghost.clear();
       term.dispose();
@@ -240,6 +298,35 @@ function createGhost(term: Terminal) {
     },
     reanchor: draw,
   };
+}
+
+/**
+ * How matches are painted: every one washed, the selected one in the
+ * accent, and both marked in the overview ruler down the scrollbar so a
+ * hit off-screen is still visible.
+ *
+ * Rebuilt per search rather than cached, so a theme change is picked up
+ * without the search having to know a theme changed.
+ */
+function searchOptions() {
+  const accent = themeColor("--accent", "#4f8cff");
+  const wash = themeColor("--border", "#2a2f37");
+  return {
+    decorations: {
+      matchBackground: wash,
+      matchOverviewRuler: wash,
+      activeMatchBackground: accent,
+      activeMatchColorOverviewRuler: accent,
+    },
+  };
+}
+
+/** A theme colour the search addon will accept: it parses these itself
+ *  and understands `#RRGGBB` and nothing else, so a theme that ever
+ *  states one as `rgb()` or `#RGBA` falls back rather than throwing. */
+function themeColor(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
 }
 
 /**
