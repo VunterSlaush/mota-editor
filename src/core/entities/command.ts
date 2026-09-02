@@ -58,6 +58,18 @@ const CLEAR: CommandInfo = {
 };
 
 /**
+ * Mota's own, in the order they are offered. None of the three reaches an
+ * agent as a slash command, so no agent can advertise them and nothing
+ * else can supply them — which is exactly why `paletteCommands` keeps
+ * them whatever the running session says.
+ */
+export const MOTA_COMMANDS: readonly CommandInfo[] = [
+  CREATE_EXTENSION,
+  INSTALL_EXTENSION,
+  CLEAR,
+];
+
+/**
  * Built-in commands each CLI understands in headless mode (plus Mota's
  * own, above). Custom commands (project/user command folders) are
  * discovered at runtime and merged by the ListCommands use case.
@@ -109,6 +121,37 @@ export function dedupeCommands(commands: readonly CommandInfo[]): CommandInfo[] 
     seen.add(c.name);
     return true;
   });
+}
+
+/**
+ * The palette's list once a session is live: what the running agent
+ * advertises, plus everything the agent cannot know about.
+ *
+ * A live ACP session reports the CLI's real commands, which beats the
+ * static per-provider table — but it used to REPLACE the whole list, and
+ * with it Mota's own commands, every installed extension's commands and
+ * every custom command file. They were still typeable and completely
+ * undiscoverable. So the agent's list supersedes only the static builtins
+ * it is a better version of; Mota's own go first because nothing else can
+ * offer them, and extension and file commands keep their place.
+ *
+ * Alphabetical, like `ListCommands`, so the palette does not reorder
+ * itself the moment a session comes up.
+ */
+export function paletteCommands(
+  agentCommands: readonly CommandInfo[],
+  discovered: readonly CommandInfo[],
+): CommandInfo[] {
+  if (agentCommands.length === 0) return [...discovered];
+  const own = new Set(MOTA_COMMANDS.map((c) => c.name));
+  return dedupeCommands([
+    ...MOTA_COMMANDS,
+    ...agentCommands,
+    // Whatever is left is something the agent could not have advertised:
+    // extension contributions and command files. Its own stale builtins
+    // are dropped — the live list is the true one.
+    ...discovered.filter((c) => c.source !== "builtin" && !own.has(c.name)),
+  ]).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Commands whose names start with the typed prefix (case-insensitive). */

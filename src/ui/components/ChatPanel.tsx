@@ -1,7 +1,11 @@
 import { GitBranch, GitFork, NotePencil, TerminalWindow } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
-import { type CommandInfo, commandNames } from "../../core/entities/command";
+import {
+  type CommandInfo,
+  commandNames,
+  paletteCommands,
+} from "../../core/entities/command";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
 import type { SubtaskScope } from "../../core/entities/subtask";
@@ -376,9 +380,13 @@ export function ChatPanel({
     [messageCount, fileChangingTools],
   );
 
-  // The running agent's own command list is the source of truth; the
-  // static + discovered set covers the time before a session starts.
-  const commands = tab.agentCommands.length > 0 ? tab.agentCommands : fallbackCommands;
+  // The running agent's own list is the truth about the CLI's builtins;
+  // Mota's own commands, extensions and command files come from here,
+  // because the agent has never heard of them.
+  const commands = useMemo(
+    () => paletteCommands(tab.agentCommands, fallbackCommands),
+    [tab.agentCommands, fallbackCommands],
+  );
 
   // Stable identity: this reaches memoized transcript rows, so a fresh
   // Set every render would defeat their memo.
