@@ -1060,11 +1060,15 @@ pub fn bypass_choice(options: &[PermissionOptionInfo]) -> Option<&PermissionOpti
 /// under bypass permissions: approving a plan is the whole point of plan
 /// mode. The guarded tool call's ACP `kind` is authoritative when it says
 /// `switch_mode`; otherwise fall back to the mode-switch option ids agents
-/// attach to exit-plan requests (Claude: auto/acceptEdits/default/plan/...)
-/// and to the request title. The title check matches "plan" as a whole
-/// word only: tool titles quote the command being run, and a substring
-/// match turned any command mentioning `roofPlane` or `planner.ts` into a
-/// "plan approval" that bypass refused to answer.
+/// attach to exit-plan requests and to the request title. The title check
+/// matches "plan" as a whole word only: tool titles quote the command being
+/// run, and a substring match turned any command mentioning `roofPlane` or
+/// `planner.ts` into a "plan approval" that bypass refused to answer.
+///
+/// The id list is per-agent vocabulary and it moves — claude-agent-acp 0.73
+/// renamed `auto` to `exit-plan-auto` — so both spellings are listed, along
+/// with Codex's. It is only a fallback: every adapter we ship against sets
+/// `switch_mode`, and this catches one that stops.
 pub fn is_plan_approval(
     title: &str,
     options: &[PermissionOptionInfo],
@@ -1073,8 +1077,25 @@ pub fn is_plan_approval(
     if tool_kind == Some("switch_mode") {
         return true;
     }
-    const MODE_SWITCH_IDS: [&str; 5] =
-        ["plan", "acceptEdits", "default", "auto", "bypassPermissions"];
+    const MODE_SWITCH_IDS: [&str; 14] = [
+        // Claude, 0.73 and later.
+        "exit-plan-auto",
+        "exit-plan-accept-edits",
+        "exit-plan-bypass",
+        "exit-plan-default",
+        "exit-plan-clear-auto",
+        "exit-plan-clear-accept-edits",
+        "exit-plan-clear-bypass",
+        // Claude, before 0.73.
+        "plan",
+        "acceptEdits",
+        "default",
+        "auto",
+        "bypassPermissions",
+        // Codex.
+        "implement_plan",
+        "revise_plan",
+    ];
     let has_mode_switch_option = options
         .iter()
         .any(|o| MODE_SWITCH_IDS.contains(&o.option_id.as_str()));
@@ -2243,6 +2264,19 @@ mod tests {
         assert!(is_plan_approval(
             "Ready to code?",
             &[opt("acceptEdits", "allow_once"), opt("plan", "reject_once")],
+            None
+        ));
+        // The same request from claude-agent-acp 0.73, which renamed every
+        // one of those ids and spells its "no" as the shared `reject`.
+        assert!(is_plan_approval(
+            "Ready to code?",
+            &[opt("exit-plan-clear-auto", "allow_always"), opt("reject", "reject_once")],
+            None
+        ));
+        // Codex names the same thing again, in its own words.
+        assert!(is_plan_approval(
+            "Ready to code?",
+            &[opt("implement_plan", "allow_once"), opt("revise_plan", "reject_once")],
             None
         ));
         // Title fallback.
