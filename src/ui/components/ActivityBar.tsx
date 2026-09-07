@@ -3,11 +3,14 @@ import {
   Bug,
   Calendar,
   ClockCounterClockwise,
+  Coins,
   Files,
+  Funnel,
   Gear,
   GitBranch,
   GitFork,
   Kanban,
+  Lightning,
   ListChecks,
   PuzzlePiece,
   Rocket,
@@ -57,6 +60,9 @@ const PANEL_ICONS: Readonly<Record<string, Icon>> = {
   bug: Bug,
   calendar: Calendar,
   rocket: Rocket,
+  coins: Coins,
+  funnel: Funnel,
+  lightning: Lightning,
 };
 
 /**
