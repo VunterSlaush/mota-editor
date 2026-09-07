@@ -46,6 +46,13 @@ Autonomous run, Multi-phase plan, Session pickup, Worktree cleanup.
 If a command name collides with one you already have, Mota lists it as
 `/poteto-mode.<name>`, and the qualified form always works.
 
+## Permissions and network
+
+- `commands:register`: the only permission. It lets the extension add the
+  slash commands above. There is no process, no script, and no network
+  call. Nothing runs on your machine except the prompt text the agent
+  receives.
+
 ## What is prompt-level and what is enforced
 
 Everything here is prompt text. Mota expands the command client-side and
