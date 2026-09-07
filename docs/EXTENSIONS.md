@@ -9,6 +9,8 @@ extension may do; extensions run with your user account — the permission
 model is informed consent, not a sandbox (ADR-0012).
 
 A complete working example lives in [`examples/standup/`](../examples/standup/).
+A pure-data example with no process, ten prompt commands read from files,
+lives in [`examples/poteto-mode/`](../examples/poteto-mode/).
 
 ## Getting one
 

@@ -1,0 +1,82 @@
+{
+  "name": "poteto-mode",
+  "version": "0.1.0",
+  "displayName": "Poteto Mode",
+  "description": "Rigorous agent mode adapted from Cursor's pstack: /poteto-mode matches a playbook, builds a todo list, delegates by model tier, and demands evidence before reporting done.",
+  "protocolVersion": 1,
+  "permissions": ["commands:register"],
+  "contributes": {
+    "commands": [
+      {
+        "name": "poteto-mode",
+        "kind": "prompt",
+        "description": "Rigorous mode: playbook, todo list, tiered sub-agents, evidence before done",
+        "argsHint": "<goal>",
+        "file": "./prompts/poteto-mode.md"
+      },
+      {
+        "name": "how",
+        "kind": "prompt",
+        "description": "Walk through how a subsystem works, from real code, before touching it",
+        "argsHint": "<subsystem or question>",
+        "file": "./prompts/how.md"
+      },
+      {
+        "name": "why",
+        "kind": "prompt",
+        "description": "Explain why something was built this way, from git history and ADRs",
+        "argsHint": "<file, symbol, or decision>",
+        "file": "./prompts/why.md"
+      },
+      {
+        "name": "architect",
+        "kind": "prompt",
+        "description": "Design a change that crosses a boundary: data shapes first, callers second, code last",
+        "argsHint": "<change>",
+        "file": "./prompts/architect.md"
+      },
+      {
+        "name": "arena",
+        "kind": "prompt",
+        "description": "Run N parallel attempts at the same task in isolation and pick the winner with evidence",
+        "argsHint": "[N] <task>",
+        "file": "./prompts/arena.md"
+      },
+      {
+        "name": "interrogate",
+        "kind": "prompt",
+        "description": "Adversarial review by independent sub-agents; only confirmed findings survive",
+        "argsHint": "[diff | file | design]",
+        "file": "./prompts/interrogate.md"
+      },
+      {
+        "name": "tdd",
+        "kind": "prompt",
+        "description": "Fix a bug or add behavior by writing the failing test first, then the smallest fix",
+        "argsHint": "<bug or behavior>",
+        "file": "./prompts/tdd.md"
+      },
+      {
+        "name": "figure-it-out",
+        "kind": "prompt",
+        "description": "Design a bespoke plan with measurable finish conditions for work no playbook covers",
+        "argsHint": "<goal>",
+        "file": "./prompts/figure-it-out.md"
+      },
+      {
+        "name": "show-me-your-work",
+        "kind": "prompt",
+        "description": "Write the decision log for the current task: what was tried, what was rejected, and why",
+        "argsHint": "[path]",
+        "file": "./prompts/show-me-your-work.md"
+      },
+      {
+        "name": "unslop",
+        "kind": "prompt",
+        "description": "Strip filler from prose or code: shorter sentences, fewer comments, no defensive noise",
+        "argsHint": "[file or selection]",
+        "file": "./prompts/unslop.md"
+      }
+    ]
+  }
+}
