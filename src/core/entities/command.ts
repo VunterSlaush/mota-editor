@@ -7,6 +7,10 @@ import {
   INSTALL_EXTENSION_DESCRIPTION,
 } from "./installExtensionGuide";
 import type { ProviderId } from "./provider";
+import {
+  UPDATE_EXTENSIONS_COMMAND,
+  UPDATE_EXTENSIONS_DESCRIPTION,
+} from "./updateExtensionsGuide";
 
 /**
  * Entities layer — a slash command the user can send to an agent.
@@ -43,6 +47,15 @@ const INSTALL_EXTENSION: CommandInfo = {
   source: "builtin",
 };
 
+/** And the one after that: an update is the same folder copy as an
+ *  install, over an extension that is already there — with the same
+ *  consent, because widened permissions send it back to the dialog. */
+const UPDATE_EXTENSIONS: CommandInfo = {
+  name: UPDATE_EXTENSIONS_COMMAND,
+  description: UPDATE_EXTENSIONS_DESCRIPTION,
+  source: "builtin",
+};
+
 /**
  * Start a fresh conversation. Mota's own too, and for the same reason:
  * clearing is something the app does to itself. Sending it on would ask
@@ -58,7 +71,7 @@ const CLEAR: CommandInfo = {
 };
 
 /**
- * Mota's own, in the order they are offered. None of the three reaches an
+ * Mota's own, in the order they are offered. None of them reaches an
  * agent as a slash command, so no agent can advertise them and nothing
  * else can supply them — which is exactly why `paletteCommands` keeps
  * them whatever the running session says.
@@ -66,6 +79,7 @@ const CLEAR: CommandInfo = {
 export const MOTA_COMMANDS: readonly CommandInfo[] = [
   CREATE_EXTENSION,
   INSTALL_EXTENSION,
+  UPDATE_EXTENSIONS,
   CLEAR,
 ];
 
@@ -78,6 +92,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
   claude: [
     CREATE_EXTENSION,
     INSTALL_EXTENSION,
+    UPDATE_EXTENSIONS,
     CLEAR,
     {
       name: "/init",
@@ -98,6 +113,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
   codex: [
     CREATE_EXTENSION,
     INSTALL_EXTENSION,
+    UPDATE_EXTENSIONS,
     CLEAR,
     {
       name: "/init",
@@ -106,7 +122,7 @@ export const BUILTIN_COMMANDS: Readonly<Record<ProviderId, readonly CommandInfo[
     },
     { name: "/review", description: "Review current changes", source: "builtin" },
   ],
-  gemini: [CREATE_EXTENSION, INSTALL_EXTENSION, CLEAR],
+  gemini: [CREATE_EXTENSION, INSTALL_EXTENSION, UPDATE_EXTENSIONS, CLEAR],
 };
 
 /**

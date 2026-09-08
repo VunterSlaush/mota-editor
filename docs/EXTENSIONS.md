@@ -24,6 +24,15 @@ the index, fetches the folder, shows you the permissions the *downloaded
 manifest* declares, and asks before copying anything. It never enables
 anything — that dialog is yours.
 
+Keeping them current works the same way: **Settings → Extensions →
+Check for updates** (or `/update-extensions`, optionally naming one)
+compares the version in each installed manifest against the index,
+reports what is behind, and asks before replacing a folder. It copies
+over the install rather than wiping it, so config an extension keeps
+beside its code survives; a new version that asks for a permission the
+old one did not sends the extension back to "Needs approval", and the
+brief says so before you agree rather than after.
+
 ## Writing one
 
 Don't want to write it by hand? Two prompt-driven routes:
@@ -209,7 +218,9 @@ labelled entry is the only right-click affordance there is, so put the
 words the user needs in the label — the host adds none of its own.
 A detail is
 `{title, subtitle?, fields: [{label, value}], body?, url?}`; `body` is
-markdown, `url` gets an open-in-browser button (http/https only).
+markdown, `url` gets copy-link and open-in-browser buttons (http/https
+only) — so a panel that has an address for an item should say so there
+rather than shipping its own "copy" menu entry.
 
 The host validates and caps everything (20 groups, 100 items each,
 50 select options, text lengths); what it does not recognize it drops,

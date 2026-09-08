@@ -1,4 +1,9 @@
-import { ArrowsClockwise, FolderOpen, Warning } from "@phosphor-icons/react";
+import {
+  ArrowsClockwise,
+  CloudArrowDown,
+  FolderOpen,
+  Warning,
+} from "@phosphor-icons/react";
 import { useState } from "react";
 import {
   type ExtensionDescriptor,
@@ -14,6 +19,9 @@ interface Props {
   onEnable: (id: string) => void;
   onDisable: (id: string) => void;
   onReload: () => void;
+  /** Starts `/update-extensions` in the active chat — null when no
+   *  project is open, since the check runs in a tab's agent. */
+  onCheckUpdates: (() => void) | null;
   readLog: (id: string) => Promise<string>;
 }
 
@@ -38,6 +46,7 @@ export function SettingsExtensions({
   onEnable,
   onDisable,
   onReload,
+  onCheckUpdates,
   readLog,
 }: Props) {
   const [logs, setLogs] = useState<Record<string, string>>({});
@@ -82,6 +91,22 @@ export function SettingsExtensions({
         </button>
         <button type="button" className="tool-add" onClick={onReload}>
           <ArrowsClockwise size={14} /> Reload list
+        </button>
+        {/* Updating is the same folder copy as installing, so it is the
+            agent that does it — this only starts the conversation, in the
+            chat you can answer. */}
+        <button
+          type="button"
+          className="tool-add"
+          disabled={onCheckUpdates === null}
+          title={
+            onCheckUpdates
+              ? "Runs /update-extensions in this project's chat: it compares what you have against the store and asks before replacing anything"
+              : "Open a project first — the check runs in that tab's chat"
+          }
+          onClick={() => onCheckUpdates?.()}
+        >
+          <CloudArrowDown size={14} /> Check for updates
         </button>
       </div>
       {folderError && <p className="settings-section__hint">{folderError}</p>}

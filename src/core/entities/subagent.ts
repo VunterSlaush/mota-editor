@@ -4,6 +4,7 @@ import { commandConfigKey } from "./commandConfig";
 import { CREATE_EXTENSION_COMMAND } from "./createExtensionGuide";
 import { INSTALL_EXTENSION_COMMAND } from "./installExtensionGuide";
 import { COMPACT_COMMAND, type ProviderId } from "./provider";
+import { UPDATE_EXTENSIONS_COMMAND } from "./updateExtensionsGuide";
 
 /**
  * Entities layer — a sub-agent a slash command can be handed off to.
@@ -77,8 +78,8 @@ export const BUILTIN_SUBAGENTS: Readonly<Record<ProviderId, readonly SubagentInf
 /**
  * Commands that must never be handed off, whatever the settings say.
  *
- * The first three are Mota's own: `/clear` never reaches an agent, and
- * the two extension commands expand into briefs whose whole point is a
+ * The first four are Mota's own: `/clear` never reaches an agent, and
+ * the three extension commands expand into briefs whose whole point is a
  * conversation with the user — a child agent cannot ask "shall I install
  * this?" and cannot be answered. Compaction is the real trap:
  * `SendPrompt.autoCompactIfNeeded` compacts by sending `COMPACT_COMMAND`
@@ -91,6 +92,7 @@ export function isNeverDelegated(provider: ProviderId, command: string): boolean
     command === CLEAR_COMMAND ||
     command === CREATE_EXTENSION_COMMAND ||
     command === INSTALL_EXTENSION_COMMAND ||
+    command === UPDATE_EXTENSIONS_COMMAND ||
     command === COMPACT_COMMAND[provider]
   );
 }

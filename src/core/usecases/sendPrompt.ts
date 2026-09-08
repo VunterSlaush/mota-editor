@@ -34,6 +34,10 @@ import {
 import { delegatedSubagent, subagentExists } from "../entities/subagent";
 import { estimateTokens } from "../entities/tokens";
 import { isRunningToolStatus } from "../entities/toolRun";
+import {
+  UPDATE_EXTENSIONS_COMMAND,
+  updateExtensionsPrompt,
+} from "../entities/updateExtensionsGuide";
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
@@ -259,9 +263,11 @@ export class SendPrompt {
         ? createExtensionPrompt(commandArgs)
         : command === INSTALL_EXTENSION_COMMAND
           ? installExtensionPrompt(commandArgs)
-          : extensionHit?.command.kind === "prompt" && extensionHit.command.template
-            ? expandPromptCommand(extensionHit.command.template, commandArgs)
-            : trimmed;
+          : command === UPDATE_EXTENSIONS_COMMAND
+            ? updateExtensionsPrompt(commandArgs)
+            : extensionHit?.command.kind === "prompt" && extensionHit.command.template
+              ? expandPromptCommand(extensionHit.command.template, commandArgs)
+              : trimmed;
 
     // A command can be configured to run in a sub-agent instead of here,
     // which is where the saving is: the child's tool output never enters

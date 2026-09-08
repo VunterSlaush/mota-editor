@@ -1,4 +1,11 @@
-import { ArrowSquareOut, ArrowsClockwise, Trash, X } from "@phosphor-icons/react";
+import {
+  ArrowSquareOut,
+  ArrowsClockwise,
+  Check,
+  Copy,
+  Trash,
+  X,
+} from "@phosphor-icons/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 import type {
@@ -419,6 +426,7 @@ function PanelDetailModal({
             {detail.subtitle && <p className="ext-detail__subtitle">{detail.subtitle}</p>}
           </div>
           <div className="ext-detail__actions">
+            {detail.url && <CopyUrlButton url={detail.url} />}
             {detail.url && (
               <button
                 type="button"
@@ -458,6 +466,35 @@ function PanelDetailModal({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * UI — the detail's link, on the clipboard. Every panel whose items carry
+ * a URL gets it (a pull request's, an issue's), which is why it lives
+ * here rather than in any one extension: pasting the link somewhere else
+ * is what people do with an open item far more often than opening it.
+ * Confirms in place like the code-block copy, and stays confirmed until
+ * the modal closes — the button is gone before it could go stale.
+ */
+function CopyUrlButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className="changes__action changes__action--icon"
+      aria-label={copied ? "Link copied" : "Copy link"}
+      title={copied ? "Copied" : `Copy link — ${url}`}
+      onClick={() => {
+        void navigator.clipboard
+          .writeText(url)
+          .then(() => setCopied(true))
+          .catch(() => undefined);
+      }}
+    >
+      {copied ? <Check /> : <Copy />}
+    </button>
   );
 }
 

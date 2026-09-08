@@ -2533,8 +2533,13 @@ body {
   cursor: pointer;
 }
 
-.tool-add:hover {
+.tool-add:hover:not(:disabled) {
   border-color: var(--accent);
+}
+
+.tool-add:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ---- Settings → Extensions ---- */

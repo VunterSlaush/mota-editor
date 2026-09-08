@@ -74,6 +74,9 @@ interface Props {
   onEnableExtension: (id: string) => void;
   onDisableExtension: (id: string) => void;
   onReloadExtensions: () => void;
+  /** Asks the active chat's agent to check the store for newer versions;
+   *  null when no project is open. */
+  onCheckExtensionUpdates: (() => void) | null;
   readExtensionLog: (id: string) => Promise<string>;
   /** Whether this disk clones; null until the probe answers. */
   supportsCow: boolean | null;
@@ -125,6 +128,7 @@ export function SettingsModal({
   onEnableExtension,
   onDisableExtension,
   onReloadExtensions,
+  onCheckExtensionUpdates,
   readExtensionLog,
   supportsCow,
   loadFolders,
@@ -201,6 +205,7 @@ export function SettingsModal({
               onEnable={onEnableExtension}
               onDisable={onDisableExtension}
               onReload={onReloadExtensions}
+              onCheckUpdates={onCheckExtensionUpdates}
               readLog={readExtensionLog}
             />
           )}

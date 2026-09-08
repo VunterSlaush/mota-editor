@@ -8,6 +8,7 @@ import type { ProviderId } from "../core/entities/provider";
 import { isShellLine, shellCommand } from "../core/entities/shellLine";
 import { tabShortcutIndex } from "../core/entities/tabShortcut";
 import { themeById } from "../core/entities/theme";
+import { UPDATE_EXTENSIONS_COMMAND } from "../core/entities/updateExtensionsGuide";
 import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import type { ShellSize } from "../core/ports/shellPort";
 import type { TabState } from "../core/state/appState";
@@ -487,6 +488,19 @@ export function App({ context }: { context: AppContext }) {
           onEnableExtension={(id) => void context.manageExtensions.enable(id)}
           onDisableExtension={(id) => void context.manageExtensions.disable(id)}
           onReloadExtensions={() => void context.manageExtensions.load()}
+          // The check is a conversation with an agent, so it runs in the
+          // chat the user can answer — settings gets out of the way.
+          onCheckExtensionUpdates={
+            tab
+              ? () => {
+                  closeSettings();
+                  void context.sendPrompt.execute(
+                    tab.project.id,
+                    UPDATE_EXTENSIONS_COMMAND,
+                  );
+                }
+              : null
+          }
           readExtensionLog={(id) => context.manageExtensions.readLog(id)}
           supportsCow={supportsCow}
           loadFolders={projectPath ? loadFolders : undefined}
