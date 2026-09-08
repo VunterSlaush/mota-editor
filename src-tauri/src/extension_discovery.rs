@@ -99,11 +99,34 @@ fn collect_from_dir(
 /// canonicalizes and re-checks, because textual checks are advice and
 /// the filesystem is the law.
 pub fn read_prompt_file(ext_dir: &Path, relative: &str) -> Result<String, String> {
+    let file = confined_file(ext_dir, relative, "Command file")?;
+    fs::read_to_string(&file).map_err(|e| format!("Could not read {relative}: {e}"))
+}
+
+/// A panel icon file (ADR-0021), same containment as prompt files plus a
+/// size cap: the bytes ride the descriptor list across the IPC as a data
+/// URL, so a wallpaper-sized "icon" is refused rather than shipped.
+pub fn read_icon_file(ext_dir: &Path, relative: &str) -> Result<Vec<u8>, String> {
+    let file = confined_file(ext_dir, relative, "Panel icon")?;
+    let size = fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+    if size > agent_core::extension::MAX_PANEL_ICON_BYTES {
+        return Err(format!(
+            "Panel icon {relative} is {size} bytes; the limit is {} — it is drawn at 20 px.",
+            agent_core::extension::MAX_PANEL_ICON_BYTES
+        ));
+    }
+    fs::read(&file).map_err(|e| format!("Could not read {relative}: {e}"))
+}
+
+/// Canonicalizes `relative` under `ext_dir` and refuses anything that
+/// resolves outside it — symlinks included, which is what the textual
+/// manifest check cannot see.
+fn confined_file(ext_dir: &Path, relative: &str, what: &str) -> Result<PathBuf, String> {
     let root = fs::canonicalize(ext_dir).map_err(|e| format!("Extension folder unavailable: {e}"))?;
     let file = fs::canonicalize(ext_dir.join(relative))
         .map_err(|e| format!("Could not resolve {relative}: {e}"))?;
     if !file.starts_with(&root) {
-        return Err(format!("Command file is outside the extension: {relative}"));
+        return Err(format!("{what} is outside the extension: {relative}"));
     }
-    fs::read_to_string(&file).map_err(|e| format!("Could not read {relative}: {e}"))
+    Ok(file)
 }

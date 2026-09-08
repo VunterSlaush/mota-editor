@@ -69,7 +69,7 @@ Don't want to write it by hand? Two prompt-driven routes:
 | `permissions` | Everything you intend to do, from the table below. Unknown strings fail closed. Changing this set sends the extension back to needs-approval. |
 | `contributes.commands` | Slash commands. `kind: "prompt"` is pure data — a `template` (or `file` relative to your folder) expanded client-side, `$ARGUMENTS` replaced (or the arguments appended, matching Claude custom commands). `kind: "programmatic"` routes to your process. |
 | `contributes.mcpServers` | MCP servers handed to the user's agents, riding the app's existing MCP plumbing. Paths naming files in your folder are resolved to absolute. |
-| `contributes.panels` | Sidebar panels: `{ "id": "tasks", "title": "Linear", "icon": "checklist" }`. The host draws the activity-bar icon and asks your process for a declarative view model — see [Panels](#panels). Requires `ui:panel` and an `entry`. |
+| `contributes.panels` | Sidebar panels: `{ "id": "tasks", "title": "Linear", "icon": "checklist" }`. The host draws the activity-bar icon and asks your process for a declarative view model — see [Panels](#panels). `icon` is a name from the host's set (`checklist`, `kanban`, `bug`, `calendar`, `rocket`, `coins`, `funnel`, `lightning`) or a path to an `.svg`, `.png` or `.ico` in your folder, e.g. `"./icon.svg"` — see [Panel icons](#panel-icons). Requires `ui:panel` and an `entry`. |
 | `contributes.events` | Workbench events you want pushed (`turn/completed`, `project/opened`, `project/closed`, `app/started`). Subscribers stay resident; command-only extensions are reaped when idle. |
 | `idleTimeoutMs` | Optional idle-shutdown override (capped at 30 min). |
 
@@ -219,6 +219,20 @@ refresh button re-sends `panel/load`; send `panels/refresh` yourself
 when your data changes behind the user's back. A working example:
 [`examples/linear/`](../examples/linear/) — your Linear issues grouped
 by status, with inline status changes.
+
+### Panel icons
+
+`icon` names one of the host's glyphs, or points at your own file
+(ADR-0021): a relative, forward-slash path inside your folder ending in
+`.svg`, `.png` or `.ico`, at most 128 KB. The host reads it once when it
+lists extensions and draws it **as a silhouette**: the image is a mask
+filled with the activity bar's current colour, so it dims, lights up on
+hover and takes the accent when active like every other icon. Design for
+that — a bold monochrome shape on a transparent background, square,
+readable at 20 px. Colour and fine detail are lost by construction; a
+coloured logo comes out as its outline. A path that leaves the folder is
+rejected at manifest time; a file that is missing or too large keeps the
+panel, with the generic puzzle piece and the reason shown in Settings.
 
 ## Lifecycle
 

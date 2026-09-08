@@ -69,7 +69,9 @@ tickets) without needing arbitrary UI.
   ADR, not a stretch of this one.
 - Icons are named, not supplied: the manifest names one of a small set the
   host maps to its icon font, so extensions cannot draw arbitrary pixels
-  in the activity bar.
+  in the activity bar. *Amended by ADR-0021: a manifest may also point at
+  an image file in its folder, which the host draws as a masked
+  silhouette in its own colours — still no arbitrary pixels.*
 
 ## Alternatives considered
 

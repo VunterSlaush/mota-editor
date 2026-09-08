@@ -34,7 +34,8 @@ Ask (unless already clear from their request):
      `"ui:panel"` and an `entry`. Manifest:
      `"panels": [{ "id": "tasks", "title": "My Tasks", "icon": "checklist" }]`
      (icons: checklist, kanban, bug, calendar, rocket, coins, funnel,
-     lightning). See the Panels
+     lightning — or a path to your own .svg/.png/.ico in the folder,
+     e.g. "./icon.svg", drawn as a monochrome silhouette). See the Panels
      section of `docs/EXTENSIONS.md` and the worked example
      `examples/linear/` in the Mota repository.
    - **Event automation** — react to `turn/completed` etc. (note: the

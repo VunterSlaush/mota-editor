@@ -323,6 +323,10 @@ pub struct PanelWire {
     pub id: String,
     pub title: String,
     pub icon: Option<String>,
+    /// The icon as a `data:` URL when the manifest names a file
+    /// (ADR-0021); None for named icons and for files that failed to
+    /// load, which the descriptor's `error` then explains.
+    pub icon_data: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -344,6 +348,13 @@ pub struct ExtensionDescriptorWire {
     pub mcp_servers: Vec<McpServerWire>,
     pub panels: Vec<PanelWire>,
     pub events: Vec<String>,
+}
+
+/// `data:<mime>;base64,…` — what the webview's CSP (`img-src data:`)
+/// already admits, so no asset protocol or scope needs opening.
+fn icon_data_url(mime: &str, bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 fn describe(
@@ -424,10 +435,23 @@ fn describe(
     }
 
     for panel in &manifest.panels {
+        let icon_data = match panel.icon.as_deref().and_then(agent_core::extension::panel_icon_file) {
+            // The parser already rejected escaping paths; an Err here
+            // cannot happen for a manifest that parsed.
+            Some(Ok(file)) => match extension_discovery::read_icon_file(&found.dir, &file.relative) {
+                Ok(bytes) => Some(icon_data_url(file.mime, &bytes)),
+                Err(message) => {
+                    base.error = Some(message);
+                    None
+                }
+            },
+            _ => None,
+        };
         base.panels.push(PanelWire {
             id: panel.id.clone(),
             title: panel.title.clone(),
             icon: panel.icon.clone(),
+            icon_data,
         });
     }
 

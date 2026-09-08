@@ -51,7 +51,7 @@ If that description is empty or unclear, ask what the extension should do before
   }
 }
 
-Omit "entry" entirely for pure prompt-command extensions. Programmatic commands and panels require it. Panel icons come from a fixed set: checklist, kanban, bug, calendar, rocket, coins, funnel, lightning (anything else gets a generic puzzle piece).
+Omit "entry" entirely for pure prompt-command extensions. Programmatic commands and panels require it. Panel icons are either a name from a fixed set — checklist, kanban, bug, calendar, rocket, coins, funnel, lightning — or a path to the extension's own .svg/.png/.ico inside its folder, e.g. "./icon.svg" (max 128 KB, drawn as a monochrome silhouette in the sidebar's colours, so use a bold shape on a transparent background). Anything else gets a generic puzzle piece.
 
 ## Script template (only when "entry" is declared) — plain Node, no dependencies
 

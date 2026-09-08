@@ -54,8 +54,12 @@ export interface ExtensionMcpContribution {
 export interface ExtensionPanelContribution {
   readonly id: string;
   readonly title: string;
-  /** Named icon from the host's fixed set; unknown names get a default. */
+  /** Named icon from the host's fixed set, or the manifest's file
+   *  reference; unknown names get a default. */
   readonly icon?: string;
+  /** The icon file as a `data:` URL when the manifest supplied one
+   *  (ADR-0021) — the activity bar draws it as a themed silhouette. */
+  readonly iconData?: string;
 }
 
 export interface ExtensionDescriptor {
@@ -225,6 +229,7 @@ export interface ExtensionPanelRef {
   readonly panelId: string;
   readonly title: string;
   readonly icon?: string;
+  readonly iconData?: string;
 }
 
 /** The panels active extensions contribute, in list order — the activity
@@ -239,6 +244,7 @@ export function extensionPanels(
       panelId: panel.id,
       title: panel.title,
       icon: panel.icon,
+      iconData: panel.iconData,
     })),
   );
 }

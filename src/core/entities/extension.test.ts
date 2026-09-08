@@ -4,6 +4,7 @@ import {
   type ExtensionDescriptor,
   expandPromptCommand,
   extensionMcpServers,
+  extensionPanels,
   findExtensionCommand,
   isActive,
 } from "./extension";
@@ -50,6 +51,49 @@ describe("isActive", () => {
     expect(isActive(extension({ status: "needs-approval" }))).toBe(false);
     expect(isActive(extension({ status: "disabled" }))).toBe(false);
     expect(isActive(extension({ status: "invalid" }))).toBe(false);
+  });
+});
+
+describe("extensionPanels", () => {
+  it("lists active extensions' panels with their icon name or icon file", () => {
+    const named = extension({
+      id: "linear",
+      permissions: ["ui:panel"],
+      panels: [{ id: "tasks", title: "Linear", icon: "checklist" }],
+    });
+    const own = extension({
+      id: "rtk",
+      permissions: ["ui:panel"],
+      panels: [
+        {
+          id: "savings",
+          title: "Token Saver",
+          icon: "./icon.svg",
+          iconData: "data:image/svg+xml;base64,PHN2Zz4=",
+        },
+      ],
+    });
+    const off = extension({
+      id: "off",
+      status: "disabled",
+      panels: [{ id: "p", title: "P" }],
+    });
+    expect(extensionPanels([named, own, off])).toEqual([
+      {
+        extensionId: "linear",
+        panelId: "tasks",
+        title: "Linear",
+        icon: "checklist",
+        iconData: undefined,
+      },
+      {
+        extensionId: "rtk",
+        panelId: "savings",
+        title: "Token Saver",
+        icon: "./icon.svg",
+        iconData: "data:image/svg+xml;base64,PHN2Zz4=",
+      },
+    ]);
   });
 });
 

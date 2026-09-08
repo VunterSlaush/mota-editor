@@ -42,7 +42,7 @@ interface WireDescriptor {
     args: string[];
     env: Record<string, string>;
   }[];
-  panels: { id: string; title: string; icon: string | null }[];
+  panels: { id: string; title: string; icon: string | null; iconData: string | null }[];
   events: string[];
 }
 
@@ -98,6 +98,7 @@ function toDomainDescriptor(wire: WireDescriptor): ExtensionDescriptor {
       id: p.id,
       title: p.title,
       icon: p.icon ?? undefined,
+      iconData: p.iconData ?? undefined,
     })),
     events: wire.events,
   };

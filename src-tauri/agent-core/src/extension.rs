@@ -120,9 +120,59 @@ pub struct PanelContribution {
     pub id: String,
     /// Shown as the icon tooltip and the panel heading.
     pub title: String,
-    /// Named icon from the host's small fixed set; the host falls back
-    /// to a generic one for names it does not know.
+    /// Either a name from the host's small fixed set, or (ADR-0021) a
+    /// relative path to an `.svg`/`.png`/`.ico` inside the extension
+    /// folder — see [`panel_icon_file`]. The host falls back to a
+    /// generic icon for names it does not know.
     pub icon: Option<String>,
+}
+
+/// An icon the manifest supplies as a file rather than a name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanelIconFile {
+    /// As written in the manifest: relative to the extension folder.
+    pub relative: String,
+    /// The `data:` media type the host serves it under.
+    pub mime: &'static str,
+}
+
+/// An icon file larger than this is refused: it is drawn at 20 px, and
+/// the whole descriptor list crosses the IPC on every extension refresh.
+pub const MAX_PANEL_ICON_BYTES: u64 = 128 * 1024;
+
+/// Reads a panel `icon` as a file reference when its extension says it
+/// is one (`.svg`, `.png`, `.ico`, any case); anything else is a name
+/// for the host's fixed set. Returns None for names.
+///
+/// A file reference must stay inside the extension folder: relative,
+/// forward slashes only, no `..` segment. The host canonicalizes and
+/// re-checks before reading (textual checks are advice, the filesystem
+/// is the law) — this is the manifest-time rejection that keeps an
+/// escaping path from ever being listed as valid.
+pub fn panel_icon_file(icon: &str) -> Option<Result<PanelIconFile, String>> {
+    let lower = icon.to_ascii_lowercase();
+    let mime = if lower.ends_with(".svg") {
+        "image/svg+xml"
+    } else if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".ico") {
+        "image/x-icon"
+    } else {
+        return None;
+    };
+    let escapes = icon.starts_with('/')
+        || icon.contains('\\')
+        || icon.contains(':')
+        || icon.split('/').any(|segment| segment == "..");
+    if escapes {
+        return Some(Err(format!(
+            "Panel icon must be a forward-slash path inside the extension folder: {icon}"
+        )));
+    }
+    Some(Ok(PanelIconFile {
+        relative: icon.trim_start_matches("./").to_owned(),
+        mime,
+    }))
 }
 
 /// How to launch the extension process, when it has one. Pure-data
@@ -412,10 +462,14 @@ fn parse_panels(
         if !is_valid_id(&id) {
             return Err(invalid(format!("Invalid panel id (want [a-z0-9-]): {id}")));
         }
+        let icon = optional_string(obj, "icon");
+        if let Some(Err(message)) = icon.as_deref().and_then(panel_icon_file) {
+            return Err(invalid(message));
+        }
         panels.push(PanelContribution {
             id,
             title: required_string(obj, "title")?,
-            icon: optional_string(obj, "icon"),
+            icon,
         });
     }
     Ok(panels)
@@ -857,6 +911,38 @@ mod tests {
         // The same manifest without the permission is rejected.
         let bare = text.replace("\"ui:panel\"", "\"notifications\"");
         assert!(matches!(parse_manifest(&bare), Err(ManifestError::Invalid(_))));
+    }
+
+    #[test]
+    fn panel_icon_files_are_told_apart_from_names() {
+        assert_eq!(panel_icon_file("checklist"), None);
+        assert_eq!(panel_icon_file("rocket"), None);
+        assert_eq!(
+            panel_icon_file("./icon.svg"),
+            Some(Ok(PanelIconFile { relative: "icon.svg".to_owned(), mime: "image/svg+xml" }))
+        );
+        assert_eq!(
+            panel_icon_file("assets/Logo.PNG"),
+            Some(Ok(PanelIconFile { relative: "assets/Logo.PNG".to_owned(), mime: "image/png" }))
+        );
+        assert_eq!(panel_icon_file("app.ico").unwrap().unwrap().mime, "image/x-icon");
+        // A file that is not an image is a (bad) name, not a file.
+        assert_eq!(panel_icon_file("main.js"), None);
+    }
+
+    #[test]
+    fn panel_icon_files_must_stay_inside_the_folder() {
+        for escaping in ["../icon.png", "a/../../icon.png", "/etc/icon.svg", "C:/x/icon.ico", "..\\icon.png"] {
+            assert!(matches!(panel_icon_file(escaping), Some(Err(_))), "{escaping}");
+        }
+        let text = r#"{ "name": "linear", "version": "1", "protocolVersion": 1,
+                        "entry": { "command": "node", "args": ["./main.js"] },
+                        "permissions": ["ui:panel"],
+                        "contributes": { "panels": [
+                            { "id": "tasks", "title": "Linear", "icon": "../icon.png" } ] } }"#;
+        assert!(matches!(parse_manifest(text), Err(ManifestError::Invalid(_))));
+        let ok = text.replace("../icon.png", "./icon.png");
+        assert_eq!(parse_manifest(&ok).unwrap().panels[0].icon.as_deref(), Some("./icon.png"));
     }
 
     #[test]

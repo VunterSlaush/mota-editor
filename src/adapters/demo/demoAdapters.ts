@@ -834,7 +834,18 @@ export class DemoExtensionHost implements ExtensionHostPort {
       status: "enabled",
       commands: [],
       mcpServers: [],
-      panels: [{ id: "tasks", title: "Tracker", icon: "checklist" }],
+      // An icon file, as the Rust host would hand it over: a data URL the
+      // activity bar masks in its own colours (ADR-0021).
+      panels: [
+        {
+          id: "tasks",
+          title: "Tracker",
+          icon: "./icon.svg",
+          iconData: `data:image/svg+xml;base64,${btoa(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#000" stroke-width="2.5"/><path d="M8 12.5l2.5 2.5L16 9.5" fill="none" stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+          )}`,
+        },
+      ],
       events: [],
     },
     {

@@ -16,6 +16,7 @@ import {
   Rocket,
   TreeStructure,
 } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 import type { ExtensionPanelRef } from "../../core/entities/extension";
 
 export type SidebarView =
@@ -52,8 +53,9 @@ const ITEMS: readonly { view: SidebarView; Icon: Icon; title: string }[] = [
 /** Every builtin view, for the tabs that offer all of them. */
 export const ALL_SIDEBAR_VIEWS: readonly SidebarView[] = ITEMS.map((item) => item.view);
 
-/** Manifests name an icon from this closed set — extensions cannot draw
- *  arbitrary pixels in the activity bar (ADR-0013). */
+/** Manifests name an icon from this closed set, or ship an image file
+ *  (ADR-0021) that the host draws as a silhouette in the bar's own
+ *  colours — see `panelIcon`. */
 const PANEL_ICONS: Readonly<Record<string, Icon>> = {
   checklist: ListChecks,
   kanban: Kanban,
@@ -64,6 +66,22 @@ const PANEL_ICONS: Readonly<Record<string, Icon>> = {
   funnel: Funnel,
   lightning: Lightning,
 };
+
+/** An extension's own icon file, drawn like the built-in glyphs: the
+ *  image is a CSS mask filled with `currentColor`, so it dims, lights on
+ *  hover, and takes the accent when active exactly as its neighbours do.
+ *  The cost is that a coloured logo becomes its silhouette — the same
+ *  trade VS Code makes in its activity bar. */
+function panelIcon(dataUrl: string): ReactNode {
+  const mask = `url("${dataUrl}")`;
+  return (
+    <span
+      className="activity-bar__image"
+      style={{ maskImage: mask, WebkitMaskImage: mask }}
+      aria-hidden="true"
+    />
+  );
+}
 
 /**
  * UI — VS-style activity bar: icons that switch (or collapse) the
@@ -78,7 +96,14 @@ export function ActivityBar({
   onSelect,
   onOpenSettings,
 }: Props) {
-  const viewButton = (view: SidebarView, ItemIcon: Icon, title: string) => (
+  const viewButton = (view: SidebarView, ItemIcon: Icon, title: string) =>
+    viewButtonWith(
+      view,
+      title,
+      <ItemIcon size={20} weight={active === view ? "fill" : "regular"} />,
+    );
+
+  const viewButtonWith = (view: SidebarView, title: string, icon: ReactNode) => (
     <button
       type="button"
       key={view}
@@ -89,7 +114,7 @@ export function ActivityBar({
       aria-label={title}
       onClick={() => onSelect(active === view ? null : view)}
     >
-      <ItemIcon size={20} weight={active === view ? "fill" : "regular"} />
+      {icon}
     </button>
   );
 
@@ -99,11 +124,17 @@ export function ActivityBar({
         viewButton(item.view, item.Icon, item.title),
       )}
       {panels.map((panel) =>
-        viewButton(
-          panelSidebarView(panel),
-          PANEL_ICONS[panel.icon ?? ""] ?? PuzzlePiece,
-          panel.title,
-        ),
+        panel.iconData
+          ? viewButtonWith(
+              panelSidebarView(panel),
+              panel.title,
+              panelIcon(panel.iconData),
+            )
+          : viewButton(
+              panelSidebarView(panel),
+              PANEL_ICONS[panel.icon ?? ""] ?? PuzzlePiece,
+              panel.title,
+            ),
       )}
       <button
         type="button"

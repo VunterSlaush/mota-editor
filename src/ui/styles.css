@@ -1958,6 +1958,21 @@ body {
   background: var(--bg-input);
 }
 
+/* An extension's icon file (ADR-0021): the image is the mask, the
+   button's colour is the paint — so it follows dim/hover/active. */
+.activity-bar__image {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  background-color: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
+
 /* ---- History panel ---- */
 .history {
   flex: 1;
