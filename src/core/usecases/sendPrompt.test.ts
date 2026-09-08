@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { commandConfigKey } from "../entities/commandConfig";
+import type { CommandSequence } from "../entities/commandSequence";
 import { newProject } from "../entities/project";
 import type { SubagentInfo } from "../entities/subagent";
 import { tabStatus } from "../entities/tabStatus";
@@ -18,6 +19,7 @@ import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort"
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { ApplyCommandConfig } from "./applyCommandConfig";
+import { CancelTurn } from "./cancelTurn";
 import { ListSubagents } from "./listSubagents";
 import { FOLLOWUP_SETTLE_MS, FOLLOWUP_TOOL_GRACE_MS, SendPrompt } from "./sendPrompt";
 import { SelectEffort, SelectMode, SelectModel, SelectPermission } from "./switchTab";
@@ -34,11 +36,19 @@ class FakeAgentGateway implements AgentGateway {
   /** The last turn's event sink, kept so a test can deliver a late event. */
   lastOnEvent: ((event: AgentTurnEvent) => void) | null = null;
 
+  /** Clear the failure after one turn, so a test can watch what runs
+   *  next rather than only the failure itself. */
+  failOnce = false;
+
   async startTurn(
     request: AgentTurnRequest,
     onEvent: (event: AgentTurnEvent) => void,
   ): Promise<void> {
-    if (this.failWith) throw new Error(this.failWith);
+    const failure = this.failWith;
+    if (failure) {
+      if (this.failOnce) this.failWith = null;
+      throw new Error(failure);
+    }
     this.requests.push(request);
     this.lastOnEvent = onEvent;
     this.script.forEach(onEvent);
@@ -1645,6 +1655,254 @@ describe("/clear", () => {
 
     expect(transcripts.saved.at(-1)?.messages.some((m) => m.text === "Hello")).toBe(true);
     expect(store.getState().tabs[0].messages.some((m) => m.text === "Hello")).toBe(false);
+  });
+});
+
+describe("SendPrompt — command sequences", () => {
+  const SHIP: CommandSequence = {
+    id: "q1",
+    name: "ship",
+    description: "Review, test, commit",
+    steps: ["/review $ARGUMENTS", "write tests", "/commit-push"],
+  };
+
+  /** Give the tab a sequence to invoke. */
+  const define = (store: Store, ...sequences: CommandSequence[]) =>
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandSequences: sequences },
+    });
+
+  it("sends the first step and queues the rest", async () => {
+    const { store, gateway, useCase } = setup(); // no completion → stays busy
+    define(store, SHIP);
+
+    await useCase.execute("t1", "/ship");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["/review"]);
+    expect(tabOf(store).queued.map((q) => q.prompt)).toEqual([
+      "write tests",
+      "/commit-push",
+    ]);
+  });
+
+  it("says which sequence is running, above the first step", async () => {
+    // The typed /ship never becomes a user message — without this the
+    // transcript would open on step one with nothing explaining it.
+    const { store, useCase } = setup();
+    define(store, SHIP);
+
+    await useCase.execute("t1", "/ship");
+
+    const [first] = tabOf(store).messages;
+    expect(first.role).toBe("info");
+    expect(first.text).toContain("/ship");
+    expect(first.text).toContain("3 steps");
+  });
+
+  it("runs every step in order as the turns complete", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    define(store, SHIP);
+
+    await useCase.execute("t1", "/ship");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual([
+      "/review",
+      "write tests",
+      "/commit-push",
+    ]);
+    expect(tabOf(store).queued).toHaveLength(0);
+  });
+
+  it("puts the steps ahead of a prompt queued before the sequence", async () => {
+    // /ship goes into the queue while a turn runs, then `foo` behind it.
+    // At drain time the sequence expands — appending its remaining steps
+    // would run `foo` in the middle of the workflow.
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    define(store, SHIP);
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: true });
+    await useCase.execute("t1", "/ship");
+    await useCase.execute("t1", "foo");
+
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: false });
+    await useCase.execute("t1", "live prompt");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual([
+      "live prompt",
+      "/review",
+      "write tests",
+      "/commit-push",
+      "foo",
+    ]);
+  });
+
+  it("substitutes the arguments into every step", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    define(store, SHIP);
+
+    await useCase.execute("t1", "/ship the auth fix");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual([
+      "/review the auth fix",
+      "write tests\n\nthe auth fix",
+      "/commit-push\n\nthe auth fix",
+    ]);
+  });
+
+  it("applies no command config for the sequence's own name", async () => {
+    // /ship never starts a turn, so a config on it could only switch the
+    // tab — and a model or effort change respawns the session.
+    const { store, useCase } = setup();
+    define(store, { ...SHIP, steps: ["do the thing"] });
+    store.dispatch({
+      type: "settings/changed",
+      patch: {
+        commandConfigs: { [commandConfigKey("claude", "/ship")]: { mode: "plan" } },
+      },
+    });
+
+    await useCase.execute("t1", "/ship");
+
+    expect(tabOf(store).project.mode).toBe(DEFAULTS.mode);
+  });
+
+  it("beats an extension command of the same name", async () => {
+    const { store, gateway, useCase } = setup();
+    define(store, { ...SHIP, steps: ["step one"] });
+    store.dispatch({
+      type: "extensions/loaded",
+      extensions: [
+        {
+          id: "shipper",
+          displayName: "Shipper",
+          version: "1.0.0",
+          description: "",
+          origin: "user",
+          path: "/ext/shipper",
+          permissions: [],
+          status: "enabled",
+          commands: [
+            { name: "ship", description: "", kind: "prompt", template: "the extension" },
+          ],
+          mcpServers: [],
+          panels: [],
+          events: [],
+        },
+      ],
+    });
+
+    await useCase.execute("t1", "/ship");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["step one"]);
+  });
+
+  it("keeps its steps when invoked into a parked plan", async () => {
+    // Declining the plan reaches stopTurn, which empties the queue — so
+    // the steps have to be queued after that, not before.
+    const { store, gateway, useCase } = setup([PLAN_APPROVAL]);
+    define(store, SHIP);
+    await useCase.execute("t1", "plan it");
+
+    gateway.script = [];
+    await useCase.execute("t1", "/ship");
+
+    expect(gateway.requests.at(-1)?.prompt).toBe("/review");
+    expect(tabOf(store).queued.map((q) => q.prompt)).toEqual([
+      "write tests",
+      "/commit-push",
+    ]);
+  });
+
+  it("runs the next step after one fails", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    define(store, { ...SHIP, steps: ["first", "second"] });
+    gateway.failWith = "spawn ENOENT";
+    gateway.failOnce = true;
+
+    await useCase.execute("t1", "/ship");
+    await flush();
+
+    expect(tabOf(store).messages.some((m) => m.role === "error")).toBe(true);
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["second"]);
+  });
+
+  it("runs the next step after a /clear step", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    define(store, { ...SHIP, steps: ["/clear", "start over"] });
+
+    await useCase.execute("t1", "/ship");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["start over"]);
+  });
+
+  it("Stop discards the steps that have not run", async () => {
+    const { store, gateway, useCase } = setup();
+    define(store, SHIP);
+    await useCase.execute("t1", "/ship");
+
+    await new CancelTurn(store, gateway).execute("t1");
+
+    expect(tabOf(store).queued).toHaveLength(0);
+    expect(tabOf(store).messages.at(-1)?.text).toContain("Discarded 2 queued messages");
+  });
+
+  it("leaves an ordinary prompt alone when no sequence claims it", async () => {
+    const { store, gateway, useCase } = setup();
+    define(store, SHIP);
+
+    await useCase.execute("t1", "/review src");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["/review src"]);
+    expect(tabOf(store).queued).toHaveLength(0);
+  });
+});
+
+describe("SendPrompt — the queue drains after a turn that never started", () => {
+  /** Something waiting behind the turn that is about to go wrong. */
+  const queueBehind = async (store: Store, useCase: SendPrompt, prompt: string) => {
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: true });
+    await useCase.execute("t1", prompt);
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: false });
+  };
+
+  it("delivers the next prompt after /clear, which starts no turn", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    await queueBehind(store, useCase, "afterwards");
+
+    await useCase.execute("t1", "/clear");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["afterwards"]);
+  });
+
+  it("delivers the next prompt after a delegated command with no sub-agent", async () => {
+    const { store, gateway, agentCatalog, useCase } = setup([
+      { kind: "completed", isError: false },
+    ]);
+    agentCatalog.discovered = [];
+    delegate(store, "/commit-push", "mota-commit-push");
+    await queueBehind(store, useCase, "afterwards");
+
+    await useCase.execute("t1", "/commit-push");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["afterwards"]);
+  });
+
+  it("delivers the next prompt after the agent refuses to start", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    gateway.failWith = "spawn ENOENT";
+    gateway.failOnce = true;
+    await queueBehind(store, useCase, "afterwards");
+
+    await useCase.execute("t1", "hello?");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["afterwards"]);
   });
 });
 

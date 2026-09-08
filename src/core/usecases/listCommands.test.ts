@@ -1,5 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
 import type { CommandInfo } from "../entities/command";
+import type { CommandSequence } from "../entities/commandSequence";
 import { newProject } from "../entities/project";
 import type { CommandCatalog } from "../ports/commandCatalog";
 import { defaultSettings, projectDefaults } from "../state/appState";
@@ -28,6 +29,13 @@ function setup() {
 
 const DEFAULTS = projectDefaults(defaultSettings);
 
+const SHIP: CommandSequence = {
+  id: "q1",
+  name: "ship",
+  description: "Review, test, commit",
+  steps: ["/review", "write tests", "/commit-push"],
+};
+
 describe("ListCommands", () => {
   it("merges built-ins with discovered custom commands, sorted by name", async () => {
     const { catalog, useCase } = setup();
@@ -50,6 +58,49 @@ describe("ListCommands", () => {
     const init = commands.filter((c) => c.name === "/init");
     expect(init).toHaveLength(1);
     expect(init[0].source).toBe("builtin");
+  });
+
+  it("lists the user's command sequences alongside the built-ins", async () => {
+    const { store, useCase } = setup();
+    store.dispatch({ type: "settings/changed", patch: { commandSequences: [SHIP] } });
+
+    const commands = await useCase.execute("t1");
+
+    expect(commands).toContainEqual({
+      name: "/ship",
+      description: "Review, test, commit",
+      source: "sequence",
+    });
+  });
+
+  it("a sequence shadows the built-in of the same name", async () => {
+    // Deliberate: naming a sequence /review is the user saying that name
+    // means their list now.
+    const { store, useCase } = setup();
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandSequences: [{ ...SHIP, name: "review" }] },
+    });
+
+    const review = (await useCase.execute("t1")).filter((c) => c.name === "/review");
+
+    expect(review).toHaveLength(1);
+    expect(review[0].source).toBe("sequence");
+  });
+
+  it("never lists a sequence that took one of Mota's own names", async () => {
+    // /clear is handled before the sequence branch ever runs, so listing
+    // it would advertise a command that does something else entirely.
+    const { store, useCase } = setup();
+    store.dispatch({
+      type: "settings/changed",
+      patch: { commandSequences: [{ ...SHIP, name: "clear" }] },
+    });
+
+    const clear = (await useCase.execute("t1")).filter((c) => c.name === "/clear");
+
+    expect(clear).toHaveLength(1);
+    expect(clear[0].source).toBe("builtin");
   });
 
   it("falls back to built-ins when discovery fails", async () => {

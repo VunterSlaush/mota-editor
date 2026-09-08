@@ -10,6 +10,7 @@ import {
 } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
+import type { CommandSequence } from "../entities/commandSequence";
 import type { ExtensionDescriptor, ExtensionStatus } from "../entities/extension";
 import type { GitActionResult, GitVerb } from "../entities/gitAction";
 import type { McpServerConfig } from "../entities/mcpServer";
@@ -182,6 +183,9 @@ export interface AppSettings {
   readonly defaultEffort: Readonly<Partial<Record<ProviderId, string>>>;
   /** Settings a slash command applies to its tab, by `commandConfigKey`. */
   readonly commandConfigs: Readonly<Record<string, CommandConfig>>;
+  /** Named prompt lists a single command runs back to back. Global: a
+   *  workflow is the user's, not the provider's. */
+  readonly commandSequences: readonly CommandSequence[];
   /** MCP servers Mota hands to agents, per provider enablement. */
   readonly mcpServers: readonly McpServerConfig[];
   /** Fraction of the context window at which sessions auto-compact. */
@@ -227,6 +231,7 @@ export const defaultSettings: AppSettings = {
   defaultModel: {},
   defaultEffort: {},
   commandConfigs: {},
+  commandSequences: [],
   mcpServers: [],
   autoCompactThreshold: DEFAULT_AUTO_COMPACT_THRESHOLD,
   autoCompact: "compact",
@@ -381,6 +386,12 @@ export type Action =
       tabId: string;
       prompt: string;
       attachments: readonly string[];
+    }
+  /** The steps a command sequence expanded to, minus the one being sent. */
+  | {
+      type: "chat/promptsQueuedNext";
+      tabId: string;
+      prompts: readonly QueuedPrompt[];
     }
   | { type: "chat/queueShifted"; tabId: string }
   | { type: "chat/queueRemoved"; tabId: string; index: number }
@@ -923,6 +934,16 @@ export function reduce(state: AppState, action: Action): AppState {
           ...tab.queued,
           { prompt: action.prompt, attachments: action.attachments },
         ],
+      }));
+
+    case "chat/promptsQueuedNext":
+      // At the FRONT: these steps belong to the command being sent now,
+      // and anything already waiting was queued to follow it, not to
+      // interrupt it.
+      if (action.prompts.length === 0) return state;
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        queued: [...action.prompts, ...tab.queued],
       }));
 
     case "chat/queueShifted":

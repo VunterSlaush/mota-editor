@@ -4,6 +4,7 @@ import type {
   PermissionPolicy,
 } from "../entities/agentSettings";
 import type { CommandConfig } from "../entities/commandConfig";
+import type { CommandSequence } from "../entities/commandSequence";
 import type { McpServerConfig, ProjectMcpOverrides } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
@@ -73,6 +74,9 @@ export interface PersistedSettings {
   readonly defaultModel?: Readonly<Partial<Record<ProviderId, string>>>;
   readonly defaultEffort?: Readonly<Partial<Record<ProviderId, string>>>;
   readonly commandConfigs?: Readonly<Record<string, CommandConfig>>;
+  /** Validated at restore rather than trusted: a hand-edited or older
+   *  row that cannot run would sit in the palette doing nothing. */
+  readonly commandSequences?: readonly CommandSequence[];
   readonly mcpServers?: readonly McpServerConfig[];
   readonly autoCompactThreshold?: number;
   readonly autoCompact?: AutoCompactPolicy;

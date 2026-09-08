@@ -3,6 +3,7 @@ import {
   DEFAULT_MODE,
   DEFAULT_PERMISSION,
 } from "../entities/agentSettings";
+import { restoredSequences } from "../entities/commandSequence";
 import { normalizedTabLabel, projectNameFromPath } from "../entities/project";
 import { restoredBoundaryPresets, restoredSubtaskScope } from "../entities/subtask";
 import { isTabColorId } from "../entities/tabColor";
@@ -93,6 +94,8 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     defaultModel: persisted?.defaultModel ?? defaultSettings.defaultModel,
     defaultEffort: persisted?.defaultEffort ?? defaultSettings.defaultEffort,
     commandConfigs: persisted?.commandConfigs ?? defaultSettings.commandConfigs,
+    commandSequences:
+      restoredSequences(persisted?.commandSequences) ?? defaultSettings.commandSequences,
     mcpServers: persisted?.mcpServers ?? defaultSettings.mcpServers,
     autoCompactThreshold: clampAutoCompactThreshold(
       persisted?.autoCompactThreshold ?? defaultSettings.autoCompactThreshold,

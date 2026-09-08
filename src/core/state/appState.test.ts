@@ -334,6 +334,51 @@ describe("appState reducer", () => {
   });
 });
 
+describe("chat/promptsQueuedNext", () => {
+  const queue = (state: AppState, prompt: string) =>
+    reduce(state, {
+      type: "chat/promptQueued",
+      tabId: "t1",
+      prompt,
+      attachments: [],
+    });
+
+  it("puts the steps ahead of what was already waiting", () => {
+    // Queue a sequence while the tab is busy, then queue something else:
+    // the sequence expands at drain time, and appending its remaining
+    // steps would run the later prompt in the middle of the workflow.
+    let state = queue(open(initialState, "t1", "/a"), "afterwards");
+
+    state = reduce(state, {
+      type: "chat/promptsQueuedNext",
+      tabId: "t1",
+      prompts: [
+        { prompt: "step two", attachments: [] },
+        { prompt: "step three", attachments: [] },
+      ],
+    });
+
+    expect(state.tabs[0].queued.map((q) => q.prompt)).toEqual([
+      "step two",
+      "step three",
+      "afterwards",
+    ]);
+  });
+
+  it("leaves the queue untouched when there are no steps to add", () => {
+    const state = queue(open(initialState, "t1", "/a"), "waiting");
+    const before = state.tabs[0].queued;
+
+    const after = reduce(state, {
+      type: "chat/promptsQueuedNext",
+      tabId: "t1",
+      prompts: [],
+    });
+
+    expect(after.tabs[0].queued).toBe(before);
+  });
+});
+
 describe("chat/turnMetaCompleted", () => {
   const meta = { sentAt: 1000, mode: "agent", permission: "manual" };
 

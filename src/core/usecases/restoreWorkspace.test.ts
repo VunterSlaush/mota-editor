@@ -47,6 +47,14 @@ const CUSTOM_SETTINGS: AppSettings = {
   defaultModel: { claude: "opus", codex: "gpt-5.5" },
   defaultEffort: { claude: "high" },
   commandConfigs: { "claude:/review": { mode: "plan", model: "haiku" } },
+  commandSequences: [
+    {
+      id: "q1",
+      name: "ship",
+      description: "Review, test, commit",
+      steps: ["/review $ARGUMENTS", "write tests", "/commit-push"],
+    },
+  ],
   mcpServers: [
     {
       id: "s1",
@@ -127,6 +135,21 @@ describe("RestoreWorkspace settings", () => {
     expect(state.settings.worktrees.inheritFromSourceTab).toBe(
       defaultSettings.worktrees.inheritFromSourceTab,
     );
+  });
+
+  it("drops a command sequence the file carries that could never run", async () => {
+    // Hand-edited, or written by a build whose row was still half-typed:
+    // a nameless sequence would sit in the palette answering nothing.
+    const state = await restore({
+      ...EMPTY,
+      settings: {
+        commandSequences: [
+          { id: "q1", name: "", description: "", steps: ["go"] },
+          CUSTOM_SETTINGS.commandSequences[0],
+        ],
+      },
+    });
+    expect(state.settings.commandSequences).toEqual(CUSTOM_SETTINGS.commandSequences);
   });
 
   it("keeps the provisioning list the file carries", async () => {

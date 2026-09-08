@@ -53,6 +53,29 @@ describe("paletteCommands", () => {
     expect(merged).toContain("/start-task");
   });
 
+  it("keeps command sequences, which no agent knows about either", () => {
+    // The regression this pins: a sequence tagged "builtin" to sit with
+    // Mota's own would be dropped by the filter for stale builtins the
+    // moment an ACP session reported the CLI's real command list.
+    const withSequence = [
+      ...DISCOVERED,
+      { name: "/ship", description: "3 steps", source: "sequence" as const },
+    ];
+    expect(names(paletteCommands(FROM_AGENT, withSequence))).toContain("/ship");
+  });
+
+  it("lets a sequence supersede the agent's own command of that name", () => {
+    const shadowing = [
+      ...DISCOVERED,
+      { name: "/review", description: "3 steps", source: "sequence" as const },
+    ];
+    const review = paletteCommands(FROM_AGENT, shadowing).filter(
+      (c) => c.name === "/review",
+    );
+    expect(review).toHaveLength(1);
+    expect(review[0].source).toBe("sequence");
+  });
+
   it("lets the live list supersede the static builtins", () => {
     const merged = paletteCommands(FROM_AGENT, DISCOVERED);
     // /init is in the static table but not in this agent's answer, so it

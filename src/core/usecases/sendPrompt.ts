@@ -1,6 +1,7 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
 import { CLEAR_COMMAND, dedupeCommands } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
+import { sequenceSteps } from "../entities/commandSequence";
 import {
   CREATE_EXTENSION_COMMAND,
   createExtensionPrompt,
@@ -200,6 +201,48 @@ export class SendPrompt {
     // instead of racing the turn still open on the agent's side.
     await declineParkedPlan(this.store, this.agentGateway, tabId);
 
+    const command = leadingCommand(trimmed);
+
+    // A command sequence is the user's own workflow under one name: step
+    // one is sent now, the rest go to the FRONT of the queue and fire as
+    // each turn completes. The token itself never reaches an agent.
+    //
+    // Placed here on both sides deliberately. After declining the plan,
+    // because that reaches `stopTurn` and empties the queue these steps
+    // are about to go into. Before `applyCommandConfig`, because the
+    // sequence's own name starts no turn, and looking up a config for it
+    // could respawn the session for a token nothing is ever sent under.
+    const steps = command
+      ? sequenceSteps(
+          this.store.getState().settings.commandSequences,
+          command,
+          argumentsAfter(command, trimmed),
+        )
+      : [];
+    if (steps.length > 0) {
+      // Before the recursion, so it reads above step one — which is all
+      // the transcript will otherwise show for a command nobody typed.
+      this.store.dispatch({
+        type: "chat/messageAppended",
+        tabId,
+        message: infoMessage(
+          `Running ${command} — ${steps.length} step${steps.length === 1 ? "" : "s"}.`,
+        ),
+      });
+      if (steps.length > 1) {
+        this.store.dispatch({
+          type: "chat/promptsQueuedNext",
+          tabId,
+          prompts: steps.slice(1).map((prompt) => ({ prompt, attachments: [] })),
+        });
+      }
+      // Step one goes back through the front door: per-command settings,
+      // sub-agent delegation and extension commands all keep working
+      // inside a sequence because of this line. It is exactly one level
+      // deep — `sequenceSteps` never returns a step naming a sequence.
+      return this.execute(tabId, steps[0], attachments);
+    }
+
     // A slash command may carry its own mode/permission/effort. Apply it
     // first, then read the tab back: the request below must describe the
     // tab as the command leaves it, not as it was when the user typed.
@@ -217,7 +260,6 @@ export class SendPrompt {
     // it reflects what the command switched the tab to). The outcome —
     // duration, token delta, stop reason — is patched on at completion.
     const sentAt = Date.now();
-    const command = leadingCommand(trimmed);
 
     // Mota's own, handled here and never sent on. The notice goes in
     // AFTER the reset for the same reason the auto-compact one does:
@@ -230,6 +272,10 @@ export class SendPrompt {
         tabId,
         message: infoMessage("New chat. The previous one is saved in History."),
       });
+      // `chat/cleared` keeps the queue on purpose — clearing the screen
+      // is not a decision to drop what was typed. But no completion is
+      // coming to release it, so it drains here or not at all.
+      this.drainQueue(tabId);
       return;
     }
 
@@ -241,7 +287,7 @@ export class SendPrompt {
       ? findExtensionCommand(this.store.getState().extensions, provider, command)
       : null;
     if (extensionHit && this.extensionCommands) {
-      const args = trimmed.slice(command?.length ?? 0).trim();
+      const args = argumentsAfter(command, trimmed);
       if (extensionHit.command.kind === "programmatic") {
         this.store.dispatch({
           type: "chat/messageAppended",
@@ -257,7 +303,7 @@ export class SendPrompt {
         return;
       }
     }
-    const commandArgs = trimmed.slice(command?.length ?? 0).trim();
+    const commandArgs = argumentsAfter(command, trimmed);
     const outgoing =
       command === CREATE_EXTENSION_COMMAND
         ? createExtensionPrompt(commandArgs)
@@ -306,6 +352,7 @@ export class SendPrompt {
             `Commands, or add a definition for it.`,
         ),
       });
+      this.drainQueue(tabId); // nothing was started, so nothing will drain it
       return;
     }
 
@@ -404,6 +451,9 @@ export class SendPrompt {
       message: errorMessage(describeFailure(descriptor.displayName, failure)),
     });
     this.store.dispatch({ type: "chat/busyChanged", tabId, busy: false });
+    // Same reason: a failure is not a completion, so nothing downstream
+    // will ever come back for what is still queued.
+    this.drainQueue(tabId);
   }
 
   /** Start the turn; the failure, or null when it went. */
@@ -1060,6 +1110,11 @@ function effectiveText(prompt: string, attachments: readonly string[]): string |
   if (trimmed.length > 0) return trimmed;
   if (attachments.length > 0) return "Please review the attached files.";
   return null;
+}
+
+/** What the user typed after the leading command, if anything. */
+function argumentsAfter(command: string | null, prompt: string): string {
+  return prompt.slice(command?.length ?? 0).trim();
 }
 
 /**

@@ -16,8 +16,9 @@ import {
  * Entities layer — a slash command the user can send to an agent.
  */
 /** Where a command comes from: the CLI itself, the project's command
- *  folder, the user's home command folder, or an installed extension. */
-export type CommandSource = "builtin" | "project" | "user" | "extension";
+ *  folder, the user's home command folder, an installed extension, or a
+ *  command sequence the user named in settings. */
+export type CommandSource = "builtin" | "project" | "user" | "extension" | "sequence";
 
 export interface CommandInfo {
   readonly name: string;
@@ -162,6 +163,12 @@ export function paletteCommands(
   const own = new Set(MOTA_COMMANDS.map((c) => c.name));
   return dedupeCommands([
     ...MOTA_COMMANDS,
+    // A sequence is the user saying this name means their list now, so
+    // it beats the agent's own command of the same name. It is listed
+    // here, ahead of them, rather than tagged "builtin" to ride along
+    // with Mota's own: the filter below drops every builtin the agent
+    // did not advertise, and a sequence would vanish with them.
+    ...discovered.filter((c) => c.source === "sequence" && !own.has(c.name)),
     ...agentCommands,
     // Whatever is left is something the agent could not have advertised:
     // extension contributions and command files. Its own stale builtins
