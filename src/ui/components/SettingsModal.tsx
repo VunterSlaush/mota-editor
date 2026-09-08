@@ -1,5 +1,6 @@
 import {
   ChartBar,
+  FlowArrow,
   Gauge,
   GitFork,
   Palette,
@@ -25,6 +26,7 @@ import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
 import type { SuggestedPresets } from "../../core/usecases/subtasks";
 import { APP_VERSION } from "../version";
+import { SettingsCommandSequences } from "./SettingsCommandSequences";
 import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsExtensions } from "./SettingsExtensions";
@@ -40,6 +42,7 @@ import { SettingsWorktrees } from "./SettingsWorktrees";
 export type SettingsSection =
   | "defaults"
   | "commands"
+  | "sequences"
   | "tools"
   | "extensions"
   | "providers"
@@ -94,6 +97,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
   [
     { id: "defaults", label: "Defaults", Icon: Sliders },
     { id: "commands", label: "Commands", Icon: TerminalWindow },
+    { id: "sequences", label: "Command sequences", Icon: FlowArrow },
     { id: "tools", label: "Tools", Icon: Toolbox },
     { id: "extensions", label: "Extensions", Icon: PuzzlePiece },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
@@ -187,6 +191,13 @@ export function SettingsModal({
               loadCommands={loadCommands}
               loadSubagents={loadSubagents}
               loadInsights={loadInsights}
+            />
+          )}
+          {section === "sequences" && (
+            <SettingsCommandSequences
+              settings={settings}
+              onChange={onChange}
+              newId={newId}
             />
           )}
           {section === "tools" && (

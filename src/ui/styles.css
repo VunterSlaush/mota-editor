@@ -2542,6 +2542,31 @@ body {
   cursor: default;
 }
 
+/* ---- Settings → Command sequences ---- */
+/* One step of a sequence. Numbered rather than bulleted: the order is
+   the whole point — step one sends, the rest queue behind it. */
+.sequence-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sequence-step__number {
+  flex: none;
+  width: 1.4em;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-dim);
+}
+
+/* The step list already ends in one; without this it sits as far from
+   the steps as the section's own "Add a sequence" button does. */
+.sequence-step + .tool-add {
+  margin-top: 6px;
+  align-self: flex-start;
+}
+
 /* ---- Settings → Extensions ---- */
 .settings-section__actions {
   display: flex;
