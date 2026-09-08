@@ -1906,6 +1906,96 @@ describe("SendPrompt — the queue drains after a turn that never started", () =
   });
 });
 
+describe("SendPrompt — auto-compact and the prompt queue", () => {
+  /** A tab whose context is over the ceiling, with something waiting. */
+  const setupFullContext = (policy: "compact" | "newChat") => {
+    const harness = setup([{ kind: "completed", isError: false }]);
+    harness.store.dispatch({
+      type: "settings/changed",
+      patch: { autoCompact: policy, autoCompactThreshold: 0.8 },
+    });
+    harness.store.dispatch({
+      type: "tab/usageUpdated",
+      tabId: "t1",
+      used: 95,
+      size: 100,
+    });
+    harness.store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: true });
+    return harness;
+  };
+
+  it("does not start a second turn when auto-compact claims the completed one", async () => {
+    const { store, gateway, useCase } = setupFullContext("compact");
+    await useCase.execute("t1", "queued after");
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: false });
+
+    await useCase.execute("t1", "first");
+
+    // Still waiting: the compaction turn owns the tab now. `execute`
+    // suspends at its first await long before `busy` goes up, so a drain
+    // here sees an idle tab and starts a SECOND concurrent turn — which
+    // the stale-turn recovery then cancels, at random, one of the two.
+    // The compaction turn owns the tab. `execute` suspends at its first
+    // await long before `busy` goes up, so draining here sees an idle
+    // tab and starts a SECOND concurrent turn — which is exactly the
+    // queued prompt going out alongside the compaction it should have
+    // been waiting for.
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["first", "/compact"]);
+
+    // And it is not stranded: the compaction turn's own completion
+    // comes back for it.
+    await flush();
+    expect(gateway.requests.map((r) => r.prompt)).toContain("queued after");
+  });
+
+  it("does not send a queued prompt into a session about to be ended", async () => {
+    // Worse than the compact policy: the queued turn would be sent to an
+    // agent that is being retired for the new chat.
+    const { store, gateway, useCase } = setupFullContext("newChat");
+    await useCase.execute("t1", "queued after");
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: false });
+
+    await useCase.execute("t1", "first");
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["first"]);
+
+    // It goes out once the new chat is up, and lands IN it: a turn that
+    // raced the reset would have its own prompt wiped off the screen by
+    // the clear, leaving an agent working on a message nobody can see.
+    await flush();
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["first", "queued after"]);
+    expect(tabOf(store).messages.map((m) => `${m.role}:${m.text}`)).toContain(
+      "user:queued after",
+    );
+  });
+
+  it("still drains the queue when auto-compact only asks", async () => {
+    // "ask" spends nothing and starts no turn, so the queue is free.
+    const { store, gateway, useCase } = setupFullContext("compact");
+    store.dispatch({ type: "settings/changed", patch: { autoCompact: "ask" } });
+    await useCase.execute("t1", "queued after");
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: false });
+
+    await useCase.execute("t1", "first");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["first", "queued after"]);
+    expect(tabOf(store).contextFullPercent).toBe(95);
+  });
+
+  it("still drains the queue when the context is nowhere near full", async () => {
+    const { store, gateway, useCase } = setup([{ kind: "completed", isError: false }]);
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: true });
+    await useCase.execute("t1", "queued after");
+    store.dispatch({ type: "chat/busyChanged", tabId: "t1", busy: false });
+
+    await useCase.execute("t1", "first");
+    await flush();
+
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["first", "queued after"]);
+  });
+});
+
 describe("SendPrompt — handing a command to a sub-agent", () => {
   it("sends the typed text plus the agent, and keeps the typed text in the transcript", async () => {
     const { store, gateway, useCase } = setup();

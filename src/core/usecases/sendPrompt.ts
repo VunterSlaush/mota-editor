@@ -1,4 +1,9 @@
 import { modeFromAgentModeId } from "../entities/agentSettings";
+import {
+  type AutoCompactDecision,
+  autoCompactDecision,
+  claimsTheTurn,
+} from "../entities/autoCompact";
 import { CLEAR_COMMAND, dedupeCommands } from "../entities/command";
 import { leadingCommand } from "../entities/commandConfig";
 import { sequenceSteps } from "../entities/commandSequence";
@@ -805,8 +810,15 @@ export class SendPrompt {
         this.completeTurnMeta(tabId, event.stopReason);
         void persistWorkspace(this.store.getState(), this.workspaceStore);
         void this.saveTranscript(tabId);
-        this.autoCompactIfNeeded(tabId);
-        this.drainQueue(tabId);
+        // Asked before acted on: compacting and starting a new chat
+        // both take the tab for themselves, and `execute` suspends at
+        // its first await long before `busy` goes up. Draining anyway
+        // would start a second, concurrent turn — and `isStaleTurnFailure`
+        // would then cancel one of the two at random. The queue is not
+        // stranded: that turn's own completion comes back here for it.
+        const compaction = this.compactionDecision(tabId);
+        this.applyAutoCompact(tabId, compaction);
+        if (!claimsTheTurn(compaction)) this.drainQueue(tabId);
         break;
       }
     }
@@ -941,75 +953,72 @@ export class SendPrompt {
     this.store.dispatch({ type: "tab/contextFullChanged", tabId, percent: undefined });
   }
 
-  /**
-   * Act on a nearly-full context window, per the user's policy.
-   *
-   * Compacting is not the win it looks like: measured on real logs it
-   * costs about what it saves. What actually drives the bill is
-   * conversation LENGTH — every turn re-sends the whole conversation, so
-   * a late turn costs several times an early one. Only a new chat resets
-   * that, which is why it is offered as an automatic policy and not just
-   * a button. It is also the one option that loses something (the agent
-   * forgets), so "ask" hands the choice back rather than spending — or
-   * forgetting — on the user's behalf.
-   *
-   * Guarded against loops: never triggered by the compact turn itself.
-   */
-  private autoCompactIfNeeded(tabId: string): void {
+  /** What a nearly-full context window calls for, for the tab as it
+   *  stands right now. The reasoning lives in `entities/autoCompact`. */
+  private compactionDecision(tabId: string): AutoCompactDecision {
     const state = this.store.getState();
     const tab = tabById(state, tabId);
-    if (!tab?.usage) return;
-    const policy = state.settings.autoCompact;
-    if (policy === "off") return;
-    if (tab.usage.used / tab.usage.size < state.settings.autoCompactThreshold) {
-      // Dropped back under the ceiling (a compaction, or a new session):
-      // the question no longer stands.
-      if (tab.contextFullPercent !== undefined) {
+    return tab ? autoCompactDecision(tab, state.settings) : { action: "nothing" };
+  }
+
+  /** Carry out the decision above. */
+  private applyAutoCompact(tabId: string, decision: AutoCompactDecision): void {
+    switch (decision.action) {
+      case "nothing":
+        return;
+
+      case "dismiss":
         this.store.dispatch({
           type: "tab/contextFullChanged",
           tabId,
           percent: undefined,
         });
-      }
-      return;
-    }
+        return;
 
-    const compactCommand = COMPACT_COMMAND[tab.project.provider];
-    const lastUserMessage = [...tab.messages].reverse().find((m) => m.role === "user");
-    if (lastUserMessage?.text === compactCommand) return; // that WAS the compact turn
+      case "ask":
+        this.store.dispatch({
+          type: "tab/contextFullChanged",
+          tabId,
+          percent: decision.percent,
+        });
+        return;
 
-    const percent = Math.round((tab.usage.used / tab.usage.size) * 100);
-    if (policy === "ask") {
-      this.store.dispatch({ type: "tab/contextFullChanged", tabId, percent });
-      return;
-    }
-    if (policy === "newChat") {
-      // Safe because the transcript was already saved above: this clears
-      // the screen, but the conversation is in History either way.
-      //
-      // The notice goes in AFTER the reset, not before — starting the new
-      // chat clears the messages, so anything said first is wiped by the
-      // very action it was explaining. A chat that emptied itself with no
-      // reason given reads as a bug, not as the setting the user chose.
-      void startNewChat(this.store, this.agentGateway, tabId).then(() => {
+      case "newChat":
+        // Safe because the transcript was already saved above: this
+        // clears the screen, but the conversation is in History either
+        // way.
+        //
+        // The notice goes in AFTER the reset, not before — starting the
+        // new chat clears the messages, so anything said first is wiped
+        // by the very action it was explaining. A chat that emptied
+        // itself with no reason given reads as a bug, not as the setting
+        // the user chose.
+        void startNewChat(this.store, this.agentGateway, tabId).then(() => {
+          this.store.dispatch({
+            type: "chat/messageAppended",
+            tabId,
+            message: infoMessage(
+              `The previous chat filled its context (${decision.percent}%) and is saved in History. This one starts fresh.`,
+            ),
+          });
+          // Here rather than at the call site: no turn is coming back
+          // for the queue, and until the new session is up a drain would
+          // send into the one being retired.
+          this.drainQueue(tabId);
+        });
+        return;
+
+      case "compact":
         this.store.dispatch({
           type: "chat/messageAppended",
           tabId,
           message: infoMessage(
-            `The previous chat filled its context (${percent}%) and is saved in History. This one starts fresh.`,
+            `Context ${decision.percent}% full — compacting the conversation automatically.`,
           ),
         });
-      });
-      return;
+        void this.execute(tabId, decision.command);
+        return;
     }
-    this.store.dispatch({
-      type: "chat/messageAppended",
-      tabId,
-      message: infoMessage(
-        `Context ${percent}% full — compacting the conversation automatically.`,
-      ),
-    });
-    void this.execute(tabId, compactCommand);
   }
 
   /**
