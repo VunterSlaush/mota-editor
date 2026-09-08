@@ -177,7 +177,9 @@ pub struct QuestionOptionInfo {
 /// One choice the user can pick when an agent requests permission.
 /// `kind` is a UI hint (`allow_once`, `allow_always`, `reject_once`,
 /// `reject_always`); `option_id` is the agent's opaque id and must be
-/// echoed back verbatim.
+/// echoed back verbatim — except for the one option Mota adds itself
+/// (`acp::with_plan_bypass_option`), which it translates before the
+/// answer reaches the agent.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionOptionInfo {

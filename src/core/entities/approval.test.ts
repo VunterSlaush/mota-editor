@@ -51,6 +51,13 @@ describe("approval entity", () => {
     }
   });
 
+  it("explains the bypass option Mota adds itself, whatever it answers with", () => {
+    expect(permissionOptionHint("mota-plan-bypass:exit-plan-default")).toBe(
+      permissionOptionHint("exit-plan-bypass"),
+    );
+    expect(permissionOptionHint("mota-plan-bypass:implement_plan")).toBeTruthy();
+  });
+
   it("explains Codex's plan card, which shares no id with Claude's", () => {
     expect(permissionOptionHint("implement_plan")).toBeTruthy();
     expect(permissionOptionHint("revise_plan")).toBeTruthy();

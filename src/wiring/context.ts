@@ -304,7 +304,7 @@ export function createAppContext(): AppContext {
     sendPrompt,
     editDraft: new EditDraft(store),
     cancelTurn: new CancelTurn(store, agentGateway),
-    respondPermission: new RespondPermission(store, agentGateway),
+    respondPermission: new RespondPermission(store, agentGateway, workspaceStore),
     respondQuestion: new RespondQuestion(store, agentGateway),
     listCommands: new ListCommands(store, commandCatalog),
     listSubagents,

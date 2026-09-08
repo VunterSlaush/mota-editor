@@ -6,9 +6,20 @@ import type {
   AgentTurnEvent,
   AgentTurnRequest,
 } from "../ports/agentGateway";
+import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
 import { RespondPermission, RespondQuestion } from "./respondPermission";
+
+class FakeWorkspaceStore implements WorkspaceStore {
+  saved: PersistedWorkspace | null = null;
+  async load() {
+    return this.saved;
+  }
+  async save(workspace: PersistedWorkspace) {
+    this.saved = workspace;
+  }
+}
 
 class RecordingGateway implements AgentGateway {
   responses: Array<{ tabId: string; requestId: string; optionId: string }> = [];
@@ -60,13 +71,26 @@ function setup() {
     }),
   });
   const gateway = new RecordingGateway();
-  return { store, gateway, useCase: new RespondPermission(store, gateway) };
+  const workspaceStore = new FakeWorkspaceStore();
+  return {
+    store,
+    gateway,
+    workspaceStore,
+    useCase: new RespondPermission(store, gateway, workspaceStore),
+  };
 }
 
 const DEFAULTS = projectDefaults(defaultSettings);
 
 const PLAN_OPTIONS = [
   { optionId: "acceptEdits", name: "Yes, auto-accept edits", kind: "allow_always" },
+  // Mota's own, which the backend appends to every plan card the agent
+  // did not put a bypass on.
+  {
+    optionId: "mota-plan-bypass:acceptEdits",
+    name: "Yes, and bypass permissions",
+    kind: "allow_always",
+  },
   { optionId: "plan", name: "No, keep planning", kind: "reject_once" },
 ];
 
@@ -85,7 +109,13 @@ function planSetup() {
     }),
   });
   const gateway = new RecordingGateway();
-  return { store, gateway, useCase: new RespondPermission(store, gateway) };
+  const workspaceStore = new FakeWorkspaceStore();
+  return {
+    store,
+    gateway,
+    workspaceStore,
+    useCase: new RespondPermission(store, gateway, workspaceStore),
+  };
 }
 
 const tabOf = (store: Store) => store.getState().tabs[0];
@@ -130,6 +160,29 @@ describe("answering a plan approval", () => {
 
     expect(gateway.cancelled).toEqual([]);
     expect(tabOf(store).busy).toBe(true);
+  });
+
+  it("switches the tab to bypass when the plan is approved with Mota's own bypass", async () => {
+    const { store, gateway, workspaceStore, useCase } = planSetup();
+    const bypass = "mota-plan-bypass:acceptEdits";
+    await useCase.execute("t1", "p1", bypass);
+
+    // The id goes to the gateway untranslated: the backend is what turns
+    // it back into the agent's own option.
+    expect(gateway.responses).toEqual([
+      { tabId: "t1", requestId: "p1", optionId: bypass },
+    ]);
+    expect(tabOf(store).project.permission).toBe("bypass");
+    expect(workspaceStore.saved?.projects[0].permission).toBe("bypass");
+    expect(tabOf(store).busy).toBe(true);
+  });
+
+  it("leaves the tab's permission alone when the agent's own option is picked", async () => {
+    const { store, workspaceStore, useCase } = planSetup();
+    await useCase.execute("t1", "p1", "acceptEdits");
+
+    expect(tabOf(store).project.permission).toBe(DEFAULTS.permission);
+    expect(workspaceStore.saved).toBeNull();
   });
 
   it("leaves an ordinary tool denial alone — only a plan ends the turn", async () => {

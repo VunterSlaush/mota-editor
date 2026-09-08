@@ -1,8 +1,10 @@
-import { isDecline } from "../entities/approval";
+import { isDecline, isPlanBypass } from "../entities/approval";
 import { pendingApproval, pendingQuestion } from "../entities/message";
 import type { AgentGateway } from "../ports/agentGateway";
+import type { WorkspaceStore } from "../ports/workspacePort";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
+import { persistWorkspace } from "./persistWorkspace";
 import { PLAN_DECLINED } from "./planApproval";
 import { stopTurn } from "./stopTurn";
 
@@ -21,6 +23,7 @@ export class RespondPermission {
   constructor(
     private readonly store: Store,
     private readonly agentGateway: AgentGateway,
+    private readonly workspaceStore: WorkspaceStore,
   ) {}
 
   async execute(tabId: string, requestId: string, optionId: string): Promise<void> {
@@ -30,6 +33,7 @@ export class RespondPermission {
 
     this.store.dispatch({ type: "chat/approvalResolved", tabId, requestId, optionId });
     await this.agentGateway.respondPermission(tabId, requestId, optionId);
+    if (isPlanBypass(optionId)) await this.bypassFromNowOn(tabId);
 
     if (!approval.isPlan) return;
     if (isDecline(approval.options, optionId)) {
@@ -42,6 +46,18 @@ export class RespondPermission {
         at: Date.now(),
       });
     }
+  }
+
+  /**
+   * Bypassing from a plan card is the same choice as picking Bypass in
+   * the composer, so it leaves the same trace: the picker moves and the
+   * tab remembers. The backend has already stopped asking for the rest of
+   * this turn — without this, the turn after would start asking again,
+   * from a picker that still said Manual.
+   */
+  private async bypassFromNowOn(tabId: string): Promise<void> {
+    this.store.dispatch({ type: "tab/permissionChanged", tabId, permission: "bypass" });
+    await persistWorkspace(this.store.getState(), this.workspaceStore);
   }
 }
 

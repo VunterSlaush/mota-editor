@@ -1106,6 +1106,65 @@ pub fn is_plan_approval(
             .any(|word| word == "plan")
 }
 
+/// Mota's own bypass option on a plan card. The id carries the agent
+/// option it answers with, because the choice travels back from the UI as
+/// an id and nothing else: `respond_permission` sees the button that was
+/// pressed, never the card it belonged to.
+const PLAN_BYPASS_PREFIX: &str = "mota-plan-bypass:";
+
+/// Whether an option already leaves the session asking for nothing.
+fn is_bypass_option(option_id: &str) -> bool {
+    matches!(
+        option_id,
+        "exit-plan-bypass" | "exit-plan-clear-bypass" | "bypassPermissions"
+    )
+}
+
+/// A plan card with a way to bypass permissions on it, always.
+///
+/// Which elevated option a plan card carries is the ADAPTER's choice, and
+/// it offers exactly one: claude-agent-acp ranks `auto` above bypass and
+/// always has auto available, so `exit-plan-bypass` is unreachable in
+/// practice, and Codex has no elevated option at all. Bypass is Mota's
+/// own policy rather than the agent's — `bypass_choice` answers these
+/// requests here, in this process — so the app can offer it whether or
+/// not the agent thought to. The appended option accepts the plan through
+/// the agent's own most conservative accept and lets Mota answer
+/// everything after it, which is what bypass means everywhere else in the
+/// app.
+///
+/// Left alone when the agent does offer bypass: two buttons meaning the
+/// same thing is a worse card than the one that was missing a button.
+pub fn with_plan_bypass_option(options: Vec<PermissionOptionInfo>) -> Vec<PermissionOptionInfo> {
+    if options.iter().any(|o| is_bypass_option(&o.option_id)) {
+        return options;
+    }
+    let Some(accept_id) = bypass_choice(&options).map(|o| o.option_id.clone()) else {
+        return options;
+    };
+    let bypass = PermissionOptionInfo {
+        option_id: format!("{PLAN_BYPASS_PREFIX}{accept_id}"),
+        name: "Yes, and bypass permissions".to_owned(),
+        kind: "allow_always".to_owned(),
+    };
+    let mut with_bypass = options;
+    // Last of the yeses: the decline keeps the bottom of the card, where
+    // every agent puts it, and the added button never displaces the
+    // agent's own first recommendation.
+    let at = with_bypass
+        .iter()
+        .position(|o| o.kind.starts_with("reject"))
+        .unwrap_or(with_bypass.len());
+    with_bypass.insert(at, bypass);
+    with_bypass
+}
+
+/// The agent option Mota's own bypass button answers with, or `None` for
+/// every other choice. The synthetic id never reaches the agent.
+pub fn plan_bypass_target(option_id: &str) -> Option<&str> {
+    option_id.strip_prefix(PLAN_BYPASS_PREFIX)
+}
+
 /// Translate `session/update` params into domain events.
 fn translate_update(params: &Value) -> Vec<AgentEvent> {
     let update = params.get("update").unwrap_or(params);
@@ -2323,6 +2382,99 @@ mod tests {
         }];
         assert_eq!(bypass_choice(&reject_only), None);
         assert_eq!(bypass_choice(&[]), None);
+    }
+
+    /// Claude's real plan card, as claude-agent-acp 0.75 sends it: one
+    /// elevated option, and it is auto — never bypass.
+    fn claude_plan_card() -> Vec<PermissionOptionInfo> {
+        let opt = |id: &str, name: &str, kind: &str| PermissionOptionInfo {
+            option_id: id.to_owned(),
+            name: name.to_owned(),
+            kind: kind.to_owned(),
+        };
+        vec![
+            opt("exit-plan-clear-auto", "Yes, clear context and use auto mode", "allow_always"),
+            opt("exit-plan-auto", "Yes, and use auto mode", "allow_always"),
+            opt("exit-plan-default", "Yes, manually approve edits", "allow_once"),
+            opt("reject", "No, keep planning", "reject_once"),
+        ]
+    }
+
+    #[test]
+    fn a_plan_card_without_bypass_gets_one() {
+        let card = with_plan_bypass_option(claude_plan_card());
+        let ids: Vec<&str> = card.iter().map(|o| o.option_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "exit-plan-clear-auto",
+                "exit-plan-auto",
+                "exit-plan-default",
+                "mota-plan-bypass:exit-plan-default",
+                "reject",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_added_bypass_answers_with_the_agents_plainest_accept() {
+        // Not the auto or clear-context options: the plan is accepted at
+        // the agent's most conservative setting and Mota does the
+        // approving, so nothing about the conversation is thrown away.
+        let card = with_plan_bypass_option(claude_plan_card());
+        let target = card.iter().find_map(|o| plan_bypass_target(&o.option_id));
+        assert_eq!(target, Some("exit-plan-default"));
+    }
+
+    #[test]
+    fn an_agent_that_offers_bypass_keeps_its_own_card() {
+        let opt = |id: &str, kind: &str| PermissionOptionInfo {
+            option_id: id.to_owned(),
+            name: id.to_owned(),
+            kind: kind.to_owned(),
+        };
+        for own in ["exit-plan-bypass", "exit-plan-clear-bypass", "bypassPermissions"] {
+            let card = vec![opt(own, "allow_always"), opt("reject", "reject_once")];
+            assert_eq!(with_plan_bypass_option(card.clone()), card);
+        }
+    }
+
+    #[test]
+    fn codex_gets_a_bypass_it_has_no_word_for() {
+        let opt = |id: &str, kind: &str| PermissionOptionInfo {
+            option_id: id.to_owned(),
+            name: id.to_owned(),
+            kind: kind.to_owned(),
+        };
+        let card = with_plan_bypass_option(vec![
+            opt("implement_plan", "allow_once"),
+            opt("revise_plan", "reject_once"),
+        ]);
+        let ids: Vec<&str> = card.iter().map(|o| o.option_id.as_str()).collect();
+        assert_eq!(ids, ["implement_plan", "mota-plan-bypass:implement_plan", "revise_plan"]);
+    }
+
+    #[test]
+    fn a_card_with_no_way_to_say_yes_gains_nothing() {
+        // Nothing to accept the plan with means nothing to bypass into.
+        let reject_only = vec![PermissionOptionInfo {
+            option_id: "reject".into(),
+            name: "No".into(),
+            kind: "reject_once".into(),
+        }];
+        assert_eq!(with_plan_bypass_option(reject_only.clone()), reject_only);
+    }
+
+    #[test]
+    fn only_the_added_option_names_a_bypass_target() {
+        assert_eq!(plan_bypass_target("exit-plan-default"), None);
+        assert_eq!(plan_bypass_target("reject"), None);
+        // An agent id containing a colon survives intact: only the first
+        // one separates the prefix from the target.
+        assert_eq!(
+            plan_bypass_target("mota-plan-bypass:vendor:accept"),
+            Some("vendor:accept")
+        );
     }
 
     #[test]

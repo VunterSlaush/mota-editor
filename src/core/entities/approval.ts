@@ -63,10 +63,24 @@ const MODE_SWITCH_HINTS: Record<string, string> = {
 };
 
 /**
+ * The bypass option Mota puts on every plan card itself, because the
+ * adapters stopped offering one (`with_plan_bypass_option` in `acp.rs`
+ * says why). Its id carries the agent option it answers with, so the
+ * prefix — not the whole id — is what identifies it.
+ */
+const PLAN_BYPASS_PREFIX = "mota-plan-bypass:";
+
+/** True for Mota's own bypass option on a plan card. */
+export function isPlanBypass(optionId: string): boolean {
+  return optionId.startsWith(PLAN_BYPASS_PREFIX);
+}
+
+/**
  * One line explaining where an option leaves the session, or `undefined`
  * for the ordinary allow/deny options, which already say what they do.
  */
 export function permissionOptionHint(optionId: string): string | undefined {
+  if (isPlanBypass(optionId)) return LANDS_IN.bypass;
   return MODE_SWITCH_HINTS[optionId];
 }
 

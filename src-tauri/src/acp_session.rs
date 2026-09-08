@@ -250,6 +250,17 @@ impl AcpSession {
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
+    /// Whether this session's scope leaves bypass on the table. Every
+    /// turn's permission is capped by the scope at turn start; the plan
+    /// card's bypass option arrives after that, so it has to ask the
+    /// same question again or it would be a way around the cap.
+    fn scope_permits_bypass(&self) -> bool {
+        agent_core::scope::effective_permission(
+            agent_core::Permission::Bypass,
+            self.subtask.as_ref(),
+        ) == agent_core::Permission::Bypass
+    }
+
     fn caps(&self) -> acp::AgentCaps {
         self.caps.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
@@ -555,6 +566,25 @@ pub async fn respond_permission(
         .parse()
         .map_err(|_| format!("Invalid permission request id: {request_id}"))?;
     session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).retain(|p| *p != id);
+    // Mota's own bypass button on a plan card. The agent hears its own
+    // plainest accept; what changes is on this side — the session starts
+    // answering the requests it would have shown the user, and stops
+    // treating the turn as a planning one, because the plan the user just
+    // approved is what the agent is about to carry out.
+    // A scope that forbids bypass is never offered the button, so an id
+    // arriving anyway is answered as the plain accept it wraps — the plan
+    // still starts, the cap still holds.
+    let option_id = match acp::plan_bypass_target(option_id) {
+        Some(agent_option_id) => {
+            if session.scope_permits_bypass() {
+                session.bypass.store(true, Ordering::SeqCst);
+                session.auto.store(false, Ordering::SeqCst);
+                session.plan_mode.store(false, Ordering::SeqCst);
+            }
+            agent_option_id
+        }
+        None => option_id,
+    };
     session
         .write_message(&acp::permission_selected_response(id, option_id))
         .await
@@ -1510,6 +1540,16 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                     return;
                 }
             }
+            // The card the user sees offers bypass whether or not the
+            // agent's own card did — bypass is the app's policy to grant,
+            // and the adapters have stopped offering it. A scoped turn is
+            // the exception: its cap was applied at turn start, and a
+            // button that undoes it mid-turn is a hole in the scope.
+            let options = if is_plan && session.scope_permits_bypass() {
+                acp::with_plan_bypass_option(options)
+            } else {
+                options
+            };
             session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).push(id);
             runner::emit(
                 app,
