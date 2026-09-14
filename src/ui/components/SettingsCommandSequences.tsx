@@ -1,16 +1,23 @@
 import { Plus, Trash } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import type { CommandInfo } from "../../core/entities/command";
 import {
   type CommandSequence,
   isReservedSequenceName,
   isRunnableSequence,
   normalizedSequenceName,
+  sequenceExpansion,
+  withSequences,
 } from "../../core/entities/commandSequence";
+import type { ProviderId } from "../../core/entities/provider";
 import type { AppSettings } from "../../core/state/appState";
+import { CommandSuggest } from "./CommandSuggest";
 
 interface Props {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   newId: () => string;
+  loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
 }
 
 /**
@@ -19,8 +26,31 @@ interface Props {
  * in settings and flagged rather than blocked, exactly like a
  * half-written MCP server.
  */
-export function SettingsCommandSequences({ settings, onChange, newId }: Props) {
+export function SettingsCommandSequences({
+  settings,
+  onChange,
+  newId,
+  loadCommands,
+}: Props) {
   const sequences = settings.commandSequences;
+  const [discovered, setDiscovered] = useState<readonly CommandInfo[]>([]);
+
+  // Read once, for the default provider: a sequence is global, so there
+  // is no one provider whose list is the right one, and the commands a
+  // step is likely to name are the same either way. The sequences being
+  // typed are merged in below rather than re-read, which is what lets a
+  // row name one that has not left this screen yet.
+  useEffect(() => {
+    let cancelled = false;
+    loadCommands(settings.defaultProvider).then((loaded) => {
+      if (!cancelled) setDiscovered(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCommands, settings.defaultProvider]);
+
+  const commands = withSequences(discovered, sequences);
 
   const replace = (next: readonly CommandSequence[]) =>
     onChange({ commandSequences: next });
@@ -51,7 +81,9 @@ export function SettingsCommandSequences({ settings, onChange, newId }: Props) {
         completes — no waiting to type the next one.
       </p>
       <p className="settings-section__hint">
-        A step is any prompt: a slash command, plain prose, or both. Write{" "}
+        A step is any prompt: a slash command, plain prose, or both. Type <code>/</code>{" "}
+        in a step to pick from the same commands the composer offers — including your
+        other sequences, which run in place as part of this one. Write{" "}
         <code>$ARGUMENTS</code> where a step should take what you typed after the
         sequence's name; steps that don't mention it get your text appended. A sequence
         wins over an extension or agent command of the same name, but not over the
@@ -87,11 +119,12 @@ export function SettingsCommandSequences({ settings, onChange, newId }: Props) {
                 key={index}
               >
                 <span className="sequence-step__number">{index + 1}</span>
-                <input
-                  className="settings-input"
-                  placeholder="Prompt to send (e.g. /review $ARGUMENTS)"
+                <CommandSuggest
                   value={step}
-                  onChange={(e) => updateStep(sequence, index, e.target.value)}
+                  onChange={(next) => updateStep(sequence, index, next)}
+                  commands={commands}
+                  placeholder="Prompt to send (e.g. /review $ARGUMENTS)"
+                  ariaLabel={`Step ${index + 1}`}
                 />
                 <button
                   type="button"
@@ -117,7 +150,7 @@ export function SettingsCommandSequences({ settings, onChange, newId }: Props) {
               <Trash size={14} />
             </button>
           </div>
-          <SequenceProblem sequence={sequence} />
+          <SequenceProblem sequence={sequence} sequences={sequences} />
         </div>
       ))}
 
@@ -128,8 +161,21 @@ export function SettingsCommandSequences({ settings, onChange, newId }: Props) {
   );
 }
 
-/** Why this row will not answer to anything yet, if it will not. */
-function SequenceProblem({ sequence }: { sequence: CommandSequence }) {
+/**
+ * What this row will really do, or why it will do nothing.
+ *
+ * The expansion is worth saying out loud because a step naming another
+ * sequence is one line on screen and any number of turns in practice —
+ * and because a step that loops back is skipped silently, which reads as
+ * a step that does not work rather than as the rule it is.
+ */
+function SequenceProblem({
+  sequence,
+  sequences,
+}: {
+  sequence: CommandSequence;
+  sequences: readonly CommandSequence[];
+}) {
   if (isReservedSequenceName(sequence.name)) {
     return (
       <span className="tool-row__warning">
@@ -145,5 +191,28 @@ function SequenceProblem({ sequence }: { sequence: CommandSequence }) {
       </span>
     );
   }
-  return null;
+
+  const { steps, cycles, truncated } = sequenceExpansion(sequences, sequence.name);
+  const written = sequence.steps.filter((step) => step.trim() !== "").length;
+  return (
+    <>
+      {steps.length !== written && (
+        <span className="tool-row__cost">
+          Runs {steps.length} {steps.length === 1 ? "prompt" : "prompts"} in all, once the
+          sequences it names are spelled out.
+        </span>
+      )}
+      {cycles.length > 0 && (
+        <span className="tool-row__warning">
+          {cycles.join(", ")} {cycles.length === 1 ? "is" : "are"} already running by the
+          time that step is reached, so it is skipped — a sequence cannot contain itself.
+        </span>
+      )}
+      {truncated && (
+        <span className="tool-row__warning">
+          Stops after {steps.length} prompts. Anything past that is not run.
+        </span>
+      )}
+    </>
+  );
 }

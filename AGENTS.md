@@ -53,3 +53,5 @@ Those documents are the single source of truth — this file points at them and
 never restates them. The boundary rules in `docs/CODING_STANDARDS.md` §
 Boundaries are enforced by `npm test` (see `scripts/architecture.mjs`), so a
 violation fails the build rather than waiting for review.
+
+## Imported Claude Cowork project instructions

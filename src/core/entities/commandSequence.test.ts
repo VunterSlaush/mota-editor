@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { CommandInfo } from "./command";
 import { leadingCommand } from "./commandConfig";
 import {
   type CommandSequence,
@@ -9,7 +10,9 @@ import {
   MAX_SEQUENCE_STEPS,
   normalizedSequenceName,
   restoredSequences,
+  sequenceExpansion,
   sequenceSteps,
+  withSequences,
 } from "./commandSequence";
 
 const sequence = (
@@ -223,6 +226,112 @@ describe("a flattened sequence never names another sequence", () => {
         }
       }
     }
+  });
+});
+
+describe("withSequences", () => {
+  const DISCOVERED: readonly CommandInfo[] = [
+    { name: "/review", description: "Review changes", source: "builtin" },
+    { name: "/init", description: "Write CLAUDE.md", source: "builtin" },
+  ];
+
+  it("offers the sequences alongside the commands already known", () => {
+    const names = withSequences(DISCOVERED, [SHIP]).map((c) => c.name);
+    expect(names).toEqual(["/init", "/review", "/ship"]);
+  });
+
+  it("lets a sequence displace the command it was named after", () => {
+    const mine = sequence("review", ["/lint", "/review-hard"]);
+    const review = withSequences(DISCOVERED, [mine]).find((c) => c.name === "/review");
+    expect(review?.source).toBe("sequence");
+  });
+
+  it("offers a name once when two sequences claim it", () => {
+    const first = sequence("ship", ["one"]);
+    const second = { ...sequence("ship", ["two"]), id: "second" };
+    const shipped = withSequences([], [first, second]).filter((c) => c.name === "/ship");
+    expect(shipped).toHaveLength(1);
+  });
+
+  it("replaces the sequences a stale list was holding rather than joining them", () => {
+    // The composer's list is read once and re-merged as rows are edited;
+    // without this a renamed sequence would answer under both names.
+    const stale = withSequences(DISCOVERED, [sequence("shipp", ["typo"])]);
+    const fresh = withSequences(stale, [SHIP]);
+    expect(fresh.map((c) => c.name)).toEqual(["/init", "/review", "/ship"]);
+  });
+
+  it("is alphabetical, so the menu does not reshuffle as rows are typed", () => {
+    const names = withSequences(DISCOVERED, [sequence("alpha", ["a"])]).map(
+      (c) => c.name,
+    );
+    expect(names).toEqual([...names].sort());
+  });
+});
+
+describe("sequenceExpansion", () => {
+  it("reports a plain sequence as running exactly what was written", () => {
+    expect(sequenceExpansion([SHIP], "/ship")).toEqual({
+      steps: ["/review", "write tests", "/commit-push"],
+      cycles: [],
+      truncated: false,
+    });
+  });
+
+  it("counts a nested sequence's steps, not the one line that names it", () => {
+    const checks = sequence("checks", ["/lint", "/typecheck"]);
+    const outer = sequence("ship", ["/checks", "/commit-push"]);
+    expect(sequenceExpansion([checks, outer], "/ship").steps).toEqual([
+      "/lint",
+      "/typecheck",
+      "/commit-push",
+    ]);
+  });
+
+  it("names the sequence a step pointed at that would have looped back", () => {
+    const ping = sequence("ping", ["one", "/pong"]);
+    const pong = sequence("pong", ["two", "/ping"]);
+    const expansion = sequenceExpansion([ping, pong], "/ping");
+    expect(expansion.steps).toEqual(["one", "two"]);
+    expect(expansion.cycles).toEqual(["/ping"]);
+  });
+
+  it("names a sequence that points at itself", () => {
+    expect(
+      sequenceExpansion([sequence("ship", ["go", "/ship"])], "/ship").cycles,
+    ).toEqual(["/ship"]);
+  });
+
+  it("names each looping sequence once however often it is reached", () => {
+    const inner = sequence("inner", ["/outer", "/outer"]);
+    const outer = sequence("outer", ["/inner", "/inner"]);
+    expect(sequenceExpansion([inner, outer], "/outer").cycles).toEqual(["/outer"]);
+  });
+
+  it("says when the step ceiling cut the run short", () => {
+    const long = sequence(
+      "long",
+      Array.from({ length: MAX_SEQUENCE_STEPS + 5 }, (_, i) => `step ${i}`),
+    );
+    const expansion = sequenceExpansion([long], "/long");
+    expect(expansion.steps).toHaveLength(MAX_SEQUENCE_STEPS);
+    expect(expansion.truncated).toBe(true);
+  });
+
+  it("does not call a sequence that just fits cut short", () => {
+    const exact = sequence(
+      "exact",
+      Array.from({ length: MAX_SEQUENCE_STEPS }, (_, i) => `step ${i}`),
+    );
+    expect(sequenceExpansion([exact], "/exact").truncated).toBe(false);
+  });
+
+  it("has nothing to report for a token no sequence claims", () => {
+    expect(sequenceExpansion([SHIP], "/nope")).toEqual({
+      steps: [],
+      cycles: [],
+      truncated: false,
+    });
   });
 });
 

@@ -198,6 +198,7 @@ export function SettingsModal({
               settings={settings}
               onChange={onChange}
               newId={newId}
+              loadCommands={loadCommands}
             />
           )}
           {section === "tools" && (

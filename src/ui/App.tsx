@@ -454,6 +454,7 @@ export function App({ context }: { context: AppContext }) {
           onSignIn={signInActiveProvider}
           onReadTerminal={readTerminal}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
+          commandSequences={state.settings.commandSequences}
           onPickFiles={() => context.filePicker.pickFiles()}
           onPasteImage={(bytes, mimeType) =>
             context.pastedImages.saveImage(bytes, mimeType)

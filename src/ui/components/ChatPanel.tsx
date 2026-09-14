@@ -6,6 +6,7 @@ import {
   commandNames,
   paletteCommands,
 } from "../../core/entities/command";
+import { type CommandSequence, withSequences } from "../../core/entities/commandSequence";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
 import type { SubtaskScope } from "../../core/entities/subtask";
@@ -161,6 +162,10 @@ interface Props {
   /** Open the provider's login prompt, offered on a sign-in failure. */
   onSignIn: () => void;
   loadCommands: () => Promise<CommandInfo[]>;
+  /** The user's sequences, folded into the palette on every render:
+   *  naming one in Settings must not wait for a reload this panel has no
+   *  reason to do while it sits mounted behind the modal. */
+  commandSequences: readonly CommandSequence[];
   loadGitChanges: () => Promise<GitChanges | null>;
   onGitStage: (path: string) => Promise<GitActionResult>;
   onGitUnstage: (path: string) => Promise<GitActionResult>;
@@ -255,6 +260,7 @@ export function ChatPanel({
   onRetry,
   onSignIn,
   loadCommands,
+  commandSequences,
   loadGitChanges,
   onGitStage,
   onGitUnstage,
@@ -286,7 +292,9 @@ export function ChatPanel({
   onReadTerminal,
 }: Props) {
   const providerName = providerById(tab.project.provider).displayName;
-  const [fallbackCommands, setFallbackCommands] = useState<readonly CommandInfo[]>([]);
+  const [discoveredCommands, setDiscoveredCommands] = useState<readonly CommandInfo[]>(
+    [],
+  );
   const [changes, setChanges] = useState<GitChanges | null>(cachedChanges);
   const [changesRefreshKey, setChangesRefreshKey] = useState(0);
   // Every loaded answer goes to the parent's cache too, so the NEXT
@@ -380,6 +388,15 @@ export function ChatPanel({
     [messageCount, fileChangingTools],
   );
 
+  // Naming a sequence in Settings makes the list below out of date while
+  // this panel stays mounted behind the modal. Re-merging is exact and
+  // costs nothing; re-reading would put a disk scan on every keystroke
+  // spent typing the sequence.
+  const fallbackCommands = useMemo(
+    () => withSequences(discoveredCommands, commandSequences),
+    [discoveredCommands, commandSequences],
+  );
+
   // The running agent's own list is the truth about the CLI's builtins;
   // Mota's own commands, extensions and command files come from here,
   // because the agent has never heard of them.
@@ -395,12 +412,13 @@ export function ChatPanel({
   useEffect(() => {
     let cancelled = false;
     loadCommands().then((loaded) => {
-      if (!cancelled) setFallbackCommands(loaded);
+      if (!cancelled) setDiscoveredCommands(loaded);
     });
     return () => {
       cancelled = true;
     };
-    // Reload when the tab's provider changes; loadCommands is stable per tab.
+    // Reload when the tab's provider changes; loadCommands is stable per
+    // tab. Sequences are folded in above rather than re-read here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.project.provider, tab.project.id]);
 

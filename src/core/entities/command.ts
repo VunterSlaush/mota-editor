@@ -177,6 +177,25 @@ export function paletteCommands(
   ]).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * The "/..." word at the end of the text, slash included, or null.
+ *
+ * Whitespace is the only delimiter, so the menu opens on the word being
+ * typed and closes as soon as it is finished. Typing "/" after other text
+ * opens it too — a command is not only ever the first thing in a prompt.
+ * The mirror of `mentionToken`, and deliberately the same rules.
+ */
+export function commandToken(text: string): string | null {
+  const token = text.split(/\s/).pop() ?? "";
+  return token.startsWith("/") ? token : null;
+}
+
+/** The text with its trailing command token swapped for `name`, plus the
+ *  space that closes the menu. Anything before the token stays. */
+export function replaceCommand(text: string, token: string, name: string): string {
+  return `${text.slice(0, text.length - token.length)}${name} `;
+}
+
 /** Commands whose names start with the typed prefix (case-insensitive). */
 export function filterCommands(
   commands: readonly CommandInfo[],

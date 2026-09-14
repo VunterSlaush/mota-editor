@@ -3,10 +3,12 @@ import {
   BUILTIN_COMMANDS,
   type CommandInfo,
   commandNames,
+  commandToken,
   dedupeCommands,
   filterCommands,
   MOTA_COMMANDS,
   paletteCommands,
+  replaceCommand,
   splitCommands,
 } from "./command";
 
@@ -96,6 +98,38 @@ describe("paletteCommands", () => {
 
   it("is the discovered list untouched before any session answers", () => {
     expect(paletteCommands([], DISCOVERED)).toEqual(DISCOVERED);
+  });
+});
+
+describe("commandToken", () => {
+  it("finds the command being typed at the end of the text", () => {
+    expect(commandToken("/rev")).toBe("/rev");
+  });
+
+  it("finds one typed after other text, since a command may go anywhere", () => {
+    expect(commandToken("first do this, then /com")).toBe("/com");
+  });
+
+  it("has nothing once the word is finished", () => {
+    expect(commandToken("/review ")).toBeNull();
+    expect(commandToken("/review the diff")).toBeNull();
+  });
+
+  it("has nothing for ordinary text", () => {
+    expect(commandToken("")).toBeNull();
+    expect(commandToken("write some tests")).toBeNull();
+  });
+});
+
+describe("replaceCommand", () => {
+  it("swaps the token for the command and closes the menu with a space", () => {
+    expect(replaceCommand("/rev", "/rev", "/review")).toBe("/review ");
+  });
+
+  it("leaves the text before the token alone", () => {
+    expect(replaceCommand("then /com", "/com", "/commit-push")).toBe(
+      "then /commit-push ",
+    );
   });
 });
 

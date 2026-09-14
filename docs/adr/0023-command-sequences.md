@@ -46,8 +46,12 @@ answers itself: those are decided before the sequence branch is reached, so allo
 name would leave a setting that quietly does nothing. `isReservedSequenceName` refuses them
 in one place, and the palette, the executor and the settings row all read it.
 
-The rule is applied in three places that must agree — `ListCommands.forProvider`,
+The rule is applied in places that must agree — `ListCommands.forProvider`,
 `paletteCommands` and `SendPrompt.execute` — which is the reason it is stated once here.
+The merge itself is `withSequences`, so no caller restates it: it replaces the sequences in
+a list rather than joining them, which makes it idempotent. That is what lets the composer
+and the settings editor fold the sequences being edited into a list read from disk minutes
+ago, instead of paying a disk scan for every keystroke spent naming one.
 
 Accepted deliberately: a sequence named `/review` displaces the builtin `/review` row from
 Settings → Commands. That is the honest reading of "the name means the sequence now". This
@@ -75,6 +79,11 @@ makes `execute`'s recursion provably one level deep.
 
 This is the same shape of decision as ADR-0018: a command is not always what it says it is,
 and the place to resolve that is before anything is sent, not while it is running.
+
+Dropping a step silently is right for the executor and wrong for the editor, so
+`sequenceExpansion` returns the same traversal's leavings — the sequences skipped and
+whether the ceiling cut the run short — and the settings row says so. A step that vanishes
+without explanation reads as a step that does not work, rather than as the rule it is.
 
 ### 3. Failure semantics are the queue's, unchanged
 

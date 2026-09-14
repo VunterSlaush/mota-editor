@@ -1,5 +1,5 @@
 import { BUILTIN_COMMANDS, type CommandInfo } from "../entities/command";
-import { commandsFromSequences } from "../entities/commandSequence";
+import { withSequences } from "../entities/commandSequence";
 import { commandsFromExtensions } from "../entities/extension";
 import type { ProviderId } from "../entities/provider";
 import type { CommandCatalog } from "../ports/commandCatalog";
@@ -36,19 +36,17 @@ export class ListCommands {
    */
   async forProvider(path: string, provider: ProviderId): Promise<CommandInfo[]> {
     const state = this.store.getState();
-    const sequences = commandsFromSequences(state.settings.commandSequences);
     const builtins = BUILTIN_COMMANDS[provider];
     const extension = commandsFromExtensions(state.extensions, provider);
     const custom = await this.commandCatalog
       .listCustomCommands(path, provider)
       .catch(() => []);
 
-    const seen = new Set(sequences.map((c) => c.name));
-    const merged = [...sequences, ...builtins.filter((c) => !seen.has(c.name))];
-    for (const c of merged) seen.add(c.name);
-    merged.push(...extension.filter((c) => !seen.has(c.name)));
-    for (const c of merged) seen.add(c.name);
-    merged.push(...custom.filter((c) => !seen.has(c.name)));
-    return merged.sort((a, b) => a.name.localeCompare(b.name));
+    // `withSequences` dedupes first-occurrence-wins and sorts, so the
+    // precedence below is the order these are written in.
+    return withSequences(
+      [...builtins, ...extension, ...custom],
+      state.settings.commandSequences,
+    );
   }
 }

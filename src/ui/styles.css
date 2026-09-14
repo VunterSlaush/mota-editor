@@ -2567,6 +2567,31 @@ body {
   align-self: flex-start;
 }
 
+/* A completion row in a step input. The menu itself is `.folder-suggest`,
+   the same typeahead the subtask areas use; only the row differs, because
+   a command has a description and a folder does not. */
+.command-suggest__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.command-suggest__name {
+  flex: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.command-suggest__description {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* ---- Settings → Extensions ---- */
 .settings-section__actions {
   display: flex;

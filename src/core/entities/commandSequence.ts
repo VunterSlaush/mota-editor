@@ -92,6 +92,28 @@ export function commandsFromSequences(
 }
 
 /**
+ * `commands`, with these sequences put in ahead of them — the precedence
+ * `ListCommands` applies, said once because two screens need it live.
+ *
+ * Sequences already in `commands` are replaced rather than merged with,
+ * which makes this idempotent: a list read from disk minutes ago can be
+ * brought up to date by handing it back with the current sequences,
+ * without another read and without a renamed one lingering under both
+ * names. That is what lets the composer's palette answer for a sequence
+ * the moment it is named, and the settings editor offer a step a
+ * sequence that has not left the screen yet.
+ */
+export function withSequences(
+  commands: readonly CommandInfo[],
+  sequences: readonly CommandSequence[],
+): CommandInfo[] {
+  return dedupeCommands([
+    ...commandsFromSequences(sequences),
+    ...commands.filter((command) => command.source !== "sequence"),
+  ]).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * Everything invoking `token` will run, in order and ready to send.
  *
  * Flattened eagerly, cycles cut with a visited set, because the steps
@@ -107,9 +129,40 @@ export function sequenceSteps(
   token: string,
   args: string,
 ): readonly string[] {
+  return sequenceExpansion(sequences, token, args).steps;
+}
+
+/**
+ * What invoking `token` really runs, and what was left out getting there.
+ *
+ * `sequenceSteps` answers the executor's question and drops the rest on
+ * the floor. The settings editor needs the floor: a step naming a
+ * sequence that loops back is silently skipped, which reads as a bug in
+ * the row rather than as the rule it is, and a nested sequence means the
+ * step count on screen is not the number of turns the user is about to
+ * start.
+ */
+export interface SequenceExpansion {
+  /** The prompts that will be sent, in order. */
+  readonly steps: readonly string[];
+  /** Sequences a step named that would have looped back to one already
+   *  running, in the order they were skipped. */
+  readonly cycles: readonly string[];
+  /** True when `MAX_SEQUENCE_STEPS` cut the expansion short. */
+  readonly truncated: boolean;
+}
+
+export function sequenceExpansion(
+  sequences: readonly CommandSequence[],
+  token: string,
+  args = "",
+): SequenceExpansion {
   const root = findSequence(sequences, token);
-  if (!root) return [];
-  return expanded(sequences, root, args, new Set([key(root)]));
+  if (!root) return { steps: [], cycles: [], truncated: false };
+
+  const found: Expansion = { steps: [], cycles: [], truncated: false };
+  expand(sequences, root, args, new Set([key(root)]), found);
+  return { ...found, cycles: [...new Set(found.cycles)] };
 }
 
 /**
@@ -148,30 +201,51 @@ function describeSteps(sequence: CommandSequence): string {
   return `${count} ${count === 1 ? "step" : "steps"}`;
 }
 
-/** One sequence's steps, with the sequences on the path back to the root
- *  spliced in and the ones that would close a cycle dropped. */
-function expanded(
+/** The traversal's running answer: one array for the executor, the rest
+ *  for the settings row that has to explain what just happened. */
+interface Expansion {
+  readonly steps: string[];
+  readonly cycles: string[];
+  truncated: boolean;
+}
+
+/** Splice one sequence's steps into `found`, nested sequences resolved
+ *  and the ones that would close a cycle recorded rather than run. */
+function expand(
   sequences: readonly CommandSequence[],
   sequence: CommandSequence,
   args: string,
   path: ReadonlySet<string>,
-): string[] {
-  const steps: string[] = [];
+  found: Expansion,
+): void {
   for (const raw of sequence.steps) {
-    if (steps.length >= MAX_SEQUENCE_STEPS) break;
+    if (found.steps.length >= MAX_SEQUENCE_STEPS) {
+      // Only a step that had something to add counts as cut short: a
+      // trailing blank row is not work the ceiling took away.
+      found.truncated ||= expandPromptCommand(raw, args).trim() !== "";
+      continue;
+    }
     const step = expandPromptCommand(raw, args).trim();
     if (step === "") continue;
 
-    const nested = findSequence(sequences, leadingCommand(step) ?? "");
+    const token = leadingCommand(step) ?? "";
+    const nested = findSequence(sequences, token);
     if (!nested) {
-      steps.push(step);
+      found.steps.push(step);
       continue;
     }
-    if (path.has(key(nested))) continue; // the step that would close the cycle
-    const nestedArgs = step.slice((leadingCommand(step) ?? "").length).trim();
-    steps.push(
-      ...expanded(sequences, nested, nestedArgs, new Set([...path, key(nested)])),
+    if (path.has(key(nested))) {
+      // The step that would close the cycle. Recorded, because silence
+      // here reads as a step that simply does not work.
+      found.cycles.push(normalizedSequenceName(nested.name));
+      continue;
+    }
+    expand(
+      sequences,
+      nested,
+      step.slice(token.length).trim(),
+      new Set([...path, key(nested)]),
+      found,
     );
   }
-  return steps.slice(0, MAX_SEQUENCE_STEPS);
 }

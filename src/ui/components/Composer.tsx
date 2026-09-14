@@ -19,7 +19,9 @@ import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
 import {
   type CommandInfo,
   commandNames,
+  commandToken,
   filterCommands,
+  replaceCommand,
 } from "../../core/entities/command";
 import {
   FILE_MENTION_LIMIT,
@@ -193,18 +195,11 @@ export function Composer({
     },
     ...effortOptions.map((level) => ({ id: level, label: level, icon: <Gauge /> })),
   ];
-  // The "/..." word being typed at the end of the draft, if any. Typing
-  // "/" mid-message (after other text) opens the palette too — commands
-  // are not only ever the first thing in a prompt.
-  const commandToken = useMemo(() => {
-    const token = draft.split(/\s/).pop() ?? "";
-    return token.startsWith("/") ? token : null;
-  }, [draft]);
+  // The "/..." word being typed at the end of the draft, if any.
+  const typedCommand = useMemo(() => commandToken(draft), [draft]);
 
   const paletteCommands =
-    !menuDismissed && commandToken !== null
-      ? filterCommands(commands, commandToken ?? "")
-      : [];
+    !menuDismissed && typedCommand !== null ? filterCommands(commands, typedCommand) : [];
 
   // A "!" line goes to the user's shell, not to the agent. Said in the
   // colour tool output is written in, so which of the two is about to
@@ -279,9 +274,7 @@ export function Composer({
   };
 
   const pickCommand = (command: CommandInfo) => {
-    // Replace only the "/..." word being typed; text before it stays.
-    const base = commandToken ? draft.slice(0, draft.length - commandToken.length) : "";
-    onDraftChange(`${base}${command.name} `, attachments);
+    onDraftChange(replaceCommand(draft, typedCommand ?? "", command.name), attachments);
     setSelectedIndex(0);
     inputRef.current?.focus();
   };
