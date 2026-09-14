@@ -1,4 +1,4 @@
-import { BUILTIN_COMMANDS, type CommandInfo } from "../entities/command";
+import { BUILTIN_COMMANDS, type CommandInfo, paletteCommands } from "../entities/command";
 import { withSequences } from "../entities/commandSequence";
 import { commandsFromExtensions } from "../entities/extension";
 import type { ProviderId } from "../entities/provider";
@@ -41,11 +41,17 @@ export class ListCommands {
     const custom = await this.commandCatalog
       .listCustomCommands(path, provider)
       .catch(() => []);
+    const advertised = this.store
+      .getState()
+      .tabs.filter(
+        (tab) => tab.project.path === path && tab.project.provider === provider,
+      )
+      .flatMap((tab) => tab.agentCommands);
 
     // `withSequences` dedupes first-occurrence-wins and sorts, so the
     // precedence below is the order these are written in.
     return withSequences(
-      [...builtins, ...extension, ...custom],
+      paletteCommands(advertised, [...builtins, ...extension, ...custom]),
       state.settings.commandSequences,
     );
   }

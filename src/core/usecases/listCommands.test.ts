@@ -37,6 +37,27 @@ const SHIP: CommandSequence = {
 };
 
 describe("ListCommands", () => {
+  it("includes commands advertised by a matching Codex chat in settings", async () => {
+    const { store, useCase } = setup();
+    store.dispatch({
+      type: "tab/providerChanged",
+      tabId: "t1",
+      provider: "codex",
+    });
+    const command: CommandInfo = {
+      name: "/custom-review",
+      description: "Review with my skill",
+      source: "builtin",
+    };
+    store.dispatch({ type: "tab/commandsUpdated", tabId: "t1", commands: [command] });
+
+    expect(await useCase.forProvider("/work/alpha", "codex")).toContainEqual(command);
+    expect(await useCase.forProvider("/work/other", "codex")).not.toContainEqual(command);
+    expect(await useCase.forProvider("/work/alpha", "claude")).not.toContainEqual(
+      command,
+    );
+  });
+
   it("merges built-ins with discovered custom commands, sorted by name", async () => {
     const { catalog, useCase } = setup();
     catalog.custom = [{ name: "/deploy", description: "Ship it", source: "project" }];

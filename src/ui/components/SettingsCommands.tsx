@@ -158,6 +158,8 @@ export function SettingsCommands({
 }: Props) {
   const [provider, setProvider] = useState<ProviderId>(settings.defaultProvider);
   const [commands, setCommands] = useState<readonly CommandInfo[]>([]);
+  const [loadingCommands, setLoadingCommands] = useState(true);
+  const [commandProblem, setCommandProblem] = useState<string>();
   const [subagents, setSubagents] = useState<readonly SubagentInfo[]>([]);
   const [savings, setSavings] = useState<readonly CommandTokenRow[]>([]);
   const catalog = modelCatalogs?.[provider];
@@ -188,9 +190,19 @@ export function SettingsCommands({
 
   useEffect(() => {
     let cancelled = false;
-    loadCommands(provider).then((loaded) => {
-      if (!cancelled) setCommands(loaded);
-    });
+    setLoadingCommands(true);
+    setCommandProblem(undefined);
+    setCommands([]);
+    loadCommands(provider)
+      .then((loaded) => {
+        if (!cancelled) setCommands(loaded);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setCommandProblem(`Could not load commands: ${String(error)}`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCommands(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -262,7 +274,13 @@ export function SettingsCommands({
         </div>
       </div>
 
-      {commands.length === 0 && (
+      {loadingCommands && <p className="settings-section__hint">Loading commands…</p>}
+      {commandProblem && (
+        <p className="settings-section__hint" role="alert">
+          {commandProblem}
+        </p>
+      )}
+      {!loadingCommands && !commandProblem && commands.length === 0 && (
         <p className="settings-section__hint">No commands found for this provider yet.</p>
       )}
 

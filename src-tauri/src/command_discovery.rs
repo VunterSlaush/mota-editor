@@ -37,7 +37,10 @@ fn command_dirs(
     let mut dirs = Vec::new();
     match provider_id {
         "claude" => {
-            dirs.push((project.join(".claude").join("commands"), CommandOrigin::Project));
+            dirs.push((
+                project.join(".claude").join("commands"),
+                CommandOrigin::Project,
+            ));
             if let Some(home) = home {
                 dirs.push((home.join(".claude").join("commands"), CommandOrigin::User));
             }
@@ -48,7 +51,10 @@ fn command_dirs(
             }
         }
         "gemini" => {
-            dirs.push((project.join(".gemini").join("commands"), CommandOrigin::Project));
+            dirs.push((
+                project.join(".gemini").join("commands"),
+                CommandOrigin::Project,
+            ));
             if let Some(home) = home {
                 dirs.push((home.join(".gemini").join("commands"), CommandOrigin::User));
             }
@@ -60,19 +66,26 @@ fn command_dirs(
 
 /// Where a provider keeps skills (exposed as slash commands too).
 fn skill_dirs(
-    app: &AppHandle,
+    home: Option<&Path>,
     project_path: &str,
     provider_id: &str,
 ) -> Vec<(PathBuf, CommandOrigin)> {
-    if provider_id != "claude" {
-        return Vec::new();
+    let folders: &[&str] = match provider_id {
+        "claude" => &[".claude"],
+        "codex" => &[".agents", ".codex"],
+        _ => return Vec::new(),
+    };
+    let mut dirs = Vec::new();
+    for folder in folders {
+        dirs.push((
+            Path::new(project_path).join(folder).join("skills"),
+            CommandOrigin::Project,
+        ));
     }
-    let mut dirs = vec![(
-        Path::new(project_path).join(".claude").join("skills"),
-        CommandOrigin::Project,
-    )];
-    if let Ok(home) = app.path().home_dir() {
-        dirs.push((home.join(".claude").join("skills"), CommandOrigin::User));
+    if let Some(home) = home {
+        for folder in folders {
+            dirs.push((home.join(folder).join("skills"), CommandOrigin::User));
+        }
     }
     dirs
 }
@@ -84,7 +97,11 @@ pub fn discover(app: &AppHandle, project_path: &str, provider_id: &str) -> Vec<C
             collect_from_dir(&dir, origin, &mut commands);
         }
     }
-    for (dir, origin) in skill_dirs(app, project_path, provider_id) {
+    for (dir, origin) in skill_dirs(
+        app.path().home_dir().ok().as_deref(),
+        project_path,
+        provider_id,
+    ) {
         if let Some(dir) = resolve_dir(dir) {
             collect_skills(&dir, origin, &mut commands);
         }
@@ -95,6 +112,43 @@ pub fn discover(app: &AppHandle, project_path: &str, provider_id: &str) -> Vec<C
     // wins over the user's, and a command file over a same-named skill.
     commands.dedup_by(|a, b| a.name == b.name);
     commands
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_discovers_project_and_user_skills() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let home = root.path().join("home");
+        for (base, folder, name) in [
+            (&project, ".agents", "project-review"),
+            (&project, ".codex", "project-check"),
+            (&home, ".agents", "user-review"),
+            (&home, ".codex", "user-check"),
+        ] {
+            let dir = base.join(folder).join("skills").join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("SKILL.md"),
+                "---\ndescription: Review changes\n---",
+            )
+            .unwrap();
+        }
+        let mut commands = Vec::new();
+        for (dir, origin) in skill_dirs(Some(&home), project.to_str().unwrap(), "codex") {
+            collect_skills(&dir, origin, &mut commands);
+        }
+        assert_eq!(commands.len(), 4);
+        assert!(commands
+            .iter()
+            .any(|c| c.name == "/project-review" && c.origin == CommandOrigin::Project));
+        assert!(commands
+            .iter()
+            .any(|c| c.name == "/user-check" && c.origin == CommandOrigin::User));
+    }
 }
 
 /// Follow a git "symlink" that Windows materialized as a plain text file
@@ -121,7 +175,9 @@ fn resolve_dir(path: PathBuf) -> Option<PathBuf> {
 }
 
 fn collect_from_dir(dir: &Path, origin: CommandOrigin, commands: &mut Vec<CustomCommand>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
@@ -135,14 +191,21 @@ fn collect_from_dir(dir: &Path, origin: CommandOrigin, commands: &mut Vec<Custom
 
 /// Skills live one folder per skill, described by its `SKILL.md`.
 fn collect_skills(dir: &Path, origin: CommandOrigin, commands: &mut Vec<CustomCommand>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let skill_dir = entry.path();
-        let Some(name) = skill_dir.file_name().and_then(|n| n.to_str()).map(str::to_owned)
+        let Some(name) = skill_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_owned)
         else {
             continue;
         };
-        let Ok(content) = fs::read_to_string(skill_dir.join("SKILL.md")) else { continue };
+        let Ok(content) = fs::read_to_string(skill_dir.join("SKILL.md")) else {
+            continue;
+        };
         commands.push(CustomCommand {
             name: format!("/{name}"),
             description: markdown_description(&content)
