@@ -1,15 +1,19 @@
 import {
-  COST_PRESETS,
+  availableCostPresets,
   MODES,
   matchingCostPreset,
   PERMISSIONS,
 } from "../../core/entities/agentSettings";
-import { EFFORT_OPTIONS, PROVIDERS, type ProviderId } from "../../core/entities/provider";
+import type { ModelCatalog } from "../../core/entities/modelCatalog";
+import { reasoningChoices, supportedEffort } from "../../core/entities/modelCatalog";
+import { PROVIDERS, type ProviderId } from "../../core/entities/provider";
 import type { AppSettings } from "../../core/state/appState";
 import { ModelPicker } from "./ModelPicker";
 import { OptionPicker } from "./OptionPicker";
 
 interface Props {
+  modelCatalog?: ModelCatalog;
+  modelProblem?: string;
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
 }
@@ -22,9 +26,19 @@ const UNSET = "";
  * edited for the default provider only: they are the one pair of settings
  * whose vocabulary changes per vendor.
  */
-export function SettingsDefaults({ settings, onChange }: Props) {
+export function SettingsDefaults({
+  settings,
+  onChange,
+  modelCatalog,
+  modelProblem,
+}: Props) {
   const provider = settings.defaultProvider;
-  const efforts = EFFORT_OPTIONS[provider];
+  const presets = availableCostPresets(provider, modelCatalog);
+  const efforts = reasoningChoices(
+    provider,
+    modelCatalog,
+    settings.defaultModel[provider] ?? "",
+  );
 
   return (
     <div className="settings-section">
@@ -97,7 +111,7 @@ export function SettingsDefaults({ settings, onChange }: Props) {
           }
           options={[
             { id: UNSET, label: "Custom", description: "Whatever you set below." },
-            ...COST_PRESETS.map((preset) => ({
+            ...presets.map((preset) => ({
               id: preset.id,
               label: preset.label,
               description: preset.description,
@@ -106,7 +120,7 @@ export function SettingsDefaults({ settings, onChange }: Props) {
           onChange={(id) => {
             // "Custom" is what the pickers below produce, not something
             // to apply — selecting it should change nothing.
-            const preset = COST_PRESETS.find((p) => p.id === id);
+            const preset = presets.find((p) => p.id === id);
             if (!preset) return;
             onChange({
               defaultModel: withProvider(
@@ -129,6 +143,8 @@ export function SettingsDefaults({ settings, onChange }: Props) {
         hint={`Sent to ${providerName(provider)}. "Default model" leaves the choice to it.`}
       >
         <ModelPicker
+          catalog={modelCatalog}
+          problem={modelProblem}
           provider={provider}
           value={settings.defaultModel[provider] ?? UNSET}
           disabled={false}
@@ -138,6 +154,15 @@ export function SettingsDefaults({ settings, onChange }: Props) {
           onChange={(model) =>
             onChange({
               defaultModel: withProvider(settings.defaultModel, provider, model),
+              defaultEffort: withProvider(
+                settings.defaultEffort,
+                provider,
+                supportedEffort(
+                  modelCatalog,
+                  model,
+                  settings.defaultEffort[provider] ?? "",
+                ),
+              ),
             })
           }
         />
@@ -153,7 +178,11 @@ export function SettingsDefaults({ settings, onChange }: Props) {
             placement="bottom"
             disabled={false}
             placeholder="Provider default"
-            value={settings.defaultEffort[provider] ?? UNSET}
+            value={supportedEffort(
+              modelCatalog,
+              settings.defaultModel[provider] ?? "",
+              settings.defaultEffort[provider] ?? UNSET,
+            )}
             options={[
               { id: UNSET, label: "Provider default" },
               ...efforts.map((effort) => ({ id: effort, label: effort })),

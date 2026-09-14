@@ -30,6 +30,7 @@ import {
   toolMessage,
   userMessage,
 } from "../entities/message";
+import { supportedEffort } from "../entities/modelCatalog";
 import { tabLabel } from "../entities/project";
 import {
   COMPACT_COMMAND,
@@ -255,7 +256,13 @@ export class SendPrompt {
     const configured = tabById(this.store.getState(), tabId);
     if (!configured) return;
 
-    const { provider, path, mode, permission, model, effort } = configured.project;
+    const { provider, path, mode, permission, model } = configured.project;
+    const effort =
+      supportedEffort(
+        this.store.getState().modelCatalogs?.[provider],
+        model ?? "",
+        configured.project.effort ?? "",
+      ) || undefined;
     const descriptor = providerById(provider);
     const resumeSessionId = descriptor.supportsResume
       ? configured.project.providerSessions[provider]

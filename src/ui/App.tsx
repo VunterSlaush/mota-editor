@@ -67,6 +67,15 @@ export function App({ context }: { context: AppContext }) {
   // reload, and for a panel that talks to the network, a wasted call.
   const panelViewCache = useRef(new Map<string, PanelView>());
   const projectPath = tab?.project.path ?? "";
+  const catalogProvider = tab?.project.provider;
+  useEffect(() => {
+    if (catalogProvider)
+      void context.discoverModels.execute(catalogProvider, projectPath);
+  }, [context, catalogProvider, projectPath]);
+  useEffect(() => {
+    if (settingsOpen)
+      void context.discoverModels.execute(state.settings.defaultProvider, projectPath);
+  }, [context, settingsOpen, state.settings.defaultProvider, projectPath]);
   // Undefined once the tab is gone, so a tab that closes another way
   // takes its own question with it.
   const closingTab = closingTabId
@@ -183,8 +192,12 @@ export function App({ context }: { context: AppContext }) {
     (provider: ProviderId) => context.listSubagents.forProvider(projectPath, provider),
     [context, projectPath],
   );
+  const discoverModels = useCallback(
+    (provider: ProviderId) => context.discoverModels.execute(provider, projectPath),
+    [context, projectPath],
+  );
   const probeProvider = useCallback(
-    (provider: ProviderId) => context.providerProbe.probe(provider, projectPath),
+    (provider: ProviderId) => context.discoverModels.recheck(provider, projectPath),
     [context, projectPath],
   );
   const signInProvider = useCallback(
@@ -454,6 +467,8 @@ export function App({ context }: { context: AppContext }) {
           onSignIn={signInActiveProvider}
           onReadTerminal={readTerminal}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
+          modelCatalog={state.modelCatalogs?.[tab.project.provider]}
+          modelProblem={state.modelProblems?.[tab.project.provider]}
           commandSequences={state.settings.commandSequences}
           onPickFiles={() => context.filePicker.pickFiles()}
           onPasteImage={(bytes, mimeType) =>
@@ -466,6 +481,10 @@ export function App({ context }: { context: AppContext }) {
       )}
       {settingsOpen && (
         <SettingsModal
+          modelCatalogs={state.modelCatalogs}
+          discoverModels={discoverModels}
+          modelCatalog={state.modelCatalogs?.[state.settings.defaultProvider]}
+          modelProblem={state.modelProblems?.[state.settings.defaultProvider]}
           settings={state.settings}
           onChange={(patch) => void context.updateSettings.execute(patch)}
           loadCommands={loadCommandsFor}

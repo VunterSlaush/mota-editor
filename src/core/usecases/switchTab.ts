@@ -1,4 +1,5 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
+import { supportedEffort } from "../entities/modelCatalog";
 import type { ProviderId } from "../entities/provider";
 import type { AgentGateway } from "../ports/agentGateway";
 import type { WorkspaceStore } from "../ports/workspacePort";
@@ -144,11 +145,17 @@ export class SelectModel {
   async execute(tabId: string, model: string): Promise<void> {
     const tab = tabById(this.store.getState(), tabId);
     if (!tab) return;
+    const effort = supportedEffort(
+      this.store.getState().modelCatalogs?.[tab.project.provider],
+      model,
+      tab.pendingSpec?.effort ?? tab.project.effort ?? "",
+    );
     if (conversationIsLive(tab)) {
-      this.store.dispatch({ type: "tab/specDeferred", tabId, model });
+      this.store.dispatch({ type: "tab/specDeferred", tabId, model, effort });
       return;
     }
     this.store.dispatch({ type: "tab/modelChanged", tabId, model });
+    this.store.dispatch({ type: "tab/effortChanged", tabId, effort });
     warmTab(this.store, this.agentGateway, tabId); // restart with the new model
     await persistWorkspace(this.store.getState(), this.workspaceStore);
   }

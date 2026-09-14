@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import type { CommandInfo } from "../../core/entities/command";
 import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { InsightsRange, InsightsReport } from "../../core/entities/insights";
+import type { ModelCatalog } from "../../core/entities/modelCatalog";
 import type { ProviderId } from "../../core/entities/provider";
 import type { SubagentInfo } from "../../core/entities/subagent";
 import type { BoundaryPreset } from "../../core/entities/subtask";
@@ -54,6 +55,10 @@ export type SettingsSection =
   | "theme";
 
 interface Props {
+  modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
+  discoverModels: (provider: ProviderId) => Promise<void>;
+  modelCatalog?: ModelCatalog;
+  modelProblem?: string;
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
@@ -115,6 +120,10 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
  * right. Every change saves immediately; there is no OK button to forget.
  */
 export function SettingsModal({
+  modelCatalogs,
+  discoverModels,
+  modelCatalog,
+  modelProblem,
   settings,
   onChange,
   loadCommands,
@@ -182,10 +191,17 @@ export function SettingsModal({
         </nav>
         <div className="settings-modal__body">
           {section === "defaults" && (
-            <SettingsDefaults settings={settings} onChange={onChange} />
+            <SettingsDefaults
+              settings={settings}
+              onChange={onChange}
+              modelCatalog={modelCatalog}
+              modelProblem={modelProblem}
+            />
           )}
           {section === "commands" && (
             <SettingsCommands
+              modelCatalogs={modelCatalogs}
+              discoverModels={discoverModels}
               settings={settings}
               onChange={onChange}
               loadCommands={loadCommands}

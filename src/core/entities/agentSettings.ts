@@ -1,3 +1,4 @@
+import type { ModelCatalog } from "./modelCatalog";
 import type { ProviderId } from "./provider";
 
 /**
@@ -142,14 +143,14 @@ export const COST_PRESETS: readonly CostPreset[] = [
     id: "economy",
     label: "Economy",
     description: "A small model at low effort — for edits, renames, and commit messages.",
-    model: { claude: "haiku", codex: "gpt-5.4-mini", gemini: "gemini-2.5-flash" },
+    model: { claude: "haiku", codex: "gpt-5.6-luna", gemini: "gemini-2.5-flash" },
     effort: { claude: "low", codex: "low", gemini: "" },
   },
   {
     id: "balanced",
     label: "Balanced",
     description: "The everyday pairing — capable enough for real work, priced sanely.",
-    model: { claude: "sonnet", codex: "gpt-5.3-codex", gemini: "gemini-3-flash-preview" },
+    model: { claude: "sonnet", codex: "gpt-5.6-sol", gemini: "gemini-3-flash-preview" },
     effort: { claude: "medium", codex: "medium", gemini: "" },
   },
   {
@@ -157,7 +158,7 @@ export const COST_PRESETS: readonly CostPreset[] = [
     label: "Maximum",
     description:
       "The strongest model at high effort. Costs the most — save it for hard problems.",
-    model: { claude: "opus", codex: "gpt-5.5", gemini: "gemini-3.1-pro-preview" },
+    model: { claude: "opus", codex: "gpt-6-astra", gemini: "gemini-3.1-pro-preview" },
     effort: { claude: "high", codex: "high", gemini: "" },
   },
 ];
@@ -179,6 +180,21 @@ export function matchingCostPreset(
       preset.effort[provider] === (effort ?? ""),
   );
   return found?.id ?? null;
+}
+
+/** A preset must never offer a model/effort pair the connection cannot run. */
+export function availableCostPresets(
+  provider: ProviderId,
+  catalog: ModelCatalog | undefined,
+): readonly CostPreset[] {
+  if (provider !== "codex") return COST_PRESETS;
+  return COST_PRESETS.filter((preset) =>
+    catalog?.models.some(
+      (model) =>
+        model.id === preset.model[provider] &&
+        model.efforts.includes(preset.effort[provider]),
+    ),
+  );
 }
 
 /**

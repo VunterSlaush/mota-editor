@@ -21,6 +21,7 @@ import type {
   ToolLocation,
 } from "../entities/message";
 import { mergeToolCall, pendingApproval, pendingQuestion } from "../entities/message";
+import type { ModelCatalog } from "../entities/modelCatalog";
 import type { PlanEntry } from "../entities/plan";
 import type { Project, ProjectDefaults } from "../entities/project";
 import { normalizedTabLabel } from "../entities/project";
@@ -217,6 +218,8 @@ export interface AppSettings {
 }
 
 export interface AppState {
+  readonly modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
+  readonly modelProblems?: Partial<Record<ProviderId, string | undefined>>;
   readonly tabs: readonly TabState[];
   readonly activeTabId: string | null;
   readonly settings: AppSettings;
@@ -251,6 +254,12 @@ export const initialState: AppState = {
 };
 
 export type Action =
+  | {
+      type: "provider/modelsDiscovered";
+      provider: ProviderId;
+      catalog?: ModelCatalog;
+      problem?: string;
+    }
   | {
       type: "workspace/restored";
       tabs: readonly TabState[];
@@ -444,6 +453,16 @@ export function reduce(state: AppState, action: Action): AppState {
             ? { ...e, status: action.status, error: action.error }
             : e,
         ),
+      };
+
+    case "provider/modelsDiscovered":
+      return {
+        ...state,
+        modelCatalogs: {
+          ...state.modelCatalogs,
+          ...(action.catalog ? { [action.provider]: action.catalog } : {}),
+        },
+        modelProblems: { ...state.modelProblems, [action.provider]: action.problem },
       };
 
     case "settings/changed":

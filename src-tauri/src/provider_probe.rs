@@ -46,6 +46,7 @@ pub enum Readiness {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderStatus {
+    pub catalog: Option<agent_core::model_catalog::ModelCatalog>,
     pub provider: String,
     pub readiness: Readiness,
     /// What to show the user: the agent's own words where there are any.
@@ -99,15 +100,19 @@ async fn probe(app: &AppHandle, provider_id: &str, project_path: &str) -> Provid
         .map(|c| c.display())
         .unwrap_or_default();
 
-    let (readiness, detail) = match probe_handshake(app, provider_id, project_path, PROBE_TIMEOUT)
+    let (readiness, detail, catalog) = match probe_handshake(app, provider_id, project_path, PROBE_TIMEOUT)
         .await
     {
-        Ok(caps) => outcome_for_started(provider_id, &caps),
-        Err(AcpStartError::Unavailable(detail)) => (Readiness::NotInstalled, detail),
-        Err(AcpStartError::Failed(detail)) => (classify_failure(&detail), detail),
+        Ok((caps, catalog)) => {
+            let (readiness, detail) = outcome_for_started(provider_id, &caps);
+            (readiness, detail, catalog)
+        }
+        Err(AcpStartError::Unavailable(detail)) => (Readiness::NotInstalled, detail, None),
+        Err(AcpStartError::Failed(detail)) => (classify_failure(&detail), detail, None),
     };
 
     ProviderStatus {
+        catalog,
         provider: provider_id.to_owned(),
         readiness,
         detail,

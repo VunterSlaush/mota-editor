@@ -1,3 +1,4 @@
+import { supportedEffort } from "../entities/modelCatalog";
 import type { AgentGateway } from "../ports/agentGateway";
 import { tabById } from "../state/appState";
 import type { Store } from "../state/store";
@@ -20,7 +21,8 @@ export function warmTab(store: Store, agentGateway: AgentGateway, tabId: string)
       provider,
       path,
       model,
-      effort,
+      supportedEffort(state.modelCatalogs?.[provider], model ?? "", effort ?? "") ||
+        undefined,
       agentServers(state, provider, mcpOverrides),
       subtask,
     )

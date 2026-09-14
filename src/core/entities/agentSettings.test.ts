@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  availableCostPresets,
   COST_PRESETS,
   clampAutoCompactThreshold,
   DEFAULT_AUTO_COMPACT_THRESHOLD,
@@ -12,6 +13,15 @@ import {
 import { EFFORT_OPTIONS, MODEL_SUGGESTIONS, PROVIDERS } from "./provider";
 
 describe("clampAutoCompactThreshold", () => {
+  it("offers only cost presets supported by the connected Codex catalog", () => {
+    expect(
+      availableCostPresets("codex", {
+        defaultModel: "gpt-5.6-sol",
+        models: [{ id: "gpt-5.6-sol", name: "Sol", efforts: ["medium"] }],
+      }).map((preset) => preset.id),
+    ).toEqual(["balanced"]);
+    expect(availableCostPresets("codex", undefined)).toEqual([]);
+  });
   it("passes a value inside the usable range through untouched", () => {
     expect(clampAutoCompactThreshold(0.6)).toBe(0.6);
     expect(clampAutoCompactThreshold(DEFAULT_AUTO_COMPACT_THRESHOLD)).toBe(
@@ -46,7 +56,7 @@ describe("COST_PRESETS", () => {
 
   it("only names models the picker also offers", () => {
     for (const preset of COST_PRESETS) {
-      for (const provider of PROVIDERS) {
+      for (const provider of PROVIDERS.filter((provider) => provider.id !== "codex")) {
         expect(MODEL_SUGGESTIONS[provider.id]).toContain(preset.model[provider.id]);
       }
     }

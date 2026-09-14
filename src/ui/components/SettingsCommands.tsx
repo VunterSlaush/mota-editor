@@ -15,11 +15,12 @@ import {
   type InsightsReport,
 } from "../../core/entities/insights";
 import {
-  EFFORT_OPTIONS,
-  MODEL_SUGGESTIONS,
-  PROVIDERS,
-  type ProviderId,
-} from "../../core/entities/provider";
+  commandReasoningChoices,
+  type ModelCatalog,
+  modelChoices,
+  supportedEffort,
+} from "../../core/entities/modelCatalog";
+import { PROVIDERS, type ProviderId } from "../../core/entities/provider";
 import {
   isNeverDelegated,
   type SubagentInfo,
@@ -30,6 +31,8 @@ import type { AppSettings } from "../../core/state/appState";
 import { OptionPicker } from "./OptionPicker";
 
 interface Props {
+  modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
+  discoverModels: (provider: ProviderId) => Promise<void>;
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   loadCommands: (provider: ProviderId) => Promise<CommandInfo[]>;
@@ -145,6 +148,8 @@ const SOURCE_GROUPS: readonly { source: CommandSource; label: string; hint: stri
  * means running that command switches the tab to it and leaves it there.
  */
 export function SettingsCommands({
+  modelCatalogs,
+  discoverModels,
   settings,
   onChange,
   loadCommands,
@@ -155,8 +160,10 @@ export function SettingsCommands({
   const [commands, setCommands] = useState<readonly CommandInfo[]>([]);
   const [subagents, setSubagents] = useState<readonly SubagentInfo[]>([]);
   const [savings, setSavings] = useState<readonly CommandTokenRow[]>([]);
-  const efforts = EFFORT_OPTIONS[provider];
-  const models = MODEL_SUGGESTIONS[provider];
+  const catalog = modelCatalogs?.[provider];
+  useEffect(() => {
+    void discoverModels(provider);
+  }, [provider, discoverModels]);
 
   // Reading every saved session is not free, so it is only done for
   // someone who actually delegates something — otherwise there is
@@ -268,127 +275,146 @@ export function SettingsCommands({
               <span className="command-group__label">{group.label}</span>
               <span className="command-group__hint">{group.hint}</span>
             </div>
-            {grouped.map((command) => (
-              <div className="command-row" key={command.name}>
-                <div className="command-row__text">
-                  <span className="command-row__name">{command.name}</span>
-                  <span className="command-row__description">{command.description}</span>
-                  <DelegationSaving
-                    report={delegationReport(
-                      savings.find((r) => r.command === command.name),
-                      Boolean(configFor(command.name).agent),
-                    )}
-                    estimated={
-                      savings.find((r) => r.command === command.name)?.estimated ?? true
-                    }
-                  />
-                </div>
-                <div className="command-row__controls">
-                  <OptionPicker
-                    ariaLabel={`Mode for ${command.name}`}
-                    placement="bottom"
-                    align="end"
-                    className="command-row__picker"
-                    disabled={false}
-                    placeholder="Mode"
-                    value={configFor(command.name).mode ?? INHERIT}
-                    options={[
-                      { id: INHERIT, label: "Leave as is" },
-                      ...MODES.map((m) => ({ id: m.id, label: m.label })),
-                    ]}
-                    onChange={(mode) => update(command.name, { mode: mode || undefined })}
-                  />
-                  <OptionPicker
-                    ariaLabel={`Permissions for ${command.name}`}
-                    placement="bottom"
-                    align="end"
-                    className="command-row__picker"
-                    disabled={false}
-                    placeholder="Permissions"
-                    value={configFor(command.name).permission ?? INHERIT}
-                    options={[
-                      { id: INHERIT, label: "Leave as is" },
-                      ...PERMISSIONS.map((p) => ({ id: p.id, label: p.label })),
-                    ]}
-                    onChange={(permission) =>
-                      update(command.name, { permission: permission || undefined })
-                    }
-                  />
-                  <OptionPicker
-                    ariaLabel={`Model for ${command.name}`}
-                    placement="bottom"
-                    align="end"
-                    className="command-row__picker"
-                    disabled={false}
-                    placeholder="Model"
-                    value={configFor(command.name).model ?? INHERIT}
-                    options={[
-                      { id: INHERIT, label: "Leave as is" },
-                      ...models.map((model) => ({ id: model, label: model })),
-                    ]}
-                    onChange={(model) =>
-                      update(command.name, { model: model || undefined })
-                    }
-                  />
-                  {efforts.length > 0 && (
+            {grouped.map((command) => {
+              const configured = configFor(command.name);
+              const models = modelChoices(provider, catalog, configured.model ?? "");
+              const efforts = commandReasoningChoices(
+                provider,
+                catalog,
+                configured.model ?? "",
+              );
+              return (
+                <div className="command-row" key={command.name}>
+                  <div className="command-row__text">
+                    <span className="command-row__name">{command.name}</span>
+                    <span className="command-row__description">
+                      {command.description}
+                    </span>
+                    <DelegationSaving
+                      report={delegationReport(
+                        savings.find((r) => r.command === command.name),
+                        Boolean(configFor(command.name).agent),
+                      )}
+                      estimated={
+                        savings.find((r) => r.command === command.name)?.estimated ?? true
+                      }
+                    />
+                  </div>
+                  <div className="command-row__controls">
                     <OptionPicker
-                      ariaLabel={`Effort for ${command.name}`}
+                      ariaLabel={`Mode for ${command.name}`}
                       placement="bottom"
                       align="end"
                       className="command-row__picker"
                       disabled={false}
-                      placeholder="Effort"
-                      value={configFor(command.name).effort ?? INHERIT}
+                      placeholder="Mode"
+                      value={configFor(command.name).mode ?? INHERIT}
                       options={[
                         { id: INHERIT, label: "Leave as is" },
-                        ...efforts.map((effort) => ({ id: effort, label: effort })),
+                        ...MODES.map((m) => ({ id: m.id, label: m.label })),
                       ]}
-                      onChange={(effort) =>
-                        update(command.name, { effort: effort || undefined })
+                      onChange={(mode) =>
+                        update(command.name, { mode: mode || undefined })
                       }
                     />
-                  )}
-                  {/* Commands Mota answers itself, and the one that
+                    <OptionPicker
+                      ariaLabel={`Permissions for ${command.name}`}
+                      placement="bottom"
+                      align="end"
+                      className="command-row__picker"
+                      disabled={false}
+                      placeholder="Permissions"
+                      value={configFor(command.name).permission ?? INHERIT}
+                      options={[
+                        { id: INHERIT, label: "Leave as is" },
+                        ...PERMISSIONS.map((p) => ({ id: p.id, label: p.label })),
+                      ]}
+                      onChange={(permission) =>
+                        update(command.name, { permission: permission || undefined })
+                      }
+                    />
+                    <OptionPicker
+                      ariaLabel={`Model for ${command.name}`}
+                      placement="bottom"
+                      align="end"
+                      className="command-row__picker"
+                      disabled={false}
+                      placeholder="Model"
+                      value={configFor(command.name).model ?? INHERIT}
+                      options={[
+                        { id: INHERIT, label: "Leave as is" },
+                        ...models.map((model) => ({ id: model, label: model })),
+                      ]}
+                      onChange={(model) =>
+                        update(command.name, {
+                          model: model || undefined,
+                          effort: model
+                            ? supportedEffort(catalog, model, configured.effort ?? "") ||
+                              undefined
+                            : configured.effort,
+                        })
+                      }
+                    />
+                    {efforts.length > 0 && (
+                      <OptionPicker
+                        ariaLabel={`Effort for ${command.name}`}
+                        placement="bottom"
+                        align="end"
+                        className="command-row__picker"
+                        disabled={false}
+                        placeholder="Effort"
+                        value={configFor(command.name).effort ?? INHERIT}
+                        options={[
+                          { id: INHERIT, label: "Leave as is" },
+                          ...efforts.map((effort) => ({ id: effort, label: effort })),
+                        ]}
+                        onChange={(effort) =>
+                          update(command.name, { effort: effort || undefined })
+                        }
+                      />
+                    )}
+                    {/* Commands Mota answers itself, and the one that
                       compacts THIS conversation, have nowhere else to
                       run — offering the choice would be offering a
                       setting that quietly does nothing. */}
-                  {!isNeverDelegated(provider, command.name) && (
-                    <OptionPicker
-                      ariaLabel={`Where ${command.name} runs`}
-                      placement="bottom"
-                      align="end"
-                      className="command-row__picker command-row__picker--where"
-                      disabled={false}
-                      placeholder="Runs in"
-                      value={configFor(command.name).agent ?? INHERIT}
-                      options={[
-                        {
-                          id: INHERIT,
-                          label: "In this chat",
-                          description:
-                            "Normal. Everything it reads stays in the conversation.",
-                          icon: <Chat size={14} />,
-                        },
-                        ...subagents.map((agent) => ({
-                          id: agent.name,
-                          label: agent.name,
-                          description: agent.description,
-                          icon: <ArrowBendUpRight size={14} />,
-                        })),
-                        // A name that no longer matches anything would
-                        // otherwise fall back to the placeholder and read
-                        // as unset — while still being set, and still
-                        // refused when the command is run.
-                        ...missingAgent(configFor(command.name).agent, subagents),
-                      ]}
-                      onChange={(agent) =>
-                        update(command.name, { agent: agent || undefined })
-                      }
-                    />
-                  )}
+                    {!isNeverDelegated(provider, command.name) && (
+                      <OptionPicker
+                        ariaLabel={`Where ${command.name} runs`}
+                        placement="bottom"
+                        align="end"
+                        className="command-row__picker command-row__picker--where"
+                        disabled={false}
+                        placeholder="Runs in"
+                        value={configFor(command.name).agent ?? INHERIT}
+                        options={[
+                          {
+                            id: INHERIT,
+                            label: "In this chat",
+                            description:
+                              "Normal. Everything it reads stays in the conversation.",
+                            icon: <Chat size={14} />,
+                          },
+                          ...subagents.map((agent) => ({
+                            id: agent.name,
+                            label: agent.name,
+                            description: agent.description,
+                            icon: <ArrowBendUpRight size={14} />,
+                          })),
+                          // A name that no longer matches anything would
+                          // otherwise fall back to the placeholder and read
+                          // as unset — while still being set, and still
+                          // refused when the command is run.
+                          ...missingAgent(configFor(command.name).agent, subagents),
+                        ]}
+                        onChange={(agent) =>
+                          update(command.name, { agent: agent || undefined })
+                        }
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </section>
         );
       })}

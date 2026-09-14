@@ -1,3 +1,4 @@
+import type { ModelCatalog } from "../entities/modelCatalog";
 import type { ProviderId } from "../entities/provider";
 
 /**
@@ -19,6 +20,7 @@ import type { ProviderId } from "../entities/provider";
 export type Readiness = "notInstalled" | "signInRequired" | "started" | "ready";
 
 export interface ProviderStatus {
+  readonly catalog?: ModelCatalog | null;
   readonly provider: ProviderId;
   readonly readiness: Readiness;
   /** What to show the user: the agent's own words where there are any. */

@@ -59,6 +59,7 @@ import { ApplyCommandConfig } from "../core/usecases/applyCommandConfig";
 import { ApplyPendingSpec, DiscardPendingSpec } from "../core/usecases/applyPendingSpec";
 import { CancelTurn } from "../core/usecases/cancelTurn";
 import { CloseProject } from "../core/usecases/closeProject";
+import { DiscoverModels } from "../core/usecases/discoverModels";
 import { EditDraft } from "../core/usecases/editDraft";
 import { ExtensionPanels } from "../core/usecases/extensionPanels";
 import { GitActions } from "../core/usecases/gitActions";
@@ -148,6 +149,7 @@ export interface AppContext {
   readonly shells: Shells;
   /** Historical usage report for the settings Insights section. */
   readonly loadInsights: (range: InsightsRange) => Promise<InsightsReport>;
+  readonly discoverModels: DiscoverModels;
   readonly providerProbe: ProviderProbe;
   /** Measures what an MCP server's tools cost on every request. */
   readonly mcpProbe: McpProbe;
@@ -250,8 +252,10 @@ export function createAppContext(): AppContext {
     sendPrompt.execute(tabId, prompt),
   );
 
+  const providerProbe = inTauri ? new TauriProviderProbe() : new DemoProviderProbe();
   return {
     store,
+    discoverModels: new DiscoverModels(store, providerProbe),
     restoreWorkspace: new RestoreWorkspace(
       store,
       workspaceStore,
@@ -316,7 +320,7 @@ export function createAppContext(): AppContext {
       new LoadInsights(store, transcriptStore, billingStore).execute(range),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway, worktrees),
     updateSettings: new UpdateSettings(store, workspaceStore),
-    providerProbe: inTauri ? new TauriProviderProbe() : new DemoProviderProbe(),
+    providerProbe,
     mcpProbe,
     filePicker,
     pastedImages: inTauri ? new TauriPastedImageStore() : new DemoPastedImageStore(),

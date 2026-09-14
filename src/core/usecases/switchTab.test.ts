@@ -71,6 +71,22 @@ function startConversation(store: Store) {
 const tab = (store: Store) => tabById(store.getState(), "t1");
 
 describe("SelectModel before a conversation exists", () => {
+  it("clears an effort that the newly selected model does not support", async () => {
+    const { store, selectModel } = setup();
+    store.dispatch({ type: "tab/providerChanged", tabId: "t1", provider: "codex" });
+    store.dispatch({ type: "tab/effortChanged", tabId: "t1", effort: "ultra" });
+    store.dispatch({
+      type: "provider/modelsDiscovered",
+      provider: "codex",
+      catalog: {
+        defaultModel: "small",
+        models: [{ id: "small", name: "Small", efforts: ["low", "high"] }],
+      },
+    });
+    await selectModel.execute("t1", "small");
+    expect(tab(store)?.project.model).toBe("small");
+    expect(tab(store)?.project.effort).toBeUndefined();
+  });
   it("applies the model and restarts the agent", async () => {
     // Nothing to re-ingest yet, so the respawn is free.
     const { store, gateway, selectModel } = setup();

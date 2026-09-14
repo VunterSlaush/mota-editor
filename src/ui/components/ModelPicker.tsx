@@ -1,8 +1,11 @@
 import { Cpu } from "@phosphor-icons/react";
-import { MODEL_SUGGESTIONS, type ProviderId } from "../../core/entities/provider";
+import { type ModelCatalog, modelChoices } from "../../core/entities/modelCatalog";
+import type { ProviderId } from "../../core/entities/provider";
 import { OptionPicker, type PickerOption } from "./OptionPicker";
 
 interface Props {
+  catalog?: ModelCatalog;
+  problem?: string;
   provider: ProviderId;
   value: string;
   /** What "default" resolves to (the app's per-provider default model),
@@ -21,15 +24,10 @@ interface Props {
   className?: string;
 }
 
-/**
- * UI — model override for the tab's agent. A picker, not a text box: the
- * choice is a short closed list, and a search field for five options
- * invites typing where only picking makes sense. Empty means the
- * provider's default model. A model set elsewhere (settings, a restored
- * workspace) that isn't a suggestion is kept as its own option, so
- * opening the list can never silently drop it.
- */
+/** Model overrides from discovery, retaining saved choices across catalog changes. */
 export function ModelPicker({
+  catalog,
+  problem,
   provider,
   value,
   defaultModel,
@@ -41,38 +39,48 @@ export function ModelPicker({
   className = "picker__trigger--dim",
 }: Props) {
   const shown = pendingValue ?? value;
-  const suggestions = MODEL_SUGGESTIONS[provider];
-  const custom = shown !== "" && !suggestions.includes(shown) ? [shown] : [];
+  const suggestions = modelChoices(provider, catalog, shown);
   const label = (model: string) => {
     const base =
       model === ""
-        ? defaultModel
-          ? `Default: ${defaultModel}`
+        ? defaultModel || catalog?.defaultModel
+          ? `Default: ${defaultModel || catalog?.defaultModel}`
           : "Default model"
         : model;
     return model === pendingValue ? `${base} · next chat` : base;
   };
   const options: readonly PickerOption<string>[] = [
     { id: "", label: label(""), icon: <Cpu /> },
-    ...custom.map((model) => ({ id: model, label: label(model), icon: <Cpu /> })),
     ...suggestions.map((model) => ({ id: model, label: label(model), icon: <Cpu /> })),
   ];
 
   return (
-    <OptionPicker
-      ariaLabel="Model"
-      options={options}
-      value={shown}
-      disabled={disabled}
-      placement={placement}
-      align={align}
-      // The pending marker is added to whatever the caller asked for,
-      // never instead of it: a deferred value must read as unsettled
-      // wherever the picker is used.
-      className={
-        pendingValue !== undefined ? `${className} picker__trigger--pending` : className
+    <div
+      title={
+        problem ||
+        (provider === "codex" && !catalog ? "Loading Codex models…" : undefined)
       }
-      onChange={onChange}
-    />
+    >
+      <OptionPicker
+        ariaLabel="Model"
+        options={options}
+        value={shown}
+        disabled={disabled}
+        placement={placement}
+        align={align}
+        // The pending marker is added to whatever the caller asked for,
+        // never instead of it: a deferred value must read as unsettled
+        // wherever the picker is used.
+        className={
+          pendingValue !== undefined ? `${className} picker__trigger--pending` : className
+        }
+        onChange={onChange}
+      />
+      {problem && (
+        <span className="tool-row__warning" role="status">
+          {problem}
+        </span>
+      )}
+    </div>
   );
 }

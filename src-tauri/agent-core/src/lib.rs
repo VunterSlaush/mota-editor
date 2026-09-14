@@ -15,6 +15,7 @@ pub mod event;
 pub mod extension;
 pub mod history;
 pub mod mcp;
+pub mod model_catalog;
 pub mod provider;
 pub mod providers;
 pub mod scope;

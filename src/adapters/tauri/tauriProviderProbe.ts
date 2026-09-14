@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ModelCatalog } from "../../core/entities/modelCatalog";
 import type { ProviderId } from "../../core/entities/provider";
 import type {
   ProviderProbe,
@@ -8,6 +9,7 @@ import type {
 
 /** Wire shape returned by the Rust backend (`probe_provider`). */
 interface WireStatus {
+  catalog?: ModelCatalog | null;
   provider: string;
   readiness: Readiness;
   detail: string;

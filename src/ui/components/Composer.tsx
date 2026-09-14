@@ -29,8 +29,9 @@ import {
   mentionToken,
   replaceMention,
 } from "../../core/entities/fileMention";
+import type { ModelCatalog } from "../../core/entities/modelCatalog";
+import { reasoningChoices, supportedEffort } from "../../core/entities/modelCatalog";
 import type { ProviderId } from "../../core/entities/provider";
-import { EFFORT_OPTIONS } from "../../core/entities/provider";
 import { isShellLine, shellPrefix } from "../../core/entities/shellLine";
 import type { TabState } from "../../core/state/appState";
 import { fileName } from "../fileName";
@@ -84,6 +85,8 @@ const PERMISSION_OPTIONS: readonly PickerOption<PermissionPolicy>[] = PERMISSION
 );
 
 interface Props {
+  modelCatalog?: ModelCatalog;
+  modelProblem?: string;
   busy: boolean;
   /** The half-written prompt. Owned by the tab, not by this component:
    *  switching tabs remounts the chat, and a remount must not eat it. */
@@ -134,6 +137,8 @@ interface Props {
  * typing "/" opens the command palette.
  */
 export function Composer({
+  modelCatalog,
+  modelProblem,
   busy,
   draft,
   attachments,
@@ -183,7 +188,8 @@ export function Composer({
     if (input && highlight) highlight.scrollTop = input.scrollTop;
   };
 
-  const effortOptions = EFFORT_OPTIONS[provider];
+  const chosenModel = pendingSpec?.model ?? model;
+  const effortOptions = reasoningChoices(provider, modelCatalog, chosenModel);
   // The empty id is the way back from a choice: the app's configured
   // default when there is one (named, so the user knows what they get),
   // otherwise the provider's own.
@@ -538,6 +544,8 @@ export function Composer({
           <div className="composer-card__group">
             <ContextGauge usage={usage} threshold={autoCompactThreshold} />
             <ModelPicker
+              catalog={modelCatalog}
+              problem={modelProblem}
               provider={provider}
               value={model}
               defaultModel={defaultModel}
@@ -549,7 +557,11 @@ export function Composer({
               <OptionPicker
                 ariaLabel="Reasoning effort"
                 options={effortPickerOptions}
-                value={pendingSpec?.effort ?? effort}
+                value={supportedEffort(
+                  modelCatalog,
+                  chosenModel,
+                  pendingSpec?.effort ?? effort,
+                )}
                 disabled={busy}
                 placeholder="effort"
                 align="end"

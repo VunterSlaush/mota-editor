@@ -1269,7 +1269,14 @@ pub(crate) async fn probe_handshake(
     provider_id: &str,
     project_path: &str,
     timeout: Duration,
-) -> Result<acp::AgentCaps, AcpStartError> {
+) -> Result<(acp::AgentCaps, Option<agent_core::model_catalog::ModelCatalog>), AcpStartError> {
+    let fallback_path;
+    let project_path = if project_path.is_empty() {
+        fallback_path = std::env::current_dir()
+            .map_err(|error| AcpStartError::Failed(error.to_string()))?
+            .to_string_lossy().into_owned();
+        &fallback_path
+    } else { project_path };
     let spec = SessionSpec {
         project_path: project_path.to_owned(),
         model: None,
@@ -1287,7 +1294,7 @@ pub(crate) async fn probe_handshake(
         .call_with_timeout(acp::session_new_request(id, project_path, &[]), id, timeout)
         .await;
     let result = match opened {
-        Ok(_) => Ok(session.caps()),
+        Ok(opened) => Ok((session.caps(), agent_core::model_catalog::from_session(&opened))),
         // Started but refused to open a session — almost always a
         // missing login; the agent's stderr usually says so.
         Err(e) => Err(AcpStartError::Failed(session.with_stderr(e))),

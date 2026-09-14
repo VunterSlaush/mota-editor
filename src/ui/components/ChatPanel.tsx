@@ -7,6 +7,7 @@ import {
   paletteCommands,
 } from "../../core/entities/command";
 import { type CommandSequence, withSequences } from "../../core/entities/commandSequence";
+import type { ModelCatalog } from "../../core/entities/modelCatalog";
 import type { ProviderId } from "../../core/entities/provider";
 import { providerById } from "../../core/entities/provider";
 import type { SubtaskScope } from "../../core/entities/subtask";
@@ -103,6 +104,8 @@ const WORKTREE_TAB_SIDEBAR_VIEWS: readonly SidebarView[] = ALL_SIDEBAR_VIEWS.fil
 );
 
 interface Props {
+  modelCatalog?: ModelCatalog;
+  modelProblem?: string;
   tab: TabState;
   /** Every open tab — the worktree panel reads its rows' status here. */
   tabs: readonly TabState[];
@@ -221,6 +224,8 @@ interface Props {
 
 /** UI — the chat for one project: header, transcript, plan, composer. */
 export function ChatPanel({
+  modelCatalog,
+  modelProblem,
   tab,
   tabs,
   autoCompactThreshold,
@@ -758,6 +763,8 @@ export function ChatPanel({
             />
           )}
           <Composer
+            modelCatalog={modelCatalog}
+            modelProblem={modelProblem}
             busy={tab.busy}
             draft={tab.draft ?? ""}
             attachments={tab.draftAttachments ?? EMPTY_ATTACHMENTS}

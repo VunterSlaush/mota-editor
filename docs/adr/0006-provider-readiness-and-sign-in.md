@@ -100,3 +100,16 @@ produce failures nobody could explain.
 - Nothing here can help a machine where the CLI itself cannot
   authenticate. The app's job is to say so clearly and offer the fix,
   not to pretend it owns the problem.
+
+### Codex model discovery
+
+The same readiness handshake returns Codex's authenticated model catalog. Chat,
+defaults, and command settings use these choices instead of a compiled GPT list.
+The core groups ACP `model[effort]` variants into models with their supported
+reasoning levels; selecting a different model clears an incompatible effort.
+
+Discovery opens no prompt and runs once per app session, sharing an in-flight
+request. Failures are shown in the picker and can be retried by rechecking the
+provider, which also refreshes the catalog after an account change. The catalog
+is not persisted: availability belongs to the current connection. Saved model
+ids remain selectable even when absent from discovery.
