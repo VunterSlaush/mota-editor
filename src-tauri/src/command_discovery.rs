@@ -28,12 +28,11 @@ pub struct CustomCommand {
 
 /// Where a provider keeps custom commands, relative to project and home.
 fn command_dirs(
-    app: &AppHandle,
+    home: Option<&Path>,
     project_path: &str,
     provider_id: &str,
 ) -> Vec<(PathBuf, CommandOrigin)> {
     let project = Path::new(project_path);
-    let home = app.path().home_dir().ok();
     let mut dirs = Vec::new();
     match provider_id {
         "claude" => {
@@ -46,6 +45,10 @@ fn command_dirs(
             }
         }
         "codex" => {
+            dirs.push((
+                project.join(".agents").join("commands"),
+                CommandOrigin::Project,
+            ));
             if let Some(home) = home {
                 dirs.push((home.join(".codex").join("prompts"), CommandOrigin::User));
             }
@@ -92,7 +95,11 @@ fn skill_dirs(
 
 pub fn discover(app: &AppHandle, project_path: &str, provider_id: &str) -> Vec<CustomCommand> {
     let mut commands: Vec<CustomCommand> = Vec::new();
-    for (dir, origin) in command_dirs(app, project_path, provider_id) {
+    for (dir, origin) in command_dirs(
+        app.path().home_dir().ok().as_deref(),
+        project_path,
+        provider_id,
+    ) {
         if let Some(dir) = resolve_dir(dir) {
             collect_from_dir(&dir, origin, &mut commands);
         }
@@ -117,6 +124,35 @@ pub fn discover(app: &AppHandle, project_path: &str, provider_id: &str) -> Vec<C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_discovers_shared_project_commands_without_a_matching_skill() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let commands_dir = project.join(".agents").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        for name in ["ship-it", "ticket"] {
+            fs::write(
+                commands_dir.join(format!("{name}.md")),
+                "---\ndescription: Project workflow\n---\nFollow the project workflow.",
+            )
+            .unwrap();
+        }
+        let mut commands = Vec::new();
+        for (dir, origin) in command_dirs(None, project.to_str().unwrap(), "codex") {
+            if let Some(dir) = resolve_dir(dir) {
+                collect_from_dir(&dir, origin, &mut commands);
+            }
+        }
+        commands.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(
+            commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["/ship-it", "/ticket"]
+        );
+        assert!(commands
+            .iter()
+            .all(|c| c.origin == CommandOrigin::Project && c.description == "Project workflow"));
+    }
 
     #[test]
     fn codex_discovers_project_and_user_skills() {

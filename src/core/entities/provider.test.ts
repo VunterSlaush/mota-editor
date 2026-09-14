@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { contextWindowFor, isProvisionalContextSize, providerById } from "./provider";
 
 describe("contextWindowFor", () => {
+  it("uses Astra's usable long context window for estimates", () => {
+    expect(contextWindowFor("codex", "gpt-6-astra")).toBe(997_500);
+  });
+
   it("caps haiku at 200k while the rest of the claude line is 1M", () => {
     expect(contextWindowFor("claude", "haiku")).toBe(200_000);
     expect(contextWindowFor("claude", "sonnet")).toBe(1_000_000);

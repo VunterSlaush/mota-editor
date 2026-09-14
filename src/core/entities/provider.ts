@@ -79,6 +79,8 @@ interface ContextWindowEntry {
  */
 const MODEL_CONTEXT_WINDOWS: readonly ContextWindowEntry[] = [
   { provider: "claude", match: "haiku", tokens: 200_000 },
+  // Matches the 1.05M launch override with Codex's 95% usable-context allowance.
+  { provider: "codex", match: "gpt-6-astra", tokens: 997_500 },
   { provider: "codex", match: "gpt-5", tokens: 400_000 },
 ];
 

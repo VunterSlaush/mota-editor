@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { autoCompactDecision, claimsTheTurn } from "./autoCompact";
 import { assistantMessage, type ChatMessage, userMessage } from "./message";
+import { contextWindowFor } from "./provider";
 
 const settings = (autoCompact: "compact" | "newChat" | "ask" | "off") => ({
   autoCompact,
@@ -19,6 +20,21 @@ const tab = (
 });
 
 describe("autoCompactDecision", () => {
+  it("does not compact Astra at the old 272k limit but still compacts near its new limit", () => {
+    const astra = {
+      messages: [],
+      usage: { used: 272_000, size: contextWindowFor("codex", "gpt-6-astra") },
+      project: { provider: "codex" as const },
+    };
+    expect(autoCompactDecision(astra, settings("compact")).action).toBe("nothing");
+    expect(
+      autoCompactDecision(
+        { ...astra, usage: { ...astra.usage, used: 900_000 } },
+        settings("compact"),
+      ).action,
+    ).toBe("compact");
+  });
+
   it("does nothing for a tab that has reported no usage", () => {
     const noUsage = { messages: [], project: { provider: "claude" as const } };
     expect(autoCompactDecision(noUsage, settings("compact")).action).toBe("nothing");

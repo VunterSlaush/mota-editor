@@ -113,3 +113,21 @@ request. Failures are shown in the picker and can be retried by rechecking the
 provider, which also refreshes the catalog after an account change. The catalog
 is not persisted: availability belongs to the current connection. Saved model
 ids remain selectable even when absent from discovery.
+
+### Astra context configuration
+
+When launching `gpt-6-astra`, Mota passes Codex's `model_context_window = 1050000`
+and `model_auto_compact_token_limit = 950000` through the existing `CODEX_CONFIG`
+adapter setting. Astra supports 1.05M tokens, while the local Codex catalog can
+default to 272k. Raising both settings prevents Codex's native compaction from
+retaining the smaller threshold. The native threshold leaves 100k of headroom;
+Mota's own configurable threshold still applies to the live reported window.
+Other model launches retain their existing settings.
+
+Client estimates use 997,500 tokens (Codex's 95% usable allowance). Live reports
+remain authoritative, including for older sessions that have not restarted with
+the override. This is a session configuration change, not a relabeling of usage.
+Restart the backend to apply it to resumed sessions.
+
+References: [Astra model limits](https://developers.openai.com/api/docs/models/gpt-6-astra)
+and [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference).

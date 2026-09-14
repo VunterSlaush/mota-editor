@@ -93,6 +93,16 @@ pub fn agent_env(
             let mut config = serde_json::Map::new();
             if let Some(model) = model {
                 config.insert("model".to_owned(), Value::String(model.to_owned()));
+                // Astra supports 1.05M, but Codex's catalog currently defaults to
+                // 272k. Configure the session itself, including native compaction,
+                // so the reported window and Mota's compaction policy agree.
+                if model == "gpt-6-astra" {
+                    config.insert("model_context_window".to_owned(), Value::from(1_050_000));
+                    config.insert(
+                        "model_auto_compact_token_limit".to_owned(),
+                        Value::from(950_000),
+                    );
+                }
             }
             if let Some(effort) = effort {
                 config.insert(
@@ -1498,6 +1508,16 @@ mod tests {
         assert_eq!(agent_commands("claude")[0].program, "claude-agent-acp");
         assert_eq!(agent_commands("codex")[0].program, "codex-acp");
         assert!(agent_commands("unknown").is_empty());
+    }
+
+    #[test]
+    fn astra_launch_enables_long_context_and_moves_native_compaction_with_it() {
+        let env = agent_env("codex", Some("gpt-6-astra"), Some("high"));
+        let config: Value = serde_json::from_str(&env[0].1).unwrap();
+        assert_eq!(config["model_context_window"], 1_050_000);
+        assert_eq!(config["model_auto_compact_token_limit"], 950_000);
+        assert_eq!(config["model"], "gpt-6-astra");
+        assert_eq!(config["model_reasoning_effort"], "high");
     }
 
     #[test]
