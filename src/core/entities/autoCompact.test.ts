@@ -20,16 +20,16 @@ const tab = (
 });
 
 describe("autoCompactDecision", () => {
-  it("does not compact Astra at the old 272k limit but still compacts near its new limit", () => {
-    const astra = {
+  it("does not compact long-context GPT models at the old 272k limit", () => {
+    const sol = {
       messages: [],
-      usage: { used: 272_000, size: contextWindowFor("codex", "gpt-6-astra") },
+      usage: { used: 272_000, size: contextWindowFor("codex", "gpt-5.6-sol") },
       project: { provider: "codex" as const },
     };
-    expect(autoCompactDecision(astra, settings("compact")).action).toBe("nothing");
+    expect(autoCompactDecision(sol, settings("compact")).action).toBe("nothing");
     expect(
       autoCompactDecision(
-        { ...astra, usage: { ...astra.usage, used: 900_000 } },
+        { ...sol, usage: { ...sol.usage, used: 900_000 } },
         settings("compact"),
       ).action,
     ).toBe("compact");

@@ -2,8 +2,18 @@ import { describe, expect, it } from "vitest";
 import { contextWindowFor, isProvisionalContextSize, providerById } from "./provider";
 
 describe("contextWindowFor", () => {
-  it("uses Astra's usable long context window for estimates", () => {
-    expect(contextWindowFor("codex", "gpt-6-astra")).toBe(997_500);
+  it("uses the usable long context window for current flagship GPT models", () => {
+    for (const model of [
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4",
+      "gpt-5.4-pro",
+    ]) {
+      expect(contextWindowFor("codex", model), model).toBe(997_500);
+    }
   });
 
   it("caps haiku at 200k while the rest of the claude line is 1M", () => {
@@ -20,9 +30,9 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor("claude", "claude-sonnet-5")).toBe(1_000_000);
   });
 
-  it("gives the gpt-5 family 400k", () => {
-    expect(contextWindowFor("codex", "gpt-5.5")).toBe(400_000);
+  it("keeps mini, nano, and older gpt-5 models at 400k", () => {
     expect(contextWindowFor("codex", "gpt-5.4-mini")).toBe(400_000);
+    expect(contextWindowFor("codex", "gpt-5.4-nano")).toBe(400_000);
     expect(contextWindowFor("codex", "gpt-5.3-codex")).toBe(400_000);
   });
 

@@ -424,6 +424,20 @@ pub async fn start_turn(
         .native_auto
         .store(applied == Some("auto"), Ordering::SeqCst);
 
+    if let Some(mode_id) = acp::native_collaboration_mode_id(provider_id, request.mode) {
+        let id = session.request_id();
+        let message = acp::set_config_option_request(
+            id,
+            &session.sid(),
+            "collaboration_mode",
+            mode_id,
+        );
+        // Older adapters do not expose session config options. The prompt
+        // preamble remains as the safe fallback when this best-effort call
+        // is rejected.
+        let _ = session.call_with_timeout(message, id, SET_MODE_TIMEOUT).await;
+    }
+
     // Last look before the point of no return: once the prompt is
     // written, stopping is the agent's cooperation (`session/cancel`);
     // before it, stopping is simply not sending it.

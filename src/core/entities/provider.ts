@@ -73,14 +73,19 @@ interface ContextWindowEntry {
 
 /**
  * Models whose window differs from their provider's default (verified
- * against vendor docs 2026-08): every current Claude line is 1M except
- * Haiku; GPT-5.x is 400K across the family; every current Gemini is 1M,
- * so it needs no rows.
+ * against vendor docs 2026-09): every current Claude line is 1M except
+ * Haiku; current flagship GPT lines are 1.05M while Mini, Nano, and older
+ * GPT-5 lines are 400K; every current Gemini is 1M, so it needs no rows.
  */
 const MODEL_CONTEXT_WINDOWS: readonly ContextWindowEntry[] = [
   { provider: "claude", match: "haiku", tokens: 200_000 },
   // Matches the 1.05M launch override with Codex's 95% usable-context allowance.
   { provider: "codex", match: "gpt-6-astra", tokens: 997_500 },
+  { provider: "codex", match: "gpt-5.4-mini", tokens: 400_000 },
+  { provider: "codex", match: "gpt-5.4-nano", tokens: 400_000 },
+  { provider: "codex", match: "gpt-5.6", tokens: 997_500 },
+  { provider: "codex", match: "gpt-5.5", tokens: 997_500 },
+  { provider: "codex", match: "gpt-5.4", tokens: 997_500 },
   { provider: "codex", match: "gpt-5", tokens: 400_000 },
 ];
 

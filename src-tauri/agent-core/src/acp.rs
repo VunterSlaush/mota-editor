@@ -16,6 +16,8 @@ use crate::provider::truncate;
 use crate::turn::{mode_preamble, Mode, Permission, TurnRequest};
 
 pub const PROTOCOL_VERSION: u64 = 1;
+const CODEX_LONG_CONTEXT_WINDOW: u64 = 1_050_000;
+const CODEX_LONG_CONTEXT_COMPACT_LIMIT: u64 = 950_000;
 
 /// How to launch a provider's ACP agent (adapter or native flag).
 #[derive(Debug, Clone, PartialEq)]
@@ -93,14 +95,16 @@ pub fn agent_env(
             let mut config = serde_json::Map::new();
             if let Some(model) = model {
                 config.insert("model".to_owned(), Value::String(model.to_owned()));
-                // Astra supports 1.05M, but Codex's catalog currently defaults to
-                // 272k. Configure the session itself, including native compaction,
-                // so the reported window and Mota's compaction policy agree.
-                if model == "gpt-6-astra" {
-                    config.insert("model_context_window".to_owned(), Value::from(1_050_000));
+                // Codex's catalog can report 272k for models whose actual window is
+                // 1.05M. Configure native compaction too so both limits agree.
+                if codex_has_long_context(model) {
+                    config.insert(
+                        "model_context_window".to_owned(),
+                        Value::from(CODEX_LONG_CONTEXT_WINDOW),
+                    );
                     config.insert(
                         "model_auto_compact_token_limit".to_owned(),
-                        Value::from(950_000),
+                        Value::from(CODEX_LONG_CONTEXT_COMPACT_LIMIT),
                     );
                 }
             }
@@ -121,6 +125,22 @@ pub fn agent_env(
             .unwrap_or_default(),
         _ => vec![],
     }
+}
+
+fn codex_has_long_context(model: &str) -> bool {
+    model_family(model, "gpt-6-astra")
+        || model_family(model, "gpt-5.6")
+        || model_family(model, "gpt-5.5")
+        || (model_family(model, "gpt-5.4")
+            && !model_family(model, "gpt-5.4-mini")
+            && !model_family(model, "gpt-5.4-nano"))
+}
+
+fn model_family(model: &str, family: &str) -> bool {
+    model == family
+        || model
+            .strip_prefix(family)
+            .is_some_and(|suffix| suffix.starts_with('-'))
 }
 
 /// How to sign a provider in, for the "Sign in" action on the settings
@@ -198,18 +218,15 @@ pub fn is_auth_failure(message: &str) -> bool {
     NEEDLES.iter().any(|needle| haystack.contains(needle))
 }
 
-/// The agent-defined session-mode id that natively enforces our mode,
-/// per provider (verified against each adapter's advertised modes).
+/// The agent-defined approval/sandbox mode for this turn.
 pub fn native_mode_id(
     provider_id: &str,
     mode: Mode,
     permission: Permission,
 ) -> Option<&'static str> {
     match (provider_id, mode) {
-        // Ask rides plan mode's enforcement: what both need from the CLI
-        // is "read anything, write nothing", and that is the only
-        // read-only tier either vendor exposes. What separates them is
-        // `turn::mode_preamble`, which Ask keeps even here.
+        // Claude's plan mode also supplies the behavior. Codex exposes its
+        // planning behavior separately as a collaboration-mode option.
         ("claude", Mode::Plan | Mode::Ask) => Some("plan"),
         // Claude's native `auto`: its own permission system approves what
         // it calls safe and asks about the rest — exactly the app's Auto
@@ -217,14 +234,26 @@ pub fn native_mode_id(
         ("claude", _) if permission == Permission::Auto => Some("auto"),
         ("claude", _) => Some("default"),
         ("codex", Mode::Plan | Mode::Ask) => Some("read-only"),
+        ("codex", _) if permission == Permission::Bypass => Some("agent-full-access"),
         ("codex", _) => Some("agent"),
         _ => None,
     }
 }
 
-/// Whether plan mode is natively enforced over ACP for this provider.
+/// Codex exposes planning separately from its approval/sandbox mode.
+pub fn native_collaboration_mode_id(provider_id: &str, mode: Mode) -> Option<&'static str> {
+    (provider_id == "codex").then_some(if mode == Mode::Plan {
+        "plan"
+    } else {
+        "default"
+    })
+}
+
+/// Whether native plan enforcement is strong enough to omit our fallback
+/// preamble. Codex needs a separate best-effort config request, so it keeps
+/// the preamble as well.
 pub fn plan_is_native(provider_id: &str) -> bool {
-    native_mode_id(provider_id, Mode::Plan, Permission::Manual).is_some()
+    provider_id == "claude"
 }
 
 // ---- Outgoing messages (client → agent) ----
@@ -458,6 +487,15 @@ pub fn set_mode_request(id: i64, session_id: &str, mode_id: &str) -> Value {
         "id": id,
         "method": "session/set_mode",
         "params": { "sessionId": session_id, "modeId": mode_id }
+    })
+}
+
+pub fn set_config_option_request(id: i64, session_id: &str, config_id: &str, value: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "session/set_config_option",
+        "params": { "sessionId": session_id, "configId": config_id, "value": value }
     })
 }
 
@@ -1511,13 +1549,36 @@ mod tests {
     }
 
     #[test]
-    fn astra_launch_enables_long_context_and_moves_native_compaction_with_it() {
-        let env = agent_env("codex", Some("gpt-6-astra"), Some("high"));
-        let config: Value = serde_json::from_str(&env[0].1).unwrap();
-        assert_eq!(config["model_context_window"], 1_050_000);
-        assert_eq!(config["model_auto_compact_token_limit"], 950_000);
-        assert_eq!(config["model"], "gpt-6-astra");
-        assert_eq!(config["model_reasoning_effort"], "high");
+    fn long_context_codex_models_move_native_compaction_with_their_window() {
+        for model in [
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-pro",
+        ] {
+            let env = agent_env("codex", Some(model), Some("high"));
+            let config: Value = serde_json::from_str(&env[0].1).unwrap();
+            assert_eq!(config["model_context_window"], 1_050_000, "{model}");
+            assert_eq!(config["model_auto_compact_token_limit"], 950_000, "{model}");
+            assert_eq!(config["model"], model);
+            assert_eq!(config["model_reasoning_effort"], "high");
+        }
+    }
+
+    #[test]
+    fn smaller_codex_models_keep_their_catalog_context_window() {
+        for model in ["gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.3-codex"] {
+            let env = agent_env("codex", Some(model), None);
+            let config: Value = serde_json::from_str(&env[0].1).unwrap();
+            assert!(config.get("model_context_window").is_none(), "{model}");
+            assert!(
+                config.get("model_auto_compact_token_limit").is_none(),
+                "{model}"
+            );
+        }
     }
 
     #[test]
@@ -1530,10 +1591,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            agent_env("codex", Some("gpt-5.5"), Some("high")),
+            agent_env("codex", Some("gpt-5.3-codex"), Some("high")),
             vec![(
                 "CODEX_CONFIG".to_owned(),
-                "{\"model\":\"gpt-5.5\",\"model_reasoning_effort\":\"high\"}".to_owned()
+                "{\"model\":\"gpt-5.3-codex\",\"model_reasoning_effort\":\"high\"}".to_owned()
             )]
         );
         // Gemini exposes no effort control; model only.
@@ -1967,6 +2028,10 @@ mod tests {
         assert_eq!(native_mode_id("claude", Mode::Agent, Permission::Auto), Some("auto"));
         assert_eq!(native_mode_id("claude", Mode::Plan, Permission::Auto), Some("plan"));
         assert_eq!(native_mode_id("codex", Mode::Agent, Permission::Auto), Some("agent"));
+        assert_eq!(
+            native_mode_id("codex", Mode::Agent, Permission::Bypass),
+            Some("agent-full-access")
+        );
         // Ask borrows the read-only tier, and must keep it even under a
         // permission policy that would otherwise hand it write access.
         assert_eq!(native_mode_id("claude", Mode::Ask, manual), Some("plan"));
@@ -1974,6 +2039,51 @@ mod tests {
         assert_eq!(native_mode_id("claude", Mode::Ask, Permission::Bypass), Some("plan"));
         assert_eq!(native_mode_id("codex", Mode::Ask, manual), Some("read-only"));
         assert_eq!(native_mode_id("codex", Mode::Ask, Permission::Bypass), Some("read-only"));
+    }
+
+    #[test]
+    fn codex_plan_uses_the_native_collaboration_mode() {
+        assert_eq!(
+            native_collaboration_mode_id("codex", Mode::Plan),
+            Some("plan")
+        );
+        assert_eq!(
+            native_collaboration_mode_id("codex", Mode::Agent),
+            Some("default")
+        );
+        assert_eq!(
+            native_collaboration_mode_id("codex", Mode::Ask),
+            Some("default")
+        );
+        assert_eq!(native_collaboration_mode_id("claude", Mode::Plan), None);
+    }
+
+    #[test]
+    fn session_config_option_request_uses_the_acp_wire_shape() {
+        assert_eq!(
+            set_config_option_request(7, "s1", "collaboration_mode", "plan"),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "session/set_config_option",
+                "params": {
+                    "sessionId": "s1",
+                    "configId": "collaboration_mode",
+                    "value": "plan"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn codex_plan_prompt_keeps_a_fallback_preamble() {
+        let request = TurnRequest {
+            mode: Mode::Plan,
+            ..test_request("add auth")
+        };
+        let prompt = prompt_request_for_provider(3, "s", "codex", &request);
+        let text = prompt["params"]["prompt"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("You are in PLAN MODE."));
     }
 
     #[test]
