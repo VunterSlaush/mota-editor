@@ -105,8 +105,9 @@ pub struct AcpSession {
     /// a permission request arriving then means "this one is risky", so
     /// the app must not second-guess it with its own approvals.
     native_auto: AtomicBool,
-    /// True while the current turn runs in plan mode — auto-approval is
-    /// fully disabled then: approving the plan is the user's call.
+    /// True while the current turn runs in plan mode — Auto's own EDIT
+    /// approvals stay off then. Bypass still holds: approving the plan
+    /// is the user's call, approving the reads behind it is not.
     plan_mode: AtomicBool,
     turn_active: AtomicBool,
     /// Set once this session holds something worth restoring: a prompt
@@ -1543,17 +1544,22 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
             // hold — a request arriving then means "this one is risky,
             // ask" and must reach the user untouched; only without a
             // native tier does the app approve EDITs itself. Never a plan
-            // approval, and nothing at all while in plan mode. When the
-            // agent offers no allow option, bypass_choice is None and the
-            // request falls through to the user.
+            // approval: accepting the plan stays the user's call whatever
+            // the policy. Plan mode does NOT otherwise suspend bypass —
+            // it changes what the agent does, not whether the user asked
+            // to be left alone, and a planning turn is mostly the reads
+            // and greps that would be the loudest to approve one by one.
+            // Auto's edit fallback does stay off while planning: nobody
+            // asked for elevation there. When the agent offers no allow
+            // option, bypass_choice is None and the request falls through
+            // to the user.
             let is_plan = acp::is_plan_approval(&title, &options, tool_kind.as_deref());
             let auto_edit_fallback = session.auto.load(Ordering::SeqCst)
                 && !session.native_auto.load(Ordering::SeqCst)
-                && tool_kind.as_deref() == Some("edit");
-            let may_auto_approve = (session.bypass.load(Ordering::SeqCst)
-                || auto_edit_fallback)
-                && !session.plan_mode.load(Ordering::SeqCst)
-                && !is_plan;
+                && tool_kind.as_deref() == Some("edit")
+                && !session.plan_mode.load(Ordering::SeqCst);
+            let may_auto_approve =
+                (session.bypass.load(Ordering::SeqCst) || auto_edit_fallback) && !is_plan;
             if may_auto_approve {
                 if let Some(choice) = acp::bypass_choice(&options) {
                     let response = acp::permission_selected_response(id, &choice.option_id);
