@@ -1113,6 +1113,13 @@ pub fn bypass_choice(options: &[PermissionOptionInfo]) -> Option<&PermissionOpti
 /// run, and a substring match turned any command mentioning `roofPlane` or
 /// `planner.ts` into a "plan approval" that bypass refused to answer.
 ///
+/// The title is only ever consulted when the request says nothing about
+/// what it guards. A whole-word match is still a guess about a sentence
+/// the agent wrote for a human — `grep -n plan_mode acp.rs` is a `plan`
+/// by that reading — so a stated kind wins over it outright: the tool a
+/// plan approval guards is `switch_mode`, and anything else is an
+/// ordinary tool call whatever its title says.
+///
 /// The id list is per-agent vocabulary and it moves — claude-agent-acp 0.73
 /// renamed `auto` to `exit-plan-auto` — so both spellings are listed, along
 /// with Codex's. It is only a fallback: every adapter we ship against sets
@@ -1122,8 +1129,10 @@ pub fn is_plan_approval(
     options: &[PermissionOptionInfo],
     tool_kind: Option<&str>,
 ) -> bool {
-    if tool_kind == Some("switch_mode") {
-        return true;
+    match tool_kind {
+        Some("switch_mode") => return true,
+        Some(_) => return false,
+        None => {}
     }
     const MODE_SWITCH_IDS: [&str; 14] = [
         // Claude, 0.73 and later.
@@ -2488,6 +2497,21 @@ mod tests {
             "git commit -m \"align the roofPlane accent\"",
             &[opt("allow", "allow_once"), opt("reject", "reject_once")],
             None
+        ));
+        // A stated kind beats the title even when the title says "plan"
+        // as a whole word: working ON plan mode means running commands
+        // that name it, and every one of those was reaching the user as
+        // a plan card that bypass would not answer.
+        assert!(!is_plan_approval(
+            "grep -n plan_mode src-tauri/src/acp_session.rs",
+            &[opt("allow", "allow_once"), opt("reject", "reject_once")],
+            Some("execute")
+        ));
+        // Same for a file the agent is about to read or edit.
+        assert!(!is_plan_approval(
+            "Edit docs/adr/0004-modes-and-permissions.md",
+            &[opt("allow", "allow_once"), opt("reject", "reject_once")],
+            Some("edit")
         ));
     }
 
