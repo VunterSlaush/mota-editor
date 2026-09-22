@@ -4,6 +4,7 @@ import {
   COST_PRESETS,
   clampAutoCompactThreshold,
   DEFAULT_AUTO_COMPACT_THRESHOLD,
+  executingMode,
   MAX_AUTO_COMPACT_THRESHOLD,
   MIN_AUTO_COMPACT_THRESHOLD,
   MODES,
@@ -133,6 +134,20 @@ describe("modeFromAgentModeId", () => {
   it("is null for an id this build has never heard of", () => {
     // Guessing a mode the user never chose is worse than doing nothing.
     expect(modeFromAgentModeId("architect", "agent")).toBeNull();
+  });
+});
+
+describe("executingMode", () => {
+  it("leaves a read-only mode behind, so a handed-over plan is implemented", () => {
+    // A fresh session still in Plan mode would plan the plan again.
+    expect(executingMode("plan")).toBe("agent");
+    expect(executingMode("ask")).toBe("agent");
+  });
+
+  it("keeps a mode that already writes", () => {
+    // Debug writes too, and its instructions are the user's own choice.
+    expect(executingMode("agent")).toBe("agent");
+    expect(executingMode("debug")).toBe("debug");
   });
 });
 

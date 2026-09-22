@@ -20,6 +20,7 @@ import type { RemovalCheck } from "../../core/entities/worktree";
 import type { WorktreeAddMode, WorktreeRemoveMode } from "../../core/ports/gitPort";
 import type { ShellSize } from "../../core/ports/shellPort";
 import type { TabState } from "../../core/state/appState";
+import type { FreshSessionSpec } from "../../core/usecases/executePlanInFreshSession";
 import type { GitActionResult } from "../../core/usecases/gitActions";
 import type { HistoryItem, HistoryListing } from "../../core/usecases/history";
 import type { GitChanges } from "../../core/usecases/loadGitChanges";
@@ -106,6 +107,12 @@ const WORKTREE_TAB_SIDEBAR_VIEWS: readonly SidebarView[] = ALL_SIDEBAR_VIEWS.fil
 interface Props {
   modelCatalog?: ModelCatalog;
   modelProblem?: string;
+  /** Every provider's models, for a plan card's handoff pickers — the
+   *  singular pair above is this tab's provider, for the composer. */
+  modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
+  modelProblems?: Partial<Record<ProviderId, string>>;
+  /** Probes a provider's models on demand. Stable identity. */
+  discoverModels: (provider: ProviderId) => Promise<void>;
   tab: TabState;
   /** Every open tab — the worktree panel reads its rows' status here. */
   tabs: readonly TabState[];
@@ -161,6 +168,8 @@ interface Props {
   onToggleVerbose: (verbose: boolean) => void;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
+  /** Hand a plan card's plan to a fresh session. Stable identity. */
+  onExecutePlanInFreshSession: (spec: FreshSessionSpec) => void;
   onRetry: () => void;
   /** Open the provider's login prompt, offered on a sign-in failure. */
   onSignIn: () => void;
@@ -226,6 +235,9 @@ interface Props {
 export function ChatPanel({
   modelCatalog,
   modelProblem,
+  modelCatalogs,
+  modelProblems,
+  discoverModels,
   tab,
   tabs,
   autoCompactThreshold,
@@ -262,6 +274,7 @@ export function ChatPanel({
   onToggleVerbose,
   onRespondPermission,
   onAnswerQuestion,
+  onExecutePlanInFreshSession,
   onRetry,
   onSignIn,
   loadCommands,
@@ -744,6 +757,12 @@ export function ChatPanel({
             onRespondPermission={onRespondPermission}
             onAnswerQuestion={onAnswerQuestion}
             onShowPlan={showPlan}
+            provider={tab.project.provider}
+            permission={tab.project.permission}
+            modelCatalogs={modelCatalogs}
+            modelProblems={modelProblems}
+            discoverModels={discoverModels}
+            onExecutePlanInFreshSession={onExecutePlanInFreshSession}
           />
           {tab.contextFullPercent !== undefined && (
             <ContextFullBar

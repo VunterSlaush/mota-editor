@@ -210,6 +210,18 @@ const MODE_ENFORCES: Readonly<Record<AgentMode, "readOnly" | "writable">> = {
   ask: "readOnly",
 };
 
+/**
+ * The mode a session must be in to CARRY OUT work rather than describe
+ * it. Handing a plan to a session still set to Plan or Ask would have it
+ * plan the plan again — the agent's own tooling is told read-only, so it
+ * could not implement anything even if it tried. Agent and Debug already
+ * write, and the difference between them is instructions the user chose,
+ * so neither is touched.
+ */
+export function executingMode(mode: AgentMode): AgentMode {
+  return MODE_ENFORCES[mode] === "readOnly" ? "agent" : mode;
+}
+
 /** Same question of an agent's own mode id, or null if we don't know it. */
 function enforcedByAgentModeId(modeId: string): "readOnly" | "writable" | null {
   switch (modeId) {

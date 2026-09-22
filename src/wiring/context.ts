@@ -61,6 +61,7 @@ import { CancelTurn } from "../core/usecases/cancelTurn";
 import { CloseProject } from "../core/usecases/closeProject";
 import { DiscoverModels } from "../core/usecases/discoverModels";
 import { EditDraft } from "../core/usecases/editDraft";
+import { ExecutePlanInFreshSession } from "../core/usecases/executePlanInFreshSession";
 import { ExtensionPanels } from "../core/usecases/extensionPanels";
 import { GitActions } from "../core/usecases/gitActions";
 import { SessionHistory } from "../core/usecases/history";
@@ -138,6 +139,8 @@ export interface AppContext {
   readonly cancelTurn: CancelTurn;
   readonly respondPermission: RespondPermission;
   readonly respondQuestion: RespondQuestion;
+  /** Hands a plan card's plan to a fresh session on a model the user picks. */
+  readonly executePlanInFreshSession: ExecutePlanInFreshSession;
   readonly listCommands: ListCommands;
   readonly listSubagents: ListSubagents;
   readonly listProjectFiles: ListProjectFiles;
@@ -310,6 +313,14 @@ export function createAppContext(): AppContext {
     cancelTurn: new CancelTurn(store, agentGateway),
     respondPermission: new RespondPermission(store, agentGateway, workspaceStore),
     respondQuestion: new RespondQuestion(store, agentGateway),
+    // Same knot as the extension turn starter above: the handoff needs a
+    // turn started, and SendPrompt exists by here.
+    executePlanInFreshSession: new ExecutePlanInFreshSession(
+      store,
+      agentGateway,
+      workspaceStore,
+      (tabId, prompt) => sendPrompt.execute(tabId, prompt),
+    ),
     listCommands: new ListCommands(store, commandCatalog),
     listSubagents,
     listProjectFiles: new ListProjectFiles(store, projectFiles),

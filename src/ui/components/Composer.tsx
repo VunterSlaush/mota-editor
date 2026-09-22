@@ -3,19 +3,16 @@ import {
   Bug,
   ClipboardText,
   Gauge,
-  Lightning,
   Paperclip,
-  PencilSimple,
   Plus,
   Question,
   Robot,
-  ShieldCheck,
   Stop,
   X,
 } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentMode, PermissionPolicy } from "../../core/entities/agentSettings";
-import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
+import { MODES } from "../../core/entities/agentSettings";
 import {
   type CommandInfo,
   commandNames,
@@ -41,6 +38,7 @@ import { ContextGauge } from "./ContextGauge";
 import { FileMentionMenu } from "./FileMentionMenu";
 import { ModelPicker } from "./ModelPicker";
 import { OptionPicker, type PickerOption } from "./OptionPicker";
+import { PermissionPicker } from "./PermissionPicker";
 
 /** The input grows with the text up to this many lines, then scrolls. */
 const MAX_INPUT_LINES = 4;
@@ -69,20 +67,10 @@ const MODE_ICONS: Record<AgentMode, ReactNode> = {
   debug: <Bug />,
 };
 
-const PERMISSION_ICONS: Record<PermissionPolicy, ReactNode> = {
-  manual: <ShieldCheck />,
-  auto: <PencilSimple />,
-  bypass: <Lightning />,
-};
-
 const MODE_OPTIONS: readonly PickerOption<AgentMode>[] = MODES.map((mode) => ({
   ...mode,
   icon: MODE_ICONS[mode.id],
 }));
-
-const PERMISSION_OPTIONS: readonly PickerOption<PermissionPolicy>[] = PERMISSIONS.map(
-  (permission) => ({ ...permission, icon: PERMISSION_ICONS[permission.id] }),
-);
 
 interface Props {
   modelCatalog?: ModelCatalog;
@@ -533,9 +521,7 @@ export function Composer({
               disabled={busy}
               onChange={onSelectMode}
             />
-            <OptionPicker
-              ariaLabel="Permissions"
-              options={PERMISSION_OPTIONS}
+            <PermissionPicker
               value={permission}
               disabled={busy}
               onChange={onSelectPermission}

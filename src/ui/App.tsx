@@ -13,6 +13,7 @@ import { applyZoomIntent, zoomFactor, zoomIntent } from "../core/entities/zoom";
 import type { ShellSize } from "../core/ports/shellPort";
 import type { TabState } from "../core/state/appState";
 import { activeTab } from "../core/state/appState";
+import type { FreshSessionSpec } from "../core/usecases/executePlanInFreshSession";
 import type { GitChanges } from "../core/usecases/loadGitChanges";
 import type { OpenShellRequest } from "../core/usecases/shells";
 import type { AppContext } from "../wiring/context";
@@ -255,6 +256,11 @@ export function App({ context }: { context: AppContext }) {
       void context.respondQuestion.execute(activeProjectId, requestId, answers),
     [context, activeProjectId],
   );
+  const executePlanInFreshSession = useCallback(
+    (spec: FreshSessionSpec) =>
+      void context.executePlanInFreshSession.execute(activeProjectId, spec),
+    [context, activeProjectId],
+  );
   const retryLast = useCallback(
     () => void context.sendPrompt.retryLast(activeProjectId),
     [context, activeProjectId],
@@ -463,12 +469,16 @@ export function App({ context }: { context: AppContext }) {
           fileActions={fileActions}
           onRespondPermission={respondPermission}
           onAnswerQuestion={answerQuestion}
+          onExecutePlanInFreshSession={executePlanInFreshSession}
           onRetry={retryLast}
           onSignIn={signInActiveProvider}
           onReadTerminal={readTerminal}
           loadCommands={() => context.listCommands.execute(tab.project.id)}
           modelCatalog={state.modelCatalogs?.[tab.project.provider]}
           modelProblem={state.modelProblems?.[tab.project.provider]}
+          modelCatalogs={state.modelCatalogs}
+          modelProblems={state.modelProblems}
+          discoverModels={discoverModels}
           commandSequences={state.settings.commandSequences}
           onPickFiles={() => context.filePicker.pickFiles()}
           onPasteImage={(bytes, mimeType) =>

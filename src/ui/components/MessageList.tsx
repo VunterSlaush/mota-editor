@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { PermissionPolicy } from "../../core/entities/agentSettings";
 import { permissionOptionHint } from "../../core/entities/approval";
 import { formatElapsed } from "../../core/entities/duration";
 import {
@@ -29,12 +30,16 @@ import {
   type ToolCallState,
   type TurnMeta,
 } from "../../core/entities/message";
+import type { ModelCatalog } from "../../core/entities/modelCatalog";
+import type { ProviderId } from "../../core/entities/provider";
 import { formatTokens } from "../../core/entities/tokens";
 import type { Row, RowStatus, RunSummary } from "../../core/entities/toolRun";
 import { groupToolRuns, segmentQuietRuns } from "../../core/entities/toolRun";
+import type { FreshSessionSpec } from "../../core/usecases/executePlanInFreshSession";
 import { fileName } from "../fileName";
 import { CommandText } from "./CommandText";
 import { Markdown } from "./MarkdownLite";
+import { PlanHandoff } from "./PlanHandoff";
 import { QuestionCard } from "./QuestionCard";
 import {
   type AgentDiff,
@@ -71,6 +76,17 @@ interface Props {
   onRespondPermission: (requestId: string, optionId: string) => void;
   onAnswerQuestion: (requestId: string, answers: Record<string, string>) => void;
   onShowPlan: () => void;
+  /** The tab's own settings, where a plan card's handoff pickers start. */
+  provider: ProviderId;
+  permission: PermissionPolicy;
+  /** Every provider's models, not just this tab's: a plan may be handed
+   *  to a vendor this tab has never run. Reducer-owned, so stable. */
+  modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
+  modelProblems?: Partial<Record<ProviderId, string>>;
+  /** Probes a provider's models on demand. Stable identity. */
+  discoverModels: (provider: ProviderId) => Promise<void>;
+  /** Hand this plan to a fresh session. Stable identity. */
+  onExecutePlanInFreshSession: (spec: FreshSessionSpec) => void;
 }
 
 // Info stays visible: cancellations, fallback notices, and stop-reason
@@ -100,6 +116,12 @@ export function MessageList({
   onRespondPermission,
   onAnswerQuestion,
   onShowPlan,
+  provider,
+  permission,
+  modelCatalogs,
+  modelProblems,
+  discoverModels,
+  onExecutePlanInFreshSession,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLDivElement>(null);
@@ -174,6 +196,12 @@ export function MessageList({
         onOpenFile={onOpenFile}
         onShowAgentDiff={onShowAgentDiff}
         onReadTerminal={onReadTerminal}
+        provider={provider}
+        permission={permission}
+        modelCatalogs={modelCatalogs}
+        modelProblems={modelProblems}
+        discoverModels={discoverModels}
+        onExecutePlanInFreshSession={onExecutePlanInFreshSession}
       />
     ) : (
       <MessageBubble
@@ -398,6 +426,12 @@ const ApprovalCard = memo(function ApprovalCard({
   onOpenFile,
   onShowAgentDiff,
   onReadTerminal,
+  provider,
+  permission,
+  modelCatalogs,
+  modelProblems,
+  discoverModels,
+  onExecutePlanInFreshSession,
 }: {
   message: ChatMessage;
   /** The tool call this request guards, when the agent named it — shown
@@ -408,7 +442,16 @@ const ApprovalCard = memo(function ApprovalCard({
   onOpenFile: (path: string) => void;
   onShowAgentDiff: (diff: AgentDiff) => void;
   onReadTerminal: ReadTerminal;
+  provider: ProviderId;
+  permission: PermissionPolicy;
+  modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
+  modelProblems?: Partial<Record<ProviderId, string>>;
+  discoverModels: (provider: ProviderId) => Promise<void>;
+  onExecutePlanInFreshSession: (spec: FreshSessionSpec) => void;
 }) {
+  // Local to the card: handing this plan over is a decision about THIS
+  // card, and it dies with it when the turn resolves or is cancelled.
+  const [handingOff, setHandingOff] = useState(false);
   const approval = message.approval;
   if (!approval) return null;
   const answered = Boolean(approval.resolvedOptionId) || Boolean(approval.cancelled);
@@ -447,7 +490,11 @@ const ApprovalCard = memo(function ApprovalCard({
               className={`approval__button ${
                 option.kind.startsWith("reject") ? "approval__button--reject" : ""
               }`}
-              disabled={answered}
+              // "Auto-accept edits here" and "hand this to another model"
+              // are contradictory answers, so only one may be clickable.
+              // The options stay visible either way: the card must still
+              // show what the agent offered.
+              disabled={answered || handingOff}
               onClick={() => onRespond(approval.requestId, option.optionId)}
             >
               <span className="approval__button-label">{option.name}</span>
@@ -461,6 +508,32 @@ const ApprovalCard = memo(function ApprovalCard({
       {approval.isPlan && !answered && (
         <div className="approval__aside">
           Or just tell the agent what to change — sending a message turns this plan down.
+        </div>
+      )}
+      {/* The plan is self-contained, so it is the one thing that can be
+          handed to a different model without the conversation. Gated on
+          the plan text for the same reason the "View the plan" link is:
+          without it there is nothing to hand over. */}
+      {approval.isPlan && approval.planMarkdown && !answered && (
+        <div className="approval__handoff">
+          <label className="approval__handoff-toggle">
+            <input
+              type="checkbox"
+              checked={handingOff}
+              onChange={(event) => setHandingOff(event.target.checked)}
+            />
+            Execute this plan in a fresh session
+          </label>
+          {handingOff && (
+            <PlanHandoff
+              provider={provider}
+              permission={permission}
+              modelCatalogs={modelCatalogs}
+              modelProblems={modelProblems}
+              discoverModels={discoverModels}
+              onConfirm={onExecutePlanInFreshSession}
+            />
+          )}
         </div>
       )}
       {chosen && <div className="approval__status">You chose: {chosen.name}</div>}

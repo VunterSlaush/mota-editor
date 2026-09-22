@@ -27,9 +27,7 @@ export async function startNewChat(
   if (!before || before.busy) return;
   const provider = before.project.provider;
 
-  await agentGateway.endSession(tabId).catch(() => undefined);
-  store.dispatch({ type: "chat/cleared", tabId });
-  store.dispatch({ type: "chat/sessionReset", tabId, provider });
+  await endConversation(store, agentGateway, tabId);
 
   // Read the tab back: the reset folds in any model/effort change that
   // was deferred during the last conversation, and the fresh session
@@ -49,4 +47,27 @@ export async function startNewChat(
       subtask,
     )
     .catch(() => undefined); // warm-up is best-effort
+}
+
+/**
+ * Shared step — end the tab's agent session and wipe the conversation,
+ * leaving nothing to resume. Separate from `startNewChat` because
+ * handing a plan to another provider needs the forgetting WITHOUT the
+ * warm-up: warming here would spawn the outgoing provider's agent for
+ * nothing and then race the turn about to start.
+ *
+ * The caller must have ensured the turn is over — clearing the screen
+ * under a live turn would orphan it.
+ */
+export async function endConversation(
+  store: Store,
+  agentGateway: AgentGateway,
+  tabId: string,
+): Promise<void> {
+  const tab = tabById(store.getState(), tabId);
+  if (!tab) return;
+
+  await agentGateway.endSession(tabId).catch(() => undefined);
+  store.dispatch({ type: "chat/cleared", tabId });
+  store.dispatch({ type: "chat/sessionReset", tabId, provider: tab.project.provider });
 }
