@@ -83,6 +83,7 @@ import { ScopeWorktreeProvisioning } from "../core/usecases/scopeWorktreeProvisi
 import { SendPrompt } from "../core/usecases/sendPrompt";
 import { SessionStatus } from "../core/usecases/sessionStatus";
 import { Shells } from "../core/usecases/shells";
+import { StartNewChatOnDefaults } from "../core/usecases/startNewChatOnDefaults";
 import { Subtasks } from "../core/usecases/subtasks";
 import {
   SelectEffort,
@@ -133,6 +134,8 @@ export interface AppContext {
   readonly worktreeProvisioning: WorktreeProvisioning;
   readonly removeWorktree: RemoveWorktree;
   readonly sessionHistory: SessionHistory;
+  /** The New chat button: a fresh conversation on the app's defaults. */
+  readonly startNewChatOnDefaults: StartNewChatOnDefaults;
   readonly updateSettings: UpdateSettings;
   readonly sendPrompt: SendPrompt;
   readonly editDraft: EditDraft;
@@ -330,6 +333,11 @@ export function createAppContext(): AppContext {
     loadInsights: (range) =>
       new LoadInsights(store, transcriptStore, billingStore).execute(range),
     sessionHistory: new SessionHistory(store, transcriptStore, agentGateway, worktrees),
+    startNewChatOnDefaults: new StartNewChatOnDefaults(
+      store,
+      agentGateway,
+      workspaceStore,
+    ),
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe,
     mcpProbe,

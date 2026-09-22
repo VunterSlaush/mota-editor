@@ -150,6 +150,10 @@ interface Props {
   onOpenSession: (item: HistoryItem) => Promise<void>;
   onDeleteSession: (item: HistoryItem) => Promise<void>;
   onNewChat: () => void;
+  /** The header's New chat button, which also puts the tab back on the
+   *  app's defaults. The other new-chat routes deliberately do not —
+   *  they continue work in hand with the settings it was started with. */
+  onNewChatOnDefaults: () => void;
   onSend: (prompt: string, attachments: readonly string[]) => void;
   onDraftChange: (draft: string, attachments: readonly string[]) => void;
   onRemoveQueued: (index: number) => void;
@@ -258,6 +262,7 @@ export function ChatPanel({
   onOpenSession,
   onDeleteSession,
   onNewChat,
+  onNewChatOnDefaults,
   onSend,
   onDraftChange,
   onRemoveQueued,
@@ -586,8 +591,8 @@ export function ChatPanel({
             type="button"
             className="new-chat-button"
             disabled={tab.busy}
-            title="New chat — clears the screen AND starts a fresh agent context"
-            onClick={onNewChat}
+            title="New chat — clears the screen, starts a fresh agent context, and returns the tab to your defaults"
+            onClick={onNewChatOnDefaults}
           >
             <NotePencil size={14} aria-hidden="true" />
             New chat

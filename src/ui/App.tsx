@@ -381,6 +381,9 @@ export function App({ context }: { context: AppContext }) {
           onOpenSession={(item) => context.sessionHistory.open(tab.project.id, item)}
           onDeleteSession={(item) => context.sessionHistory.remove(tab.project.id, item)}
           onNewChat={() => context.sessionHistory.startNew(tab.project.id)}
+          onNewChatOnDefaults={() =>
+            void context.startNewChatOnDefaults.execute(tab.project.id)
+          }
           onSend={(prompt, attachments) => {
             // A "!" line was never meant for the agent: it runs in this
             // project's own terminal, which is also where its output
