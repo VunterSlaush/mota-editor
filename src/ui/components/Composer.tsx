@@ -88,6 +88,8 @@ interface Props {
   provider: ProviderId;
   mode: AgentMode;
   permission: PermissionPolicy;
+  /** Whether Jev's gate runs — the only time "Auto with Jev" is offered. */
+  jevGate: boolean;
   model: string;
   effort: string;
   /** What "default" resolves to for this provider (from Settings →
@@ -138,6 +140,7 @@ export function Composer({
   provider,
   mode,
   permission,
+  jevGate,
   model,
   effort,
   defaultModel,
@@ -524,6 +527,7 @@ export function Composer({
             <PermissionPicker
               value={permission}
               disabled={busy}
+              jevGate={jevGate}
               onChange={onSelectPermission}
             />
           </div>

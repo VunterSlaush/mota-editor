@@ -49,9 +49,9 @@ fn segments(path: &str) -> Vec<String> {
 
 /// The permission tier the scope leaves standing. A read-only subtask
 /// never auto-approves anything — every action the agent still asks for
-/// is one the user should see. A boundary subtask keeps auto but never
-/// the vendor bypass flag: bypass switches off the very sandbox that
-/// backs the boundary up.
+/// is one the user should see, Jev's approvals included. A boundary
+/// subtask keeps auto (and jev-auto) but never the vendor bypass flag:
+/// bypass switches off the very sandbox that backs the boundary up.
 pub fn effective_permission(permission: Permission, scope: Option<&SubtaskScope>) -> Permission {
     match scope {
         None => permission,
@@ -293,6 +293,18 @@ mod tests {
         );
         assert_eq!(
             effective_permission(Permission::Manual, Some(&scope)),
+            Permission::Manual
+        );
+    }
+
+    #[test]
+    fn boundary_keeps_jev_auto_and_read_only_strips_it() {
+        assert_eq!(
+            effective_permission(Permission::JevAuto, Some(&boundary(&["apps/web"]))),
+            Permission::JevAuto
+        );
+        assert_eq!(
+            effective_permission(Permission::JevAuto, Some(&SubtaskScope::ReadOnly)),
             Permission::Manual
         );
     }

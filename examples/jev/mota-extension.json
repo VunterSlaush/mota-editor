@@ -1,0 +1,13 @@
+{
+  "name": "jev",
+  "version": "0.1.0",
+  "displayName": "Jev",
+  "description": "Gives your agents Jev, TypeSafe AI's fast classifier, as a tool: calibrated yes/no, choice and score answers about any text or JSON in well under a second.",
+  "protocolVersion": 1,
+  "entry": { "command": "node", "args": ["./main.cjs"] },
+  "permissions": ["tools:register", "ui:panel"],
+  "contributes": {
+    "mcpServers": [{ "name": "jev", "command": "node", "args": ["./main.cjs", "--mcp"] }],
+    "panels": [{ "id": "jev", "title": "Jev", "icon": "funnel" }]
+  }
+}

@@ -10,6 +10,7 @@ import {
   LockKey,
   Paperclip,
   SignIn,
+  Warning,
   X,
 } from "@phosphor-icons/react";
 import {
@@ -24,6 +25,7 @@ import {
 import type { PermissionPolicy } from "../../core/entities/agentSettings";
 import { permissionOptionHint } from "../../core/entities/approval";
 import { formatElapsed } from "../../core/entities/duration";
+import { describeRiskVerdict, describeTurnVerdict } from "../../core/entities/jev";
 import {
   AUTH_REQUIRED_CONTEXT,
   type ChatMessage,
@@ -79,6 +81,8 @@ interface Props {
   /** The tab's own settings, where a plan card's handoff pickers start. */
   provider: ProviderId;
   permission: PermissionPolicy;
+  /** Whether Jev's gate runs — the plan handoff offers "Auto with Jev" then. */
+  jevGate: boolean;
   /** Every provider's models, not just this tab's: a plan may be handed
    *  to a vendor this tab has never run. Reducer-owned, so stable. */
   modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
@@ -118,6 +122,7 @@ export function MessageList({
   onShowPlan,
   provider,
   permission,
+  jevGate,
   modelCatalogs,
   modelProblems,
   discoverModels,
@@ -198,6 +203,7 @@ export function MessageList({
         onReadTerminal={onReadTerminal}
         provider={provider}
         permission={permission}
+        jevGate={jevGate}
         modelCatalogs={modelCatalogs}
         modelProblems={modelProblems}
         discoverModels={discoverModels}
@@ -428,6 +434,7 @@ const ApprovalCard = memo(function ApprovalCard({
   onReadTerminal,
   provider,
   permission,
+  jevGate,
   modelCatalogs,
   modelProblems,
   discoverModels,
@@ -444,6 +451,7 @@ const ApprovalCard = memo(function ApprovalCard({
   onReadTerminal: ReadTerminal;
   provider: ProviderId;
   permission: PermissionPolicy;
+  jevGate: boolean;
   modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
   modelProblems?: Partial<Record<ProviderId, string>>;
   discoverModels: (provider: ProviderId) => Promise<void>;
@@ -465,6 +473,12 @@ const ApprovalCard = memo(function ApprovalCard({
       <div className="approval__title">
         <LockKey /> {message.text}
       </div>
+      {/* Why this reached you when the policy might have let it through. */}
+      {approval.jevVerdict && (
+        <div className="approval__jev">
+          <Warning size={13} weight="bold" /> {describeRiskVerdict(approval.jevVerdict)}
+        </div>
+      )}
       {approval.planMarkdown && (
         <button type="button" className="approval__plan-link" onClick={onShowPlan}>
           <ClipboardText /> View the plan
@@ -528,6 +542,7 @@ const ApprovalCard = memo(function ApprovalCard({
             <PlanHandoff
               provider={provider}
               permission={permission}
+              jevGate={jevGate}
               modelCatalogs={modelCatalogs}
               modelProblems={modelProblems}
               discoverModels={discoverModels}
@@ -712,6 +727,7 @@ const MessageBubble = memo(function MessageBubble({
           ))}
         </div>
       )}
+      {turn?.jev && <JevBadge turn={turn} />}
       {turnDone && turn && (
         <>
           <button
@@ -750,6 +766,23 @@ function TurnDetails({ turn }: { turn: TurnMeta }) {
       <span>{turn.mode}</span>
       <span>{turn.permission}</span>
       {turn.stopReason && <span>{turn.stopReason}</span>}
+      {turn.jev && <span>{describeTurnVerdict(turn.jev).detail}</span>}
     </div>
+  );
+}
+
+/** Jev's read of the finished turn, as a one-word badge on the prompt. */
+function JevBadge({ turn }: { turn: TurnMeta }) {
+  if (!turn.jev) return null;
+  const summary = describeTurnVerdict(turn.jev);
+  return (
+    <span className={`msg__jev msg__jev--${summary.tone}`} title={summary.detail}>
+      {summary.tone === "ok" ? (
+        <Check size={11} weight="bold" />
+      ) : (
+        <Warning size={11} weight="bold" />
+      )}
+      {summary.label}
+    </span>
   );
 }

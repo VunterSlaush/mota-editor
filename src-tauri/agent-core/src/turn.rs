@@ -28,6 +28,11 @@ pub enum Permission {
     Auto,
     /// The vendor's explicit bypass flag: the agent acts without asking.
     Bypass,
+    /// Ask by default, like Manual — except that calls Jev rates clearly
+    /// safe are approved without a card (ADR-0025). ACP-only: a headless
+    /// run has no approvals to intercept, so it behaves as Manual there.
+    #[serde(rename = "jev-auto")]
+    JevAuto,
 }
 
 /// Everything a provider needs to build one turn's command.
@@ -269,6 +274,15 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Permission>("\"auto\"").unwrap(),
             Permission::Auto
+        );
+    }
+
+    #[test]
+    fn jev_auto_deserializes_from_its_kebab_case_id() {
+        // The enum is lowercase otherwise; this one id has a hyphen.
+        assert_eq!(
+            serde_json::from_str::<Permission>("\"jev-auto\"").unwrap(),
+            Permission::JevAuto
         );
     }
 }

@@ -14,6 +14,7 @@ use tokio::process::Child;
 use crate::acp_session::{self, AcpSessions, AcpStartError, SessionSpec};
 use crate::agent_discovery;
 use crate::command_discovery;
+use crate::jev_client::{self, JevFailure};
 use crate::runner;
 use crate::workspace_file;
 
@@ -59,6 +60,9 @@ pub struct StartTurnArgs {
     /// Recent conversation carried into that sub-agent.
     #[serde(default)]
     pub handoff: Option<String>,
+    /// Whether Jev may second-guess this turn's approvals (ADR-0025).
+    #[serde(default)]
+    pub jev_gate: bool,
 }
 
 #[tauri::command]
@@ -115,6 +119,7 @@ pub async fn start_turn(
         &args.tab_id,
         provider.id(),
         request.clone(),
+        acp_session::TurnPolicy { permission: args.permission, jev_gate: args.jev_gate },
         args.mcp_servers.clone(),
         Arc::clone(&cancelled),
     )
@@ -428,6 +433,44 @@ pub async fn get_terminal_output(
     Ok(acp_session::read_terminal_output(&acp, &tab_id, &terminal_id).map(
         |(output, truncated, exited)| TerminalOutput { output, truncated, exited },
     ))
+}
+
+/// Ask Jev a batch of questions about a state — the turn judge's call.
+/// One retry on a rate limit or overload: nobody is blocked on this one,
+/// unlike the permission gate, which never retries.
+#[tauri::command]
+pub async fn jev_classify(
+    app: AppHandle,
+    state: serde_json::Value,
+    questions: serde_json::Value,
+) -> Result<agent_core::jev::Answers, JevFailure> {
+    if let Some(message) = agent_core::jev::classify_request_problem(&state, &questions) {
+        return Err(JevFailure::Validation { message });
+    }
+    let first = jev_client::classify(&app, state.clone(), questions.clone()).await;
+    match first {
+        Err(JevFailure::RateLimited | JevFailure::Overloaded) => {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            jev_client::classify(&app, state, questions).await
+        }
+        other => other,
+    }
+}
+
+/// Save the Jev key. Write-only: nothing ever reads it back to the webview.
+#[tauri::command]
+pub async fn set_jev_api_key(app: AppHandle, key: String) -> Result<(), String> {
+    run_blocking(move || jev_client::set_api_key(&app, &key)).await
+}
+
+#[tauri::command]
+pub async fn clear_jev_api_key(app: AppHandle) -> Result<(), String> {
+    run_blocking(move || jev_client::clear_api_key(&app)).await
+}
+
+#[tauri::command]
+pub async fn jev_key_status(app: AppHandle) -> Result<jev_client::KeyStatus, String> {
+    run_blocking(move || Ok(jev_client::key_status(&app))).await
 }
 
 #[tauri::command]

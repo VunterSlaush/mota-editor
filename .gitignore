@@ -6,6 +6,9 @@ dist/
 pnpm-lock.yaml
 yarn.lock
 
+# The Jev example keeps its API key beside its code.
+examples/jev/config.json
+
 src-tauri/target/
 src-tauri/gen/schemas/
 *.log

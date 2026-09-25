@@ -1,6 +1,6 @@
 import { ArrowBendUpRight, Chat, WarningCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
-import { MODES, PERMISSIONS } from "../../core/entities/agentSettings";
+import { availablePermissions, MODES } from "../../core/entities/agentSettings";
 import type { CommandInfo, CommandSource } from "../../core/entities/command";
 import {
   type CommandConfig,
@@ -345,7 +345,10 @@ export function SettingsCommands({
                       value={configFor(command.name).permission ?? INHERIT}
                       options={[
                         { id: INHERIT, label: "Leave as is" },
-                        ...PERMISSIONS.map((p) => ({ id: p.id, label: p.label })),
+                        ...availablePermissions(settings.jev).map((p) => ({
+                          id: p.id,
+                          label: p.label,
+                        })),
                       ]}
                       onChange={(permission) =>
                         update(command.name, { permission: permission || undefined })

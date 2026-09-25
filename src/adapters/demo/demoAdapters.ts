@@ -3,6 +3,11 @@ import type { BilledRequest } from "../../core/entities/billing";
 import type { CommandInfo } from "../../core/entities/command";
 import type { ExtensionDescriptor } from "../../core/entities/extension";
 import type { SessionStats, TurnStat } from "../../core/entities/insights";
+import type {
+  JevRiskVerdict,
+  TurnJudgeInput,
+  TurnVerdict,
+} from "../../core/entities/jev";
 import type { McpServerSpec } from "../../core/entities/mcpServer";
 import type { ProviderId } from "../../core/entities/provider";
 import type { SubagentInfo } from "../../core/entities/subagent";
@@ -31,6 +36,7 @@ import type {
   WorktreeAddMode,
   WorktreeRemoveMode,
 } from "../../core/ports/gitPort";
+import type { JevKeyStatus, JevKeyStore } from "../../core/ports/jevKeyStore";
 import type { McpProbe, McpProbeResult } from "../../core/ports/mcpProbe";
 import type { NotificationPort } from "../../core/ports/notificationPort";
 import type { ProjectFiles } from "../../core/ports/projectFiles";
@@ -47,6 +53,7 @@ import type {
   TranscriptMeta,
   TranscriptStore,
 } from "../../core/ports/transcriptStore";
+import type { TurnJudge } from "../../core/ports/turnJudge";
 import type { WindowPort } from "../../core/ports/windowPort";
 import type {
   FilePicker,
@@ -216,25 +223,17 @@ export class DemoAgentGateway implements AgentGateway {
       emit({ kind: "tool", name: "note", detail: "Plan approved — starting work." });
     }
 
-    if (wantsPermission && request.permission !== "bypass") {
-      await delay(200);
-      const requestId = `demo-${Date.now()}`;
-      emit({
-        kind: "permission",
-        requestId,
-        title: "Run npm test",
-        options: [
-          { optionId: "allow", name: "Allow Once", kind: "allow_once" },
-          { optionId: "reject", name: "Deny", kind: "reject_once" },
-        ],
-      });
-      const choice = await new Promise<string>((resolve) => {
-        this.pendingPermissions.set(requestId, resolve);
-      });
-      emit({
-        kind: "tool",
-        name: "shell",
-        detail: choice === "allow" ? "npm test ✓" : "npm test (denied)",
+    // Under jev-auto the demo plays Jev too: the harmless call goes
+    // through unasked, and a destructive one reaches the user flagged.
+    const jevAuto = request.permission === "jev-auto";
+    if (wantsPermission && request.permission !== "bypass" && !jevAuto) {
+      await this.askPermission(emit, "Run npm test", "npm test");
+    }
+    if (jevAuto && !readOnly) {
+      emit({ kind: "tool", name: "shell", detail: "npm test ✓ (Jev: clearly safe)" });
+      await this.askPermission(emit, "rm -rf dist", "rm -rf dist", {
+        risk: 0.91,
+        reason: "destructive",
       });
     }
 
@@ -254,6 +253,35 @@ export class DemoAgentGateway implements AgentGateway {
     await delay(120);
     emit({ kind: "usage", used: 41_000, size: 200_000 });
     emit({ kind: "completed", isError: false, providerSessionId: "demo-session" });
+  }
+
+  /** One approval card, then the tool row its answer leads to. */
+  private async askPermission(
+    emit: (event: AgentTurnEvent) => void,
+    title: string,
+    command: string,
+    jevVerdict?: JevRiskVerdict,
+  ): Promise<void> {
+    await delay(200);
+    const requestId = `demo-${Date.now()}`;
+    emit({
+      kind: "permission",
+      requestId,
+      title,
+      options: [
+        { optionId: "allow", name: "Allow Once", kind: "allow_once" },
+        { optionId: "reject", name: "Deny", kind: "reject_once" },
+      ],
+      ...(jevVerdict ? { jevVerdict } : {}),
+    });
+    const choice = await new Promise<string>((resolve) => {
+      this.pendingPermissions.set(requestId, resolve);
+    });
+    emit({
+      kind: "tool",
+      name: "shell",
+      detail: choice === "allow" ? `${command} ✓` : `${command} (denied)`,
+    });
   }
 
   async cancelTurn(tabId: string): Promise<void> {
@@ -1125,6 +1153,45 @@ export class DemoShell implements ShellPort {
 
   private say(sessionId: string, text: string): void {
     this.streams.get(sessionId)?.onOutput(new TextEncoder().encode(text));
+  }
+}
+
+/** Browser demo — the Jev key, held in memory for the page's lifetime. */
+export class DemoJevKeyStore implements JevKeyStore {
+  private configured = false;
+
+  async status(): Promise<JevKeyStatus> {
+    await delay(150);
+    return {
+      configured: this.configured,
+      source: this.configured ? "file" : "none",
+      curlFound: true,
+    };
+  }
+
+  async setKey(key: string): Promise<void> {
+    if (!key.trim()) throw new Error("The Jev key is empty.");
+    this.configured = true;
+  }
+
+  async clearKey(): Promise<void> {
+    this.configured = false;
+  }
+}
+
+/**
+ * Browser demo — Jev's turn judge. Content with every turn, except one
+ * whose prompt says "incomplete", so the warning badge can be seen.
+ */
+export class DemoTurnJudge implements TurnJudge {
+  async judge(input: TurnJudgeInput): Promise<TurnVerdict | null> {
+    await delay(300);
+    const incomplete = /\bincomplete\b/i.test(input.prompt);
+    return {
+      completed: incomplete ? 0.18 : 0.94,
+      unverifiedClaim: incomplete ? 0.62 : 0.08,
+      needsFollowUp: incomplete ? 0.71 : 0.12,
+    };
   }
 }
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_PERMISSION,
 } from "../entities/agentSettings";
 import { restoredSequences } from "../entities/commandSequence";
+import type { JevSettings } from "../entities/jev";
 import { normalizedTabLabel, projectNameFromPath } from "../entities/project";
 import { restoredBoundaryPresets, restoredSubtaskScope } from "../entities/subtask";
 import { isTabColorId } from "../entities/tabColor";
@@ -108,6 +109,17 @@ function restoredSettings(persisted: PersistedSettings | undefined): AppSettings
     terminalFontSize: persisted?.terminalFontSize ?? defaultSettings.terminalFontSize,
     terminalSuggestions:
       persisted?.terminalSuggestions ?? defaultSettings.terminalSuggestions,
+    jev: restoredJev(persisted?.jev),
+  };
+}
+
+/** Field by field, like the worktree settings. */
+function restoredJev(persisted: Partial<JevSettings> | undefined): JevSettings {
+  const fallback = defaultSettings.jev;
+  return {
+    enabled: persisted?.enabled ?? fallback.enabled,
+    gate: persisted?.gate ?? fallback.gate,
+    judge: persisted?.judge ?? fallback.judge,
   };
 }
 

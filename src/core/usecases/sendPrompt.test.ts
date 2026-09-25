@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { commandConfigKey } from "../entities/commandConfig";
 import type { CommandSequence } from "../entities/commandSequence";
+import type { TurnJudgeInput, TurnVerdict } from "../entities/jev";
 import { newProject } from "../entities/project";
 import type { SubagentInfo } from "../entities/subagent";
 import { tabStatus } from "../entities/tabStatus";
@@ -15,6 +16,7 @@ import type {
   TranscriptMeta,
   TranscriptStore,
 } from "../ports/transcriptStore";
+import type { TurnJudge } from "../ports/turnJudge";
 import type { PersistedWorkspace, WorkspaceStore } from "../ports/workspacePort";
 import { defaultSettings, projectDefaults } from "../state/appState";
 import { Store } from "../state/store";
@@ -142,7 +144,7 @@ class FakeTranscriptStore implements TranscriptStore {
   }
 }
 
-function setup(script: AgentTurnEvent[] = []) {
+function setup(script: AgentTurnEvent[] = [], turnJudge?: TurnJudge) {
   const store = new Store();
   store.dispatch({
     type: "tab/opened",
@@ -172,6 +174,7 @@ function setup(script: AgentTurnEvent[] = []) {
     () => `s${++counter}`,
     undefined,
     new ListSubagents(store, agentCatalog),
+    turnJudge,
   );
   return { store, gateway, workspace, transcripts, notifications, agentCatalog, useCase };
 }
@@ -2116,5 +2119,232 @@ describe("SendPrompt — handing a command to a sub-agent", () => {
     await useCase.execute("t1", "/commit-push");
 
     expect(gateway.requests[0].delegateTo).toBeUndefined();
+  });
+});
+
+/** Test double — Jev's turn judge, answering on cue. */
+class FakeTurnJudge implements TurnJudge {
+  inputs: TurnJudgeInput[] = [];
+  verdict: TurnVerdict | null = {
+    completed: 0.95,
+    unverifiedClaim: 0.05,
+    needsFollowUp: 0.1,
+  };
+  /** When set, verdicts wait for `release` — Jev still thinking. */
+  hold = false;
+  private waiting: Array<() => void> = [];
+
+  judge(input: TurnJudgeInput): Promise<TurnVerdict | null> {
+    this.inputs.push(input);
+    if (!this.hold) return Promise.resolve(this.verdict);
+    return new Promise((resolve) => this.waiting.push(() => resolve(this.verdict)));
+  }
+
+  release(): void {
+    for (const answer of this.waiting.splice(0)) answer();
+  }
+}
+
+const JEV_ON = { enabled: true, gate: true, judge: true };
+const DONE: AgentTurnEvent[] = [
+  {
+    kind: "toolCall",
+    toolCallId: "c1",
+    toolKind: "execute",
+    title: "npm test",
+    status: "completed",
+  },
+  { kind: "assistant", text: "Fixed, and the tests pass." },
+  { kind: "completed", isError: false, stopReason: "end_turn" },
+];
+
+function jevSetup(script: AgentTurnEvent[] = DONE) {
+  const judge = new FakeTurnJudge();
+  const fixture = setup(script, judge);
+  fixture.store.dispatch({ type: "settings/changed", patch: { jev: JEV_ON } });
+  return { ...fixture, judge };
+}
+
+const promptOf = (store: Store) => store.getState().tabs[0].messages[0];
+
+describe("SendPrompt — Jev judges the finished turn", () => {
+  it("stamps the verdict on the prompt once the turn completes", async () => {
+    const { store, useCase, judge } = jevSetup();
+    await useCase.execute("t1", "fix the login bug");
+    await flush();
+    expect(promptOf(store).turn?.jev).toEqual(judge.verdict);
+  });
+
+  it("shows Jev the prompt, the answer and the tools that ran", async () => {
+    const { useCase, judge } = jevSetup();
+    await useCase.execute("t1", "fix the login bug");
+    expect(judge.inputs).toEqual([
+      {
+        prompt: "fix the login bug",
+        answer: "Fixed, and the tests pass.",
+        toolCalls: ["npm test"],
+        toolCallCount: 1,
+        stopReason: "end_turn",
+      },
+    ]);
+  });
+
+  it("asks nothing while Jev is off", async () => {
+    const judge = new FakeTurnJudge();
+    const { useCase } = setup(DONE, judge);
+    await useCase.execute("t1", "fix it");
+    expect(judge.inputs).toEqual([]);
+  });
+
+  it("asks nothing while only the judge is off", async () => {
+    const { store, useCase, judge } = jevSetup();
+    store.dispatch({
+      type: "settings/changed",
+      patch: { jev: { ...JEV_ON, judge: false } },
+    });
+    await useCase.execute("t1", "fix it");
+    expect(judge.inputs).toEqual([]);
+  });
+
+  it("leaves a failed turn unjudged", async () => {
+    const { useCase, judge } = jevSetup([
+      { kind: "completed", isError: true, result: "boom" },
+    ]);
+    await useCase.execute("t1", "fix it");
+    expect(judge.inputs).toEqual([]);
+  });
+
+  it("leaves a cancelled turn unjudged", async () => {
+    const { useCase, judge } = jevSetup([
+      { kind: "completed", isError: false, stopReason: "cancelled" },
+    ]);
+    await useCase.execute("t1", "fix it");
+    expect(judge.inputs).toEqual([]);
+  });
+
+  it("gets the user's eyes on a turn Jev thinks is unfinished", async () => {
+    const { useCase, judge, notifications } = jevSetup();
+    judge.verdict = { completed: 0.2, unverifiedClaim: 0.1, needsFollowUp: 0.1 };
+    await useCase.execute("t1", "fix it");
+    await flush();
+    // Once for the completion, once more for the verdict.
+    expect(notifications.calls).toHaveLength(2);
+  });
+
+  it("flags a background tab when Jev thinks its turn is unfinished", async () => {
+    const { store, useCase, judge } = jevSetup();
+    judge.verdict = { completed: 0.2, unverifiedClaim: 0.1, needsFollowUp: 0.1 };
+    judge.hold = true;
+    store.dispatch({
+      type: "tab/opened",
+      project: newProject("t2", "/work/beta", DEFAULTS),
+    });
+    await useCase.execute("t1", "fix it");
+    await flush();
+    // The user looked at the tab and left again before Jev answered.
+    store.dispatch({ type: "tab/activated", tabId: "t1" });
+    store.dispatch({ type: "tab/activated", tabId: "t2" });
+    expect(store.getState().tabs[0].attention).toBe(false);
+
+    judge.release();
+    await flush();
+
+    expect(store.getState().tabs[0].attention).toBe(true);
+  });
+
+  it("stays quiet about a turn Jev thinks is done", async () => {
+    const { useCase, notifications } = jevSetup();
+    await useCase.execute("t1", "fix it");
+    await flush();
+    expect(notifications.calls).toHaveLength(1);
+  });
+
+  it("does nothing with a null verdict", async () => {
+    const { store, useCase, judge, transcripts } = jevSetup();
+    judge.verdict = null;
+    await useCase.execute("t1", "fix it");
+    await flush();
+    expect(promptOf(store).turn?.jev).toBeUndefined();
+    expect(transcripts.saved).toHaveLength(1);
+  });
+
+  it("drops a verdict that lands after the chat was cleared", async () => {
+    const { store, useCase, judge, transcripts } = jevSetup();
+    judge.hold = true;
+    await useCase.execute("t1", "fix it");
+    await flush();
+    store.dispatch({ type: "chat/cleared", tabId: "t1" });
+    const savesBefore = transcripts.saved.length;
+
+    judge.release();
+    await flush();
+
+    expect(store.getState().tabs[0].messages).toEqual([]);
+    expect(transcripts.saved).toHaveLength(savesBefore);
+  });
+
+  it("saves the transcript again so History keeps the verdict", async () => {
+    const { useCase, transcripts, judge } = jevSetup();
+    await useCase.execute("t1", "fix it");
+    await flush();
+    const last = transcripts.saved[transcripts.saved.length - 1];
+    expect(last.messages[0].turn?.jev).toEqual(judge.verdict);
+    // Into the same chat, not a second one.
+    expect(new Set(transcripts.saved.map((t) => t.id)).size).toBe(1);
+  });
+
+  it("never holds the tab up waiting for Jev", async () => {
+    const { store, gateway, useCase, judge } = jevSetup();
+    judge.hold = true;
+    store.dispatch({
+      type: "chat/promptQueued",
+      tabId: "t1",
+      prompt: "next",
+      attachments: [],
+    });
+
+    await useCase.execute("t1", "fix it");
+    await flush();
+
+    expect(store.getState().tabs[0].busy).toBe(false);
+    expect(gateway.requests.map((r) => r.prompt)).toEqual(["fix it", "next"]);
+  });
+});
+
+describe("SendPrompt — Jev's risk gate", () => {
+  it("carries Jev's reason onto the approval card", async () => {
+    const { store, useCase } = setup([
+      {
+        kind: "permission",
+        requestId: "p1",
+        title: "rm -rf dist",
+        options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+        jevVerdict: { risk: 0.91, reason: "destructive" },
+      },
+    ]);
+    await useCase.execute("t1", "clean up");
+    const card = store.getState().tabs[0].messages.find((m) => m.role === "approval");
+    expect(card?.approval?.jevVerdict).toEqual({ risk: 0.91, reason: "destructive" });
+  });
+
+  it("sends jev-auto with the gate on, and manual once the gate is off", async () => {
+    const { store, gateway, useCase } = jevSetup([{ kind: "completed", isError: false }]);
+    store.dispatch({
+      type: "tab/permissionChanged",
+      tabId: "t1",
+      permission: "jev-auto",
+    });
+
+    await useCase.execute("t1", "first");
+    store.dispatch({
+      type: "settings/changed",
+      patch: { jev: { ...JEV_ON, gate: false } },
+    });
+    await useCase.execute("t1", "second");
+
+    expect(gateway.requests.map((r) => [r.permission, r.jevGate])).toEqual([
+      ["jev-auto", true],
+      ["manual", false],
+    ]);
   });
 });

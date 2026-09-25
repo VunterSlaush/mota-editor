@@ -3,6 +3,7 @@ import {
   FlowArrow,
   Gauge,
   GitFork,
+  Lightning,
   Palette,
   PlugsConnected,
   PuzzlePiece,
@@ -22,6 +23,7 @@ import type { ProviderId } from "../../core/entities/provider";
 import type { SubagentInfo } from "../../core/entities/subagent";
 import type { BoundaryPreset } from "../../core/entities/subtask";
 import type { ProvisionEntry } from "../../core/entities/worktree";
+import type { JevKeyStore } from "../../core/ports/jevKeyStore";
 import type { McpProbe } from "../../core/ports/mcpProbe";
 import type { ProviderStatus } from "../../core/ports/providerProbe";
 import type { AppSettings, TabState } from "../../core/state/appState";
@@ -32,6 +34,7 @@ import { SettingsCommands } from "./SettingsCommands";
 import { SettingsDefaults } from "./SettingsDefaults";
 import { SettingsExtensions } from "./SettingsExtensions";
 import { SettingsInsights } from "./SettingsInsights";
+import { SettingsJev } from "./SettingsJev";
 import { SettingsProviders } from "./SettingsProviders";
 import { SettingsSubtasks } from "./SettingsSubtasks";
 import { SettingsTerminal } from "./SettingsTerminal";
@@ -47,6 +50,7 @@ export type SettingsSection =
   | "tools"
   | "extensions"
   | "providers"
+  | "jev"
   | "worktrees"
   | "subtasks"
   | "terminal"
@@ -73,6 +77,8 @@ interface Props {
   /** The tab the Tools section scopes servers for; null with none open. */
   activeTab: TabState | null;
   mcpProbe: McpProbe;
+  /** The Jev key, write-only from here. */
+  jevKeys: JevKeyStore;
   onScopeMcpServer: (serverId: string, enabled: boolean | undefined) => void;
   /** The active project's own heavy-folder list; undefined follows the default. */
   onScopeProvisioning: (entries: readonly ProvisionEntry[] | undefined) => void;
@@ -106,6 +112,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; Icon: typeof Slid
     { id: "tools", label: "Tools", Icon: Toolbox },
     { id: "extensions", label: "Extensions", Icon: PuzzlePiece },
     { id: "providers", label: "Providers", Icon: PlugsConnected },
+    { id: "jev", label: "Jev", Icon: Lightning },
     { id: "worktrees", label: "Worktrees", Icon: GitFork },
     { id: "subtasks", label: "Subtasks", Icon: TreeStructure },
     { id: "terminal", label: "Terminal", Icon: Terminal },
@@ -134,6 +141,7 @@ export function SettingsModal({
   tabs,
   activeTab,
   mcpProbe,
+  jevKeys,
   onScopeMcpServer,
   onScopeProvisioning,
   newId,
@@ -239,6 +247,9 @@ export function SettingsModal({
           )}
           {section === "providers" && (
             <SettingsProviders probe={probeProvider} signIn={signInProvider} />
+          )}
+          {section === "jev" && (
+            <SettingsJev settings={settings} onChange={onChange} jevKeys={jevKeys} />
           )}
           {section === "worktrees" && (
             <SettingsWorktrees

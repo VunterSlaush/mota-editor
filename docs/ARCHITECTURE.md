@@ -198,3 +198,4 @@ Significant decisions are recorded as ADRs in [`docs/adr/`](adr/):
 - [ADR-0003 — Two-sided Clean Architecture with ports at every boundary](adr/0003-clean-architecture-layout.md)
 - [ADR-0004 — Modes and permissions over headless CLIs](adr/0004-modes-and-permissions.md)
 - [ADR-0005 — Interactive agent sessions over ACP](adr/0005-acp-interactive-sessions.md)
+- [ADR-0025 — Jev as a second opinion on the agent](adr/0025-jev-as-a-second-opinion.md)

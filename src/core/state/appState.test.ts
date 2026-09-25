@@ -425,6 +425,101 @@ describe("chat/turnMetaCompleted", () => {
   });
 });
 
+describe("chat/turnJudged", () => {
+  const meta = { sentAt: 1000, mode: "agent", permission: "manual" };
+  const verdict = { completed: 0.9, unverifiedClaim: 0.1, needsFollowUp: 0.2 };
+
+  it("stamps the verdict on exactly the judged prompt", () => {
+    let state = open(initialState, "t1", "/a");
+    const first = userMessage("one", [], meta);
+    const second = userMessage("two", [], meta);
+    state = reduce(state, { type: "chat/messageAppended", tabId: "t1", message: first });
+    state = reduce(state, { type: "chat/messageAppended", tabId: "t1", message: second });
+
+    state = reduce(state, {
+      type: "chat/turnJudged",
+      tabId: "t1",
+      messageId: first.id,
+      verdict,
+    });
+
+    const [judged, untouched] = state.tabs[0].messages;
+    expect(judged.turn?.jev).toEqual(verdict);
+    expect(untouched).toBe(second);
+  });
+
+  it("does nothing for an id that is gone", () => {
+    let state = open(initialState, "t1", "/a");
+    const prompt = userMessage("one", [], meta);
+    state = reduce(state, { type: "chat/messageAppended", tabId: "t1", message: prompt });
+
+    state = reduce(state, {
+      type: "chat/turnJudged",
+      tabId: "t1",
+      messageId: "nope",
+      verdict,
+    });
+
+    expect(state.tabs[0].messages[0]).toBe(prompt);
+  });
+});
+
+describe("jev-auto without Jev's gate", () => {
+  const jevOn = { enabled: true, gate: true, judge: true };
+
+  function withJevAutoTab(): AppState {
+    let state = reduce(initialState, { type: "settings/changed", patch: { jev: jevOn } });
+    state = open(state, "t1", "/a");
+    state = reduce(state, {
+      type: "tab/permissionChanged",
+      tabId: "t1",
+      permission: "jev-auto",
+    });
+    return reduce(state, {
+      type: "settings/changed",
+      patch: { defaultPermission: "jev-auto" },
+    });
+  }
+
+  it("keeps jev-auto while the gate is on", () => {
+    const state = withJevAutoTab();
+    expect(state.tabs[0].project.permission).toBe("jev-auto");
+    expect(state.settings.defaultPermission).toBe("jev-auto");
+  });
+
+  it("moves jev-auto tabs and the default to manual when the gate goes off", () => {
+    const state = reduce(withJevAutoTab(), {
+      type: "settings/changed",
+      patch: { jev: { ...jevOn, gate: false } },
+    });
+    expect(state.tabs[0].project.permission).toBe("manual");
+    expect(state.settings.defaultPermission).toBe("manual");
+  });
+
+  it("turns a switch to jev-auto into manual while the gate is off", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "tab/permissionChanged",
+      tabId: "t1",
+      permission: "jev-auto",
+    });
+    expect(state.tabs[0].project.permission).toBe("manual");
+  });
+
+  it("leaves the other permissions alone", () => {
+    let state = open(initialState, "t1", "/a");
+    state = reduce(state, {
+      type: "tab/permissionChanged",
+      tabId: "t1",
+      permission: "bypass",
+    });
+    const before = state;
+    state = reduce(state, { type: "settings/changed", patch: { theme: "mota-light" } });
+    expect(state.tabs).toBe(before.tabs);
+    expect(state.tabs[0].project.permission).toBe("bypass");
+  });
+});
+
 describe("tab/planMarkdownUpdated", () => {
   it("a new plan supersedes the old checklist and file path", () => {
     let state = open(initialState, "t1", "/a");

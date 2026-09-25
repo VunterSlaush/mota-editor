@@ -118,6 +118,8 @@ interface Props {
   tabs: readonly TabState[];
   /** Fraction of the context window at which auto-compact kicks in. */
   autoCompactThreshold: number;
+  /** Whether Jev's gate runs — the pickers offer "Auto with Jev" then. */
+  jevGate: boolean;
   /** The app's default model/effort for this tab's provider, so the
    *  composer's pickers can name what "default" gets. Empty = provider's own. */
   defaultModel: string;
@@ -245,6 +247,7 @@ export function ChatPanel({
   tab,
   tabs,
   autoCompactThreshold,
+  jevGate,
   defaultModel,
   defaultEffort,
   cachedChanges,
@@ -764,6 +767,7 @@ export function ChatPanel({
             onShowPlan={showPlan}
             provider={tab.project.provider}
             permission={tab.project.permission}
+            jevGate={jevGate}
             modelCatalogs={modelCatalogs}
             modelProblems={modelProblems}
             discoverModels={discoverModels}
@@ -800,6 +804,7 @@ export function ChatPanel({
             provider={tab.project.provider}
             mode={tab.project.mode}
             permission={tab.project.permission}
+            jevGate={jevGate}
             model={tab.project.model ?? ""}
             effort={tab.project.effort ?? ""}
             defaultModel={defaultModel}

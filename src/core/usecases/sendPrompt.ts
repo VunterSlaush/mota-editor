@@ -18,6 +18,13 @@ import {
   installExtensionPrompt,
 } from "../entities/installExtensionGuide";
 import {
+  jevGateActive,
+  jevJudgeActive,
+  type TurnVerdict,
+  turnJudgeInput,
+  verdictNeedsAttention,
+} from "../entities/jev";
+import {
   AUTH_REQUIRED_CONTEXT,
   approvalMessage,
   assistantMessage,
@@ -48,6 +55,7 @@ import {
 import type { AgentGateway, AgentTurnEvent } from "../ports/agentGateway";
 import type { NotificationPort } from "../ports/notificationPort";
 import type { PersistedTranscript, TranscriptStore } from "../ports/transcriptStore";
+import type { TurnJudge } from "../ports/turnJudge";
 import type { WorkspaceStore } from "../ports/workspacePort";
 import { type TabState, tabById } from "../state/appState";
 import type { Store } from "../state/store";
@@ -107,6 +115,15 @@ interface DeltaBuffer {
  */
 export const FOLLOWUP_TOOL_GRACE_MS = 15 * 60_000;
 
+/** A turn that just completed, as the judge needs it. */
+interface FinishedTurn {
+  /** The prompt that started it. */
+  readonly messageId: string;
+  readonly stopReason?: string;
+  /** The completion's transcript save, which the verdict's save follows. */
+  readonly saved: Promise<void>;
+}
+
 /** One agent-initiated stretch, open until the events stop coming. */
 interface Followup {
   timer: ReturnType<typeof setTimeout>;
@@ -154,6 +171,9 @@ export class SendPrompt {
     private readonly newId: IdGenerator,
     private readonly extensionCommands?: RunExtensionCommand,
     private readonly subagents?: ListSubagents,
+    // Four optional collaborators in a row now; the next one should turn
+    // them into an options object rather than a longer tail.
+    private readonly turnJudge?: TurnJudge,
   ) {
     agentGateway.subscribeAgentInitiated((tabId, event) =>
       this.onAgentInitiated(tabId, event),
@@ -424,6 +444,7 @@ export class SendPrompt {
         configured.project.mcpOverrides,
       ),
       subtask: configured.project.subtask,
+      jevGate: jevGateActive(this.store.getState().settings.jev),
       ...(delegateTo
         ? {
             delegateTo,
@@ -670,6 +691,7 @@ export class SendPrompt {
             planMarkdown: event.planMarkdown,
             toolCallId: event.toolCallId,
             isPlan: event.isPlan,
+            ...(event.jevVerdict ? { jevVerdict: event.jevVerdict } : {}),
           }),
         });
         // A plan parks the turn. The agent is blocked on the user either
@@ -812,11 +834,22 @@ export class SendPrompt {
         // A cancel already has the user's full attention.
         if (event.stopReason !== "cancelled") this.requestAttention(tabId);
         this.estimateUsageIfUnreported(tabId);
+        // Read before `completeTurnMeta` lets go of it.
+        const finishedPrompt = this.inflight.get(tabId);
         // After the estimate (so the delta has an endpoint) and before
         // the save (so the transcript carries the completed meta).
         this.completeTurnMeta(tabId, event.stopReason);
         void persistWorkspace(this.store.getState(), this.workspaceStore);
-        void this.saveTranscript(tabId);
+        const saved = this.saveTranscript(tabId);
+        // A failed or stopped turn has nothing to judge: the user already
+        // knows how it went.
+        if (finishedPrompt && !event.isError && event.stopReason !== "cancelled") {
+          this.judgeTurnLater(tabId, {
+            messageId: finishedPrompt.messageId,
+            stopReason: event.stopReason,
+            saved,
+          });
+        }
         // Asked before acted on: compacting and starting a new chat
         // both take the tab for themselves, and `execute` suspends at
         // its first await long before `busy` goes up. Draining anyway
@@ -1057,6 +1090,39 @@ export class SendPrompt {
         ...(stopReason && stopReason !== "end_turn" ? { stopReason } : {}),
       },
     });
+  }
+
+  /**
+   * Ask Jev how the turn went, without holding anything up: the tab is
+   * already idle and its queue draining by the time a verdict lands, and
+   * a verdict that never lands changes nothing (ADR-0025). Fire and
+   * forget, like `applyAutoCompact`'s new chat.
+   */
+  private judgeTurnLater(tabId: string, finished: FinishedTurn): void {
+    const state = this.store.getState();
+    const tab = tabById(state, tabId);
+    if (!this.turnJudge || !tab || !jevJudgeActive(state.settings.jev)) return;
+    const input = turnJudgeInput(tab.messages, finished.messageId, finished.stopReason);
+    if (!input) return;
+    // After the completion's own save, so the re-save below can never
+    // race it into minting a second transcript for the same chat.
+    void Promise.all([this.turnJudge.judge(input), finished.saved])
+      .then(([verdict]) => {
+        if (verdict) this.stampVerdict(tabId, finished.messageId, verdict);
+      })
+      .catch(() => undefined);
+  }
+
+  /** Put a verdict on its prompt — if the prompt is still on screen. */
+  private stampVerdict(tabId: string, messageId: string, verdict: TurnVerdict): void {
+    const tab = tabById(this.store.getState(), tabId);
+    // Cleared, closed, or replaced by a loaded chat while Jev thought:
+    // the turn it judged is not the one on screen any more.
+    if (!tab?.messages.some((m) => m.id === messageId)) return;
+    this.store.dispatch({ type: "chat/turnJudged", tabId, messageId, verdict });
+    if (verdictNeedsAttention(verdict)) this.requestAttention(tabId);
+    // So History keeps the badge.
+    void this.saveTranscript(tabId);
   }
 
   /** Persist the conversation so it appears in the History panel. */

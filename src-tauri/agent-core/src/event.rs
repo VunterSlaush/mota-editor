@@ -73,6 +73,10 @@ pub enum AgentEvent {
         /// asking about one tool call. The UI treats it as a stopping
         /// point: the turn parks until the user answers.
         is_plan: bool,
+        /// Why Jev asked for this card, when it was Jev that did — a
+        /// call Bypass would have approved, or one `jev-auto` could not
+        /// clear (ADR-0025). None when Jev was not consulted or failed.
+        jev_verdict: Option<crate::jev::JevVerdict>,
     },
     /// The agent asks the user a question (ACP form elicitation — Claude's
     /// `AskUserQuestion`). Unlike a permission request this is not about
@@ -186,4 +190,36 @@ pub struct PermissionOptionInfo {
     pub option_id: String,
     pub name: String,
     pub kind: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jev::JevVerdict;
+
+    fn permission_requested(jev_verdict: Option<JevVerdict>) -> serde_json::Value {
+        serde_json::to_value(AgentEvent::PermissionRequested {
+            request_id: "9".to_owned(),
+            title: "rm -rf dist".to_owned(),
+            options: Vec::new(),
+            plan_markdown: None,
+            plan_file_path: None,
+            tool_call_id: None,
+            is_plan: false,
+            jev_verdict,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_jev_verdict_crosses_the_wire_in_camel_case() {
+        let verdict = JevVerdict { risk: 0.5, reason: "destructive".to_owned() };
+        let wire = permission_requested(Some(verdict));
+        assert_eq!(wire["jevVerdict"], serde_json::json!({"risk": 0.5, "reason": "destructive"}));
+    }
+
+    #[test]
+    fn a_request_jev_never_saw_carries_a_null_verdict() {
+        assert!(permission_requested(None)["jevVerdict"].is_null());
+    }
 }

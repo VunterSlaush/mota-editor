@@ -15,6 +15,7 @@ mod fs_confine;
 mod mcp_probe;
 mod git;
 mod history_file;
+mod jev_client;
 mod project_files;
 mod provider_probe;
 mod runner;
@@ -86,6 +87,10 @@ pub fn run() {
             commands::reveal_path,
             commands::read_project_markdown,
             commands::save_pasted_image,
+            commands::jev_classify,
+            commands::set_jev_api_key,
+            commands::clear_jev_api_key,
+            commands::jev_key_status,
             provider_probe::probe_provider,
             boundary_suggest::suggest_boundaries,
             sign_in::open_provider_login,

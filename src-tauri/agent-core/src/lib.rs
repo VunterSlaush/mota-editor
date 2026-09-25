@@ -14,6 +14,7 @@ pub mod delegate;
 pub mod event;
 pub mod extension;
 pub mod history;
+pub mod jev;
 pub mod mcp;
 pub mod model_catalog;
 pub mod provider;

@@ -4584,6 +4584,17 @@ body {
   color: var(--text-dim);
 }
 
+/* Jev's reason for putting this call in front of the user (ADR-0025). */
+.approval__jev {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warning);
+}
+
 .approval__button:disabled {
   opacity: 0.4;
   cursor: default;
@@ -5379,6 +5390,24 @@ body {
 .msg__turn-toggle:hover,
 .msg__turn-toggle[aria-expanded="true"] {
   color: var(--text);
+}
+
+/* Jev's verdict on the finished turn: quiet when fine, loud when not. */
+.msg__jev {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.msg__jev--ok {
+  color: var(--success);
+}
+
+.msg__jev--warn {
+  color: var(--warning);
 }
 
 .msg__turn-details {

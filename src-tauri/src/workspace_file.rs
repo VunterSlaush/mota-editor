@@ -38,10 +38,40 @@ pub fn save(app: &AppHandle, json: &str) -> io::Result<()> {
 /// redirect the write), and a crash mid-write can never truncate the
 /// real file.
 pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> io::Result<()> {
+    replace_via_temp(path, bytes, |tmp| {
+        fs::OpenOptions::new().write(true).create_new(true).open(tmp)
+    })
+}
+
+/// [`write_atomic`] for a secret: the file is owner-only (0600 on Unix)
+/// from the moment it exists, never widened after the fact. Windows
+/// relies on the per-user ACL of the app-config folder.
+pub(crate) fn write_atomic_private(path: &std::path::Path, bytes: &[u8]) -> io::Result<()> {
+    replace_via_temp(path, bytes, create_private)
+}
+
+/// A new, owner-only file. `create_new`, so nothing pre-planted at the
+/// path (a symlink) is ever written through.
+pub(crate) fn create_private(path: &std::path::Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn replace_via_temp(
+    path: &std::path::Path,
+    bytes: &[u8],
+    create: impl FnOnce(&std::path::Path) -> io::Result<fs::File>,
+) -> io::Result<()> {
     use std::io::Write;
     let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
     let _ = fs::remove_file(&tmp);
-    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let mut file = create(&tmp)?;
     let result = file.write_all(bytes);
     drop(file);
     match result.and_then(|()| fs::rename(&tmp, path)) {

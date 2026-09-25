@@ -51,7 +51,9 @@ impl Provider for Claude {
                 args.push("--permission-mode".to_owned());
                 args.push("auto".to_owned());
             }
-            (_, Permission::Manual) => {}
+            // Jev judges ACP permission requests; a headless run makes
+            // none, so jev-auto is Manual here.
+            (_, Permission::Manual | Permission::JevAuto) => {}
         }
         if let Some(model) = request.model.as_deref() {
             args.push("--model".to_owned());

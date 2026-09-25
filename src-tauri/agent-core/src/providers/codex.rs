@@ -65,7 +65,9 @@ impl Provider for Codex {
                     // workspace, the sandbox still guards everything else.
                     args.push("--full-auto".to_owned());
                 }
-                Permission::Manual => {}
+                // Jev judges ACP permission requests; a headless run
+                // makes none, so jev-auto is Manual here.
+                Permission::Manual | Permission::JevAuto => {}
             }
         }
         args.push(effective_prompt(request, "codex", false));

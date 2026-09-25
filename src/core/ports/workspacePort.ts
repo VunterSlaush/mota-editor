@@ -5,6 +5,7 @@ import type {
 } from "../entities/agentSettings";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { CommandSequence } from "../entities/commandSequence";
+import type { JevSettings } from "../entities/jev";
 import type { McpServerConfig, ProjectMcpOverrides } from "../entities/mcpServer";
 import type { ProviderId } from "../entities/provider";
 import type { ProvisionEntry, WorktreeSettings } from "../entities/worktree";
@@ -87,6 +88,8 @@ export interface PersistedSettings {
   readonly terminalShell?: string;
   readonly terminalFontSize?: number;
   readonly terminalSuggestions?: boolean;
+  /** Partial for the same reason as `worktrees`. */
+  readonly jev?: Partial<JevSettings>;
 }
 
 export interface PersistedWorkspace {

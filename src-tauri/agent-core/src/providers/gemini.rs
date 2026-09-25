@@ -45,7 +45,9 @@ impl Provider for Gemini {
                 args.push("--approval-mode".to_owned());
                 args.push("auto_edit".to_owned());
             }
-            Permission::Manual => {}
+            // Jev judges ACP permission requests; a headless run makes
+            // none, so jev-auto is Manual here.
+            Permission::Manual | Permission::JevAuto => {}
         }
         let external_dirs = external_attachment_dirs(request);
         if !external_dirs.is_empty() {

@@ -9,6 +9,7 @@ import {
   DemoFilePicker,
   DemoFolderPicker,
   DemoGit,
+  DemoJevKeyStore,
   DemoMcpProbe,
   DemoNotifications,
   DemoPastedImageStore,
@@ -17,6 +18,7 @@ import {
   DemoShell,
   DemoShellHistory,
   DemoTranscriptStore,
+  DemoTurnJudge,
   DemoWindow,
   DemoWorkspaceStore,
   DemoWorktreeProvisioning,
@@ -33,6 +35,7 @@ import { TauriExtensionHost } from "../adapters/tauri/tauriExtensionHost";
 import { TauriFilePicker } from "../adapters/tauri/tauriFilePicker";
 import { TauriFolderPicker } from "../adapters/tauri/tauriFolderPicker";
 import { TauriGitStatus } from "../adapters/tauri/tauriGitStatus";
+import { TauriJevKeyStore } from "../adapters/tauri/tauriJevKeyStore";
 import { TauriMcpProbe } from "../adapters/tauri/tauriMcpProbe";
 import { TauriNotifications } from "../adapters/tauri/tauriNotifications";
 import { TauriPastedImageStore } from "../adapters/tauri/tauriPastedImageStore";
@@ -41,12 +44,14 @@ import { TauriProviderProbe } from "../adapters/tauri/tauriProviderProbe";
 import { TauriShell } from "../adapters/tauri/tauriShell";
 import { TauriShellHistory } from "../adapters/tauri/tauriShellHistory";
 import { TauriTranscriptStore } from "../adapters/tauri/tauriTranscriptStore";
+import { TauriTurnJudge } from "../adapters/tauri/tauriTurnJudge";
 import { TauriWindow } from "../adapters/tauri/tauriWindow";
 import { TauriWorkspaceStore } from "../adapters/tauri/tauriWorkspaceStore";
 import { TauriWorktreeProvisioning } from "../adapters/tauri/tauriWorktreeProvisioning";
 import { TauriZoom } from "../adapters/tauri/tauriZoom";
 import type { InsightsRange, InsightsReport } from "../core/entities/insights";
 import type { AppBadgePort } from "../core/ports/appBadgePort";
+import type { JevKeyStore } from "../core/ports/jevKeyStore";
 import type { McpProbe } from "../core/ports/mcpProbe";
 import type { ProviderProbe } from "../core/ports/providerProbe";
 import type { ShellHistorySource } from "../core/ports/shellHistorySource";
@@ -159,6 +164,8 @@ export interface AppContext {
   readonly providerProbe: ProviderProbe;
   /** Measures what an MCP server's tools cost on every request. */
   readonly mcpProbe: McpProbe;
+  /** The Jev API key: save, remove, ask whether one is set (ADR-0025). */
+  readonly jevKeys: JevKeyStore;
   readonly filePicker: FilePicker;
   readonly pastedImages: PastedImageStore;
   /** Live output of an agent-owned terminal, for the tool-call cards. */
@@ -202,6 +209,8 @@ export function createAppContext(): AppContext {
     : new DemoWorktreeProvisioning();
   const extensionHost = inTauri ? new TauriExtensionHost() : new DemoExtensionHost();
   const windowPort = inTauri ? new TauriWindow() : new DemoWindow();
+  const jevKeys = inTauri ? new TauriJevKeyStore() : new DemoJevKeyStore();
+  const turnJudge = inTauri ? new TauriTurnJudge() : new DemoTurnJudge();
   const newId = () => crypto.randomUUID();
 
   // Session-level events (warm-up stages, agent mode switches) arrive
@@ -253,6 +262,7 @@ export function createAppContext(): AppContext {
     newId,
     runExtensionCommand,
     listSubagents,
+    turnJudge,
   );
   runExtensionCommand.connectTurnStarter((tabId, prompt) =>
     sendPrompt.execute(tabId, prompt),
@@ -341,6 +351,7 @@ export function createAppContext(): AppContext {
     updateSettings: new UpdateSettings(store, workspaceStore),
     providerProbe,
     mcpProbe,
+    jevKeys,
     filePicker,
     pastedImages: inTauri ? new TauriPastedImageStore() : new DemoPastedImageStore(),
     readTerminalOutput: (tabId, terminalId) =>

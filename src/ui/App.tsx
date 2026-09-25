@@ -3,6 +3,7 @@ import { type AppBadge, appBadge, sameBadge } from "../core/entities/appBadge";
 import type { ExtensionPanelRef } from "../core/entities/extension";
 import { extensionPanels as panelsOfExtensions } from "../core/entities/extension";
 import type { PanelView } from "../core/entities/extensionPanels";
+import { jevGateActive } from "../core/entities/jev";
 import { tabLabel } from "../core/entities/project";
 import type { ProviderId } from "../core/entities/provider";
 import { isShellLine, shellCommand } from "../core/entities/shellLine";
@@ -357,6 +358,7 @@ export function App({ context }: { context: AppContext }) {
           tab={tab}
           tabs={state.tabs}
           autoCompactThreshold={state.settings.autoCompactThreshold}
+          jevGate={jevGateActive(state.settings.jev)}
           defaultModel={state.settings.defaultModel[tab.project.provider] ?? ""}
           defaultEffort={state.settings.defaultEffort[tab.project.provider] ?? ""}
           cachedChanges={gitChangesCache.current.get(tab.project.id) ?? null}
@@ -508,6 +510,7 @@ export function App({ context }: { context: AppContext }) {
           tabs={state.tabs}
           activeTab={tab}
           mcpProbe={context.mcpProbe}
+          jevKeys={context.jevKeys}
           onScopeMcpServer={(serverId, enabled) => {
             if (tab)
               void context.scopeMcpServer.execute(tab.project.id, serverId, enabled);

@@ -232,6 +232,8 @@ pub fn native_mode_id(
         // it calls safe and asks about the rest — exactly the app's Auto
         // policy, judged by the CLI instead of approximated here.
         ("claude", _) if permission == Permission::Auto => Some("auto"),
+        // JevAuto lands here with Manual: the agent must ASK, so Mota
+        // has a request to put in front of Jev (ADR-0025).
         ("claude", _) => Some("default"),
         ("codex", Mode::Plan | Mode::Ask) => Some("read-only"),
         ("codex", _) if permission == Permission::Bypass => Some("agent-full-access"),
@@ -724,6 +726,9 @@ pub enum Incoming {
         /// ACP kind of the guarded tool call (`switch_mode` marks a plan
         /// approval authoritatively).
         tool_kind: Option<String>,
+        /// The guarded call's arguments as the agent sent them (the
+        /// command line, the path, the MCP arguments) — what Jev judges.
+        raw_input: Option<Value>,
     },
     /// The agent asks the user a question (form elicitation).
     ElicitationRequest {
@@ -942,6 +947,7 @@ fn classify_permission_request(id: i64, value: &Value) -> Incoming {
         .pointer("/toolCall/kind")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    let raw_input = params.pointer("/toolCall/rawInput").cloned();
     // The same rule the elicitation path follows: a request we cannot
     // render is worse than no request, because the agent blocks on it.
     if options.is_empty() {
@@ -955,6 +961,7 @@ fn classify_permission_request(id: i64, value: &Value) -> Incoming {
         plan_file_path,
         tool_call_id,
         tool_kind,
+        raw_input,
     }
 }
 
@@ -2051,6 +2058,14 @@ mod tests {
     }
 
     #[test]
+    fn jev_auto_uses_the_asking_mode_so_mota_sees_every_request() {
+        let jev = Permission::JevAuto;
+        assert_eq!(native_mode_id("claude", Mode::Agent, jev), Some("default"));
+        assert_eq!(native_mode_id("codex", Mode::Agent, jev), Some("agent"));
+        assert_eq!(native_mode_id("claude", Mode::Plan, jev), Some("plan"));
+    }
+
+    #[test]
     fn codex_plan_uses_the_native_collaboration_mode() {
         assert_eq!(
             native_collaboration_mode_id("codex", Mode::Plan),
@@ -2165,6 +2180,32 @@ mod tests {
                 assert_eq!(options[0].option_id, "allow");
                 assert_eq!(plan_markdown, None);
             }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn permission_requests_keep_the_raw_input_for_jev() {
+        let line = r#"{"jsonrpc":"2.0","id":9,"method":"session/request_permission","params":{
+            "sessionId":"s","toolCall":{"toolCallId":"c1","title":"rm -rf dist","rawInput":{"command":"rm -rf dist"}},
+            "options":[{"optionId":"allow","name":"Allow Once","kind":"allow_once"}]}}"#
+            .replace('\n', "");
+        match parse_incoming(&line) {
+            Some(Incoming::PermissionRequest { raw_input, .. }) => {
+                assert_eq!(raw_input, Some(json!({"command": "rm -rf dist"})));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn permission_requests_without_raw_input_carry_none() {
+        let line = r#"{"jsonrpc":"2.0","id":9,"method":"session/request_permission","params":{
+            "sessionId":"s","toolCall":{"toolCallId":"c1","title":"Run npm test"},
+            "options":[{"optionId":"allow","name":"Allow Once","kind":"allow_once"}]}}"#
+            .replace('\n', "");
+        match parse_incoming(&line) {
+            Some(Incoming::PermissionRequest { raw_input, .. }) => assert_eq!(raw_input, None),
             other => panic!("unexpected: {other:?}"),
         }
     }

@@ -1,3 +1,5 @@
+import type { JevSettings } from "./jev";
+import { jevGateActive } from "./jev";
 import type { ModelCatalog } from "./modelCatalog";
 import type { ProviderId } from "./provider";
 
@@ -5,7 +7,7 @@ import type { ProviderId } from "./provider";
  * Entities layer — per-tab agent behavior settings.
  */
 export type AgentMode = "agent" | "plan" | "ask" | "debug";
-export type PermissionPolicy = "manual" | "auto" | "bypass";
+export type PermissionPolicy = "manual" | "auto" | "bypass" | "jev-auto";
 
 export interface OptionDescriptor<T extends string> {
   readonly id: T;
@@ -54,7 +56,39 @@ export const PERMISSIONS: readonly OptionDescriptor<PermissionPolicy>[] = [
     label: "Bypass permissions",
     description: "The agent acts without asking. Use only in projects you trust.",
   },
+  {
+    id: "jev-auto",
+    label: "Auto with Jev",
+    description:
+      "Asks, except for calls Jev rates clearly safe; risky ones are flagged for you.",
+  },
 ];
+
+/** The permissions a picker may offer: `jev-auto` only while Jev's gate runs. */
+export function availablePermissions(
+  jev: JevSettings,
+): readonly OptionDescriptor<PermissionPolicy>[] {
+  return permissionsOffered(jevGateActive(jev));
+}
+
+/** The same list, for views that were handed the gate's state alone. */
+export function permissionsOffered(
+  jevGate: boolean,
+): readonly OptionDescriptor<PermissionPolicy>[] {
+  if (jevGate) return PERMISSIONS;
+  return PERMISSIONS.filter((option) => option.id !== "jev-auto");
+}
+
+/**
+ * The permission a tab really runs with. `jev-auto` without Jev's gate is
+ * Manual — the safe side of it — never a silent step up to Auto.
+ */
+export function effectivePermission(
+  permission: PermissionPolicy,
+  jev: JevSettings,
+): PermissionPolicy {
+  return permission === "jev-auto" && !jevGateActive(jev) ? "manual" : permission;
+}
 
 export const DEFAULT_MODE: AgentMode = "agent";
 export const DEFAULT_PERMISSION: PermissionPolicy = "manual";

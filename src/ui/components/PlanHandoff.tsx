@@ -17,6 +17,8 @@ interface Props {
   /** The tab's current settings — where each picker starts. */
   provider: ProviderId;
   permission: PermissionPolicy;
+  /** Whether Jev's gate runs — the only time "Auto with Jev" is offered. */
+  jevGate: boolean;
   modelCatalogs?: Partial<Record<ProviderId, ModelCatalog>>;
   modelProblems?: Partial<Record<ProviderId, string>>;
   /** Probes a provider's models. Codex has none until it is asked, and
@@ -36,6 +38,7 @@ interface Props {
 export function PlanHandoff({
   provider: tabProvider,
   permission: tabPermission,
+  jevGate,
   modelCatalogs,
   modelProblems,
   discoverModels,
@@ -103,6 +106,7 @@ export function PlanHandoff({
         <PermissionPicker
           value={permission}
           disabled={false}
+          jevGate={jevGate}
           placement="bottom"
           onChange={setPermission}
         />

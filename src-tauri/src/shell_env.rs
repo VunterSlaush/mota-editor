@@ -15,10 +15,11 @@
 //! app that silently disagreed with the terminal would be unexplainable.
 
 /// Variable prefixes worth importing beyond `PATH`: the ones that select
-/// or authenticate a provider, and so decide whether a turn works.
+/// or authenticate a provider, and so decide whether a turn works —
+/// plus Jev's key (`TYPESAFE_API_KEY`, ADR-0025).
 #[cfg(target_os = "macos")]
-const IMPORTED_PREFIXES: [&str; 5] =
-    ["ANTHROPIC_", "CLAUDE_", "CODEX_", "GEMINI_", "OPENAI_"];
+const IMPORTED_PREFIXES: [&str; 6] =
+    ["ANTHROPIC_", "CLAUDE_", "CODEX_", "GEMINI_", "OPENAI_", "TYPESAFE_"];
 
 /// How long the login shell gets. Profiles that start version managers
 /// can be slow; past this we give up and use what we have rather than
@@ -128,6 +129,7 @@ mod tests {
         assert!(is_imported("PATH"));
         assert!(is_imported("ANTHROPIC_API_KEY"));
         assert!(is_imported("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(is_imported("TYPESAFE_API_KEY"));
         assert!(!is_imported("HOME"));
         assert!(!is_imported("LC_ALL"));
     }

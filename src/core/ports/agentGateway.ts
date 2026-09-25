@@ -1,4 +1,5 @@
 import type { AgentMode, PermissionPolicy } from "../entities/agentSettings";
+import type { JevRiskVerdict } from "../entities/jev";
 import type { McpServerSpec } from "../entities/mcpServer";
 import type { Question, ToolCallContent, ToolLocation } from "../entities/message";
 import type { ProviderId } from "../entities/provider";
@@ -68,6 +69,8 @@ export type AgentTurnEvent =
       /** True when the agent is presenting its plan rather than asking
        *  about one tool call — a stopping point, not a speed bump. */
       isPlan?: boolean;
+      /** Why Jev asked for this card, when it was Jev that did. */
+      jevVerdict?: JevRiskVerdict;
     }
   | {
       kind: "question";
@@ -121,6 +124,8 @@ export interface AgentTurnRequest {
   readonly delegateTo?: string;
   /** Recent conversation to carry into that sub-agent. */
   readonly handoff?: string;
+  /** Whether Jev may second-guess this turn's approvals (ADR-0025). */
+  readonly jevGate: boolean;
 }
 
 export interface AgentGateway {

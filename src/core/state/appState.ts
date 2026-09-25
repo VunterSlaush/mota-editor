@@ -7,12 +7,15 @@ import {
   DEFAULT_AUTO_COMPACT_THRESHOLD,
   DEFAULT_MODE,
   DEFAULT_PERMISSION,
+  effectivePermission,
 } from "../entities/agentSettings";
 import type { CommandInfo } from "../entities/command";
 import type { CommandConfig } from "../entities/commandConfig";
 import type { CommandSequence } from "../entities/commandSequence";
 import type { ExtensionDescriptor, ExtensionStatus } from "../entities/extension";
 import type { GitActionResult, GitVerb } from "../entities/gitAction";
+import type { JevSettings, TurnVerdict } from "../entities/jev";
+import { defaultJevSettings } from "../entities/jev";
 import type { McpServerConfig } from "../entities/mcpServer";
 import type {
   ChatMessage,
@@ -215,6 +218,8 @@ export interface AppSettings {
   readonly terminalFontSize: number;
   /** Greyed-out completions in the terminal, from the user's history. */
   readonly terminalSuggestions: boolean;
+  /** Jev as a second opinion on tool calls and finished turns (ADR-0025). */
+  readonly jev: JevSettings;
 }
 
 export interface AppState {
@@ -244,6 +249,7 @@ export const defaultSettings: AppSettings = {
   terminalShell: "",
   terminalFontSize: 13,
   terminalSuggestions: true,
+  jev: defaultJevSettings,
 };
 
 export const initialState: AppState = {
@@ -361,6 +367,8 @@ export type Action =
         readonly stopReason?: string;
       };
     }
+  /** Jev judged a finished turn: stamp the verdict onto its prompt. */
+  | { type: "chat/turnJudged"; tabId: string; messageId: string; verdict: TurnVerdict }
   | {
       type: "chat/transcriptLoaded";
       tabId: string;
@@ -435,12 +443,12 @@ export type Action =
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "workspace/restored":
-      return {
+      return permissionsNarrowedToJev({
         ...state,
         tabs: action.tabs,
         activeTabId: action.activeTabId,
         settings: action.settings ?? state.settings,
-      };
+      });
 
     case "extensions/loaded":
       return { ...state, extensions: action.extensions };
@@ -466,7 +474,10 @@ export function reduce(state: AppState, action: Action): AppState {
       };
 
     case "settings/changed":
-      return { ...state, settings: { ...state.settings, ...action.patch } };
+      return permissionsNarrowedToJev({
+        ...state,
+        settings: { ...state.settings, ...action.patch },
+      });
 
     case "tab/opened": {
       // Re-activate rather than duplicate — but only among plain tabs.
@@ -607,10 +618,12 @@ export function reduce(state: AppState, action: Action): AppState {
       }));
 
     case "tab/permissionChanged":
-      return mapTab(state, action.tabId, (tab) => ({
-        ...tab,
-        project: { ...tab.project, permission: action.permission },
-      }));
+      return permissionsNarrowedToJev(
+        mapTab(state, action.tabId, (tab) => ({
+          ...tab,
+          project: { ...tab.project, permission: action.permission },
+        })),
+      );
 
     case "tab/modelChanged":
       return mapTab(state, action.tabId, (tab) =>
@@ -838,6 +851,18 @@ export function reduce(state: AppState, action: Action): AppState {
         messages: tab.messages.map((m) =>
           m.id === action.messageId && m.turn
             ? { ...m, turn: { ...m.turn, ...action.patch } }
+            : m,
+        ),
+      }));
+
+    // Same one-object discipline; an id that is gone (cleared, loaded
+    // over) matches nothing and the verdict is dropped.
+    case "chat/turnJudged":
+      return mapTab(state, action.tabId, (tab) => ({
+        ...tab,
+        messages: tab.messages.map((m) =>
+          m.id === action.messageId && m.turn
+            ? { ...m, turn: { ...m.turn, jev: action.verdict } }
             : m,
         ),
       }));
@@ -1071,6 +1096,32 @@ function appendDelta(
 function dropFirst(list: readonly string[], value: string): readonly string[] {
   const at = list.indexOf(value);
   return at === -1 ? list : [...list.slice(0, at), ...list.slice(at + 1)];
+}
+
+/**
+ * Every permission in the state as it can actually run: `jev-auto` falls
+ * back to Manual wherever Jev's gate is off. Applied on every path a
+ * permission can arrive by — Settings, the toolbar, a slash command's
+ * config, a plan hand-off, a restored workspace — so a tab never shows
+ * a tier that is not in force. Unchanged objects are kept, so tabs that
+ * were not touched do not re-render.
+ */
+function permissionsNarrowedToJev(state: AppState): AppState {
+  const jev = state.settings.jev;
+  const narrow = (permission: PermissionPolicy) => effectivePermission(permission, jev);
+  const defaultPermission = narrow(state.settings.defaultPermission);
+  const settings =
+    defaultPermission === state.settings.defaultPermission
+      ? state.settings
+      : { ...state.settings, defaultPermission };
+  const tabs = state.tabs.map((tab) => {
+    const permission = narrow(tab.project.permission);
+    return permission === tab.project.permission
+      ? tab
+      : { ...tab, project: { ...tab.project, permission } };
+  });
+  const changed = settings !== state.settings || tabs.some((t, i) => t !== state.tabs[i]);
+  return changed ? { ...state, settings, tabs } : state;
 }
 
 function mapTab(

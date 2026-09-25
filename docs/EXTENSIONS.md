@@ -11,6 +11,8 @@ model is informed consent, not a sandbox (ADR-0012).
 A complete working example lives in [`examples/standup/`](../examples/standup/).
 A pure-data example with no process, ten prompt commands read from files,
 lives in [`examples/poteto-mode/`](../examples/poteto-mode/).
+An MCP tool and a panel served by one file, `main.cjs` and
+`main.cjs --mcp`, lives in [`examples/jev/`](../examples/jev/).
 
 ## Getting one
 

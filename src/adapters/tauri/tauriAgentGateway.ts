@@ -51,6 +51,7 @@ interface WireEvent {
         planFilePath: string | null;
         toolCallId: string | null;
         isPlan: boolean;
+        jevVerdict: { risk: number; reason: string } | null;
       }
     | {
         type: "questionAsked";
@@ -175,6 +176,7 @@ export class TauriAgentGateway implements AgentGateway {
           subtask: request.subtask ?? null,
           delegateTo: request.delegateTo ?? null,
           handoff: request.handoff ?? null,
+          jevGate: request.jevGate,
         },
       });
     } catch (e) {
@@ -359,6 +361,7 @@ function toDomainEvent(wire: WireEvent["event"]): AgentTurnEvent {
         planFilePath: wire.planFilePath ?? undefined,
         toolCallId: wire.toolCallId ?? undefined,
         isPlan: wire.isPlan,
+        jevVerdict: wire.jevVerdict ?? undefined,
       };
     case "questionAsked":
       // Rust serializes absent values as null; the core models them as

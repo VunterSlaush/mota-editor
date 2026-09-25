@@ -77,6 +77,7 @@ const CUSTOM_SETTINGS: AppSettings = {
   terminalShell: "/bin/zsh",
   terminalFontSize: 15,
   terminalSuggestions: false,
+  jev: { enabled: true, gate: false, judge: false },
 };
 
 /**
@@ -135,6 +136,52 @@ describe("RestoreWorkspace settings", () => {
     expect(state.settings.worktrees.inheritFromSourceTab).toBe(
       defaultSettings.worktrees.inheritFromSourceTab,
     );
+  });
+
+  it("defaults the Jev group when the file has no Jev settings", async () => {
+    const state = await restore({ ...EMPTY, settings: { theme: "mota-light" } });
+    expect(state.settings.jev).toEqual(defaultSettings.jev);
+  });
+
+  it("defaults Jev fields one by one, keeping the ones that are there", async () => {
+    const state = await restore({ ...EMPTY, settings: { jev: { enabled: true } } });
+    expect(state.settings.jev).toEqual({ ...defaultSettings.jev, enabled: true });
+  });
+
+  it("brings a jev-auto tab back as manual when Jev is off", async () => {
+    // Jev-auto without Jev's gate would promise approvals nothing makes.
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          permission: "jev-auto",
+          providerSessions: {},
+        },
+      ],
+      activeTabId: "t1",
+      settings: { jev: { enabled: false }, defaultPermission: "jev-auto" },
+    });
+    expect(state.tabs[0].project.permission).toBe("manual");
+    expect(state.settings.defaultPermission).toBe("manual");
+  });
+
+  it("keeps a jev-auto tab when Jev's gate is on", async () => {
+    const state = await restore({
+      projects: [
+        {
+          id: "t1",
+          path: "/work/alpha",
+          provider: "claude",
+          permission: "jev-auto",
+          providerSessions: {},
+        },
+      ],
+      activeTabId: "t1",
+      settings: { jev: { enabled: true, gate: true } },
+    });
+    expect(state.tabs[0].project.permission).toBe("jev-auto");
   });
 
   it("drops a command sequence the file carries that could never run", async () => {

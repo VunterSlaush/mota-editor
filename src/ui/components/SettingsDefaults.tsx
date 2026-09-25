@@ -1,8 +1,8 @@
 import {
   availableCostPresets,
+  availablePermissions,
   MODES,
   matchingCostPreset,
-  PERMISSIONS,
 } from "../../core/entities/agentSettings";
 import type { ModelCatalog } from "../../core/entities/modelCatalog";
 import { reasoningChoices, supportedEffort } from "../../core/entities/modelCatalog";
@@ -84,7 +84,7 @@ export function SettingsDefaults({
           placement="bottom"
           disabled={false}
           value={settings.defaultPermission}
-          options={PERMISSIONS.map((p) => ({
+          options={availablePermissions(settings.jev).map((p) => ({
             id: p.id,
             label: p.label,
             description: p.description,

@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use agent_core::acp;
+use agent_core::jev;
 use agent_core::{AgentEvent, TurnRequest};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
@@ -109,6 +110,14 @@ pub struct AcpSession {
     /// approvals stay off then. Bypass still holds: approving the plan
     /// is the user's call, approving the reads behind it is not.
     plan_mode: AtomicBool,
+    /// Jev may turn one of Bypass/Auto's approvals into a question
+    /// (ADR-0025). Set per turn from its `TurnPolicy`.
+    jev_gate: AtomicBool,
+    /// `jev-auto`: Jev may approve a request the user would otherwise
+    /// be asked about, when it rates the call clearly safe.
+    jev_auto: AtomicBool,
+    /// The current turn's prompt — the task Jev judges a call against.
+    last_prompt: Mutex<Option<String>>,
     turn_active: AtomicBool,
     /// Set once this session holds something worth restoring: a prompt
     /// was sent, or a saved conversation was loaded into it. A session
@@ -366,18 +375,29 @@ impl AcpSession {
     }
 }
 
+/// How one turn's permission requests are answered: the tier the user
+/// picked, and whether Jev may second-guess it (ADR-0025). It rides the
+/// turn, not the session or global state, so a setting changed mid-turn
+/// never changes the rules of a turn already running.
+pub struct TurnPolicy {
+    pub permission: agent_core::Permission,
+    pub jev_gate: bool,
+}
+
 /// Run one turn over ACP, creating or reusing the tab's session.
 ///
 /// `cancelled` is the stop button's reach into the startup window: the
 /// session handshake below can take seconds, and a stop clicked during
 /// it must prevent the prompt from ever being sent — not just cancel a
 /// turn the agent already has.
+#[allow(clippy::too_many_arguments)] // identity, request, policy and cancel lever travel apart on purpose.
 pub async fn start_turn(
     app: AppHandle,
     sessions: &AcpSessions,
     tab_id: &str,
     provider_id: &str,
     request: TurnRequest,
+    policy: TurnPolicy,
     mcp_servers: Vec<acp::McpServer>,
     cancelled: Arc<AtomicBool>,
 ) -> Result<(), AcpStartError> {
@@ -405,7 +425,7 @@ pub async fn start_turn(
     // flags: Mota's own auto-approval must never approve what the scope
     // forbids (a read-only tab asks about everything).
     let permission =
-        agent_core::scope::effective_permission(request.permission, request.subtask.as_ref());
+        agent_core::scope::effective_permission(policy.permission, request.subtask.as_ref());
     session.bypass.store(
         permission == agent_core::Permission::Bypass,
         Ordering::SeqCst,
@@ -414,6 +434,20 @@ pub async fn start_turn(
         permission == agent_core::Permission::Auto,
         Ordering::SeqCst,
     );
+    // Jev guards only what would otherwise be approved unasked, and
+    // assists only the tier that asked for it — both read AFTER the scope
+    // cap, which stays the ceiling (ADR-0014).
+    session.jev_gate.store(
+        policy.jev_gate
+            && matches!(permission, agent_core::Permission::Bypass | agent_core::Permission::Auto),
+        Ordering::SeqCst,
+    );
+    session.jev_auto.store(
+        policy.jev_gate && permission == agent_core::Permission::JevAuto,
+        Ordering::SeqCst,
+    );
+    *session.last_prompt.lock().unwrap_or_else(PoisonError::into_inner) =
+        Some(request.prompt.chars().take(agent_core::jev::MAX_TASK_CHARS).collect());
     session
         .plan_mode
         .store(request.mode == agent_core::Mode::Plan, Ordering::SeqCst);
@@ -946,6 +980,9 @@ async fn boot_agent(
         auto: AtomicBool::new(false),
         native_auto: AtomicBool::new(false),
         plan_mode: AtomicBool::new(false),
+        jev_gate: AtomicBool::new(false),
+        jev_auto: AtomicBool::new(false),
+        last_prompt: Mutex::new(None),
         turn_active: AtomicBool::new(false),
         has_conversation: AtomicBool::new(false),
         dead: AtomicBool::new(false),
@@ -1538,6 +1575,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
             plan_file_path,
             tool_call_id,
             tool_kind,
+            raw_input,
         }) => {
             // Bypass auto-approves ordinary tool requests. Auto leaves
             // the judgment to the agent's native auto mode where one took
@@ -1560,12 +1598,38 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                 && !session.plan_mode.load(Ordering::SeqCst);
             let may_auto_approve =
                 (session.bypass.load(Ordering::SeqCst) || auto_edit_fallback) && !is_plan;
-            if may_auto_approve {
-                if let Some(choice) = acp::bypass_choice(&options) {
-                    let response = acp::permission_selected_response(id, &choice.option_id);
-                    let _ = session.write_message(&response).await;
+            // Jev is consulted only where an approval would otherwise be
+            // automatic (the safety net) or where `jev-auto` asked for its
+            // help — and only once a key is on hand, so an unconfigured
+            // Jev costs nothing and changes nothing (ADR-0025).
+            let jev_policy = if may_auto_approve {
+                session.jev_gate.load(Ordering::SeqCst).then_some(jev::GatePolicy::BypassGuard)
+            } else {
+                (!is_plan && session.jev_auto.load(Ordering::SeqCst))
+                    .then_some(jev::GatePolicy::ManualAssist)
+            };
+            let approve_with = acp::bypass_choice(&options).map(|choice| choice.option_id.clone());
+            if let (Some(policy), Some(option_id)) = (jev_policy, &approve_with) {
+                if crate::jev_client::is_configured_fast(app) {
+                    let call = GuardedCall {
+                        id,
+                        title,
+                        options,
+                        plan_markdown,
+                        plan_file_path,
+                        tool_call_id,
+                        tool_kind,
+                        raw_input,
+                        approve_with: option_id.clone(),
+                    };
+                    spawn_jev_gate(app, tab_id, session, call, policy);
                     return;
                 }
+            }
+            if let (true, Some(option_id)) = (may_auto_approve, approve_with) {
+                let response = acp::permission_selected_response(id, &option_id);
+                let _ = session.write_message(&response).await;
+                return;
             }
             // The card the user sees offers bypass whether or not the
             // agent's own card did — bypass is the app's policy to grant,
@@ -1589,6 +1653,7 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
                     plan_file_path,
                     tool_call_id,
                     is_plan,
+                    jev_verdict: None,
                 },
             );
         }
@@ -1713,6 +1778,110 @@ async fn handle_line(app: &AppHandle, tab_id: &str, session: &Arc<AcpSession>, l
     }
 }
 
+/// A permission request held while Jev looks at it: enough to judge the
+/// call, and everything the card needs if Jev says ask.
+struct GuardedCall {
+    id: i64,
+    title: String,
+    options: Vec<agent_core::PermissionOptionInfo>,
+    plan_markdown: Option<String>,
+    plan_file_path: Option<String>,
+    tool_call_id: Option<String>,
+    tool_kind: Option<String>,
+    raw_input: Option<Value>,
+    /// The agent's allow option, answered if Jev approves.
+    approve_with: String,
+}
+
+/// Put one request in front of Jev, off the reader loop — the wire never
+/// waits on the network. The id is registered as pending BEFORE the call:
+/// a cancel landing while Jev thinks answers the agent itself, and the
+/// task then finds nothing left to answer, so the agent never hears twice.
+fn spawn_jev_gate(
+    app: &AppHandle,
+    tab_id: &str,
+    session: &Arc<AcpSession>,
+    call: GuardedCall,
+    policy: jev::GatePolicy,
+) {
+    session.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).push(call.id);
+    let (app, tab_id, session) = (app.clone(), tab_id.to_owned(), Arc::clone(session));
+    tauri::async_runtime::spawn(async move {
+        // Any failure restores what the turn would have done without
+        // Jev: Bypass/Auto approve, jev-auto asks.
+        let verdict = match (consult_jev(&app, &session, &call, policy).await, policy) {
+            (Ok(jev::GateDecision::Ask { verdict }), _) => Some(verdict),
+            (Err(_), jev::GatePolicy::ManualAssist) => None,
+            (Ok(jev::GateDecision::Approve), _) | (Err(_), jev::GatePolicy::BypassGuard) => {
+                if session.take_pending_permission(call.id) {
+                    let response = acp::permission_selected_response(call.id, &call.approve_with);
+                    let _ = session.write_message(&response).await;
+                }
+                return;
+            }
+        };
+        if !session.is_pending_permission(call.id) {
+            return; // cancelled while Jev was thinking
+        }
+        runner::emit(
+            &app,
+            &tab_id,
+            &AgentEvent::PermissionRequested {
+                request_id: call.id.to_string(),
+                title: call.title,
+                options: call.options,
+                plan_markdown: call.plan_markdown,
+                plan_file_path: call.plan_file_path,
+                tool_call_id: call.tool_call_id,
+                is_plan: false,
+                jev_verdict: verdict,
+            },
+        );
+    });
+}
+
+/// Jev's decision on one call, judged against the turn's task and the
+/// tab's scope.
+async fn consult_jev(
+    app: &AppHandle,
+    session: &AcpSession,
+    call: &GuardedCall,
+    policy: jev::GatePolicy,
+) -> Result<jev::GateDecision, String> {
+    let task = session.last_prompt.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    let state = jev::gate_state(&jev::GateContext {
+        title: &call.title,
+        tool_kind: call.tool_kind.as_deref(),
+        raw_input: call.raw_input.as_ref(),
+        project_path: &session.project_path,
+        task: task.as_deref(),
+        scope: session.subtask.as_ref(),
+    });
+    let answers = crate::jev_client::classify(app, state, jev::gate_questions())
+        .await
+        .map_err(|failure| format!("{failure:?}"))?;
+    jev::gate_decision(&answers, policy)
+}
+
+impl AcpSession {
+    /// Claim a pending permission request for answering: true exactly
+    /// once per id, so the user, a cancel, and Jev can never all answer.
+    fn take_pending_permission(&self, id: i64) -> bool {
+        take_pending(&self.pending_permissions, id)
+    }
+
+    fn is_pending_permission(&self, id: i64) -> bool {
+        self.pending_permissions.lock().unwrap_or_else(PoisonError::into_inner).contains(&id)
+    }
+}
+
+fn take_pending(pending: &Mutex<Vec<i64>>, id: i64) -> bool {
+    let mut pending = pending.lock().unwrap_or_else(PoisonError::into_inner);
+    let before = pending.len();
+    pending.retain(|p| *p != id);
+    pending.len() != before
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1723,6 +1892,14 @@ mod tests {
         effort: Option<&'a str>,
     ) -> SessionShape<'a> {
         SessionShape { provider_id, model, effort, subtask: None }
+    }
+
+    #[test]
+    fn a_pending_permission_can_be_taken_only_once() {
+        let pending = Mutex::new(vec![4, 7]);
+        assert!(take_pending(&pending, 7));
+        assert!(!take_pending(&pending, 7));
+        assert_eq!(*pending.lock().unwrap(), vec![4]);
     }
 
     #[test]

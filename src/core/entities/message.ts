@@ -1,3 +1,5 @@
+import type { JevRiskVerdict, TurnVerdict } from "./jev";
+
 /**
  * Entities layer — a single message in a project conversation.
  */
@@ -32,6 +34,8 @@ export interface ApprovalState {
    * declining ends the turn instead of letting the agent carry on.
    */
   readonly isPlan?: boolean;
+  /** Why Jev asked for this card, when it did (ADR-0025). */
+  readonly jevVerdict?: JevRiskVerdict;
   /** Set once the user picked an option. */
   readonly resolvedOptionId?: string;
   /** True when the turn ended before the user answered. */
@@ -133,8 +137,8 @@ export interface ErrorInfo {
 export interface TurnMeta {
   /** Epoch ms the prompt was sent. */
   readonly sentAt: number;
-  /** Plain strings, not the settings types: message.ts imports nothing
-   *  and the UI only displays these values. */
+  /** Plain strings, not the settings types: message.ts imports no
+   *  settings, and the UI only displays these values. */
   readonly mode: string;
   readonly permission: string;
   /** Undefined = provider default (the agent never reports the model it
@@ -160,6 +164,8 @@ export interface TurnMeta {
   readonly tokensEstimated?: boolean;
   /** ACP stop reason, recorded only when not a plain "end_turn". */
   readonly stopReason?: string;
+  /** Jev's read of the finished turn, stamped shortly after it ends. */
+  readonly jev?: TurnVerdict;
 }
 
 export interface ChatMessage {
