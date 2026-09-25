@@ -199,10 +199,10 @@ describe("buildInsights", () => {
     const report = build([s]);
     const sonnet = report.tokens.byModel.find((r) => r.model === "sonnet");
     const mystery = report.tokens.byModel.find((r) => r.model === "mystery-model");
-    expect(sonnet?.costUsd).toBeCloseTo(6);
+    expect(sonnet?.costUsd).toBeCloseTo(4);
     expect(mystery?.costUsd).toBeNull();
     // Only the known row contributes to the total estimate.
-    expect(report.tokens.estimatedCostUsd).toBeCloseTo(6);
+    expect(report.tokens.estimatedCostUsd).toBeCloseTo(4);
   });
 
   it("nulls the total cost when no model has known pricing", () => {
@@ -219,7 +219,7 @@ describe("buildInsights", () => {
       model: "default",
       provider: "claude",
     });
-    expect(report.tokens.byModel[0].costUsd).toBeCloseTo(6);
+    expect(report.tokens.byModel[0].costUsd).toBeCloseTo(4);
   });
 
   it("counts compaction turns for every provider's compact command", () => {

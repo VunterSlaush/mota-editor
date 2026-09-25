@@ -14,14 +14,14 @@ import type { ProviderId } from "./provider";
  *
  * Blend: context growth is dominated by input-side accumulation (tool
  * results, files, history), so input is weighted 3:1 over output.
- * Vendor list prices (USD per 1M tokens) verified 2026-08.
+ * Vendor list prices (USD per 1M tokens) verified 2026-09.
  */
 const INPUT_WEIGHT = 0.75;
 
 /**
  * Cache rates, as multiples of a model's input rate. Anthropic prices
- * cache traffic relative to input rather than listing it per model, so
- * one set of multipliers covers the whole table.
+ * cache traffic relative to input, so one set of multipliers covers the
+ * table — except the cache reads a row lists itself.
  */
 const CACHE_WRITE_5M = 1.25;
 const CACHE_WRITE_1H = 2.0;
@@ -34,14 +34,46 @@ interface PriceEntry {
   readonly match: string;
   readonly inputPerMTok: number;
   readonly outputPerMTok: number;
+  /** Overrides `input × CACHE_READ` where the vendor discounts reads further. */
+  readonly cacheReadPerMTok?: number;
 }
 
 export const MODEL_PRICES: readonly PriceEntry[] = [
-  // Anthropic
-  { provider: "claude", match: "fable", inputPerMTok: 10, outputPerMTok: 50 },
-  { provider: "claude", match: "opusplan", inputPerMTok: 5, outputPerMTok: 25 },
-  { provider: "claude", match: "opus", inputPerMTok: 5, outputPerMTok: 25 },
-  { provider: "claude", match: "sonnet", inputPerMTok: 3, outputPerMTok: 15 },
+  // Anthropic. Per family: the latest id, then older pinned `claude-*` ids,
+  // then the bare aliases ("opus", "opusplan", "opus[1m]"), which Claude
+  // Code resolves to the family's latest model.
+  {
+    provider: "claude",
+    match: "fable-5-1",
+    inputPerMTok: 10,
+    outputPerMTok: 50,
+    cacheReadPerMTok: 0.25,
+  },
+  { provider: "claude", match: "claude-fable", inputPerMTok: 10, outputPerMTok: 50 },
+  {
+    provider: "claude",
+    match: "fable",
+    inputPerMTok: 10,
+    outputPerMTok: 50,
+    cacheReadPerMTok: 0.25,
+  },
+  {
+    provider: "claude",
+    match: "opus-5-5",
+    inputPerMTok: 4,
+    outputPerMTok: 20,
+    cacheReadPerMTok: 0.2,
+  },
+  { provider: "claude", match: "claude-opus", inputPerMTok: 5, outputPerMTok: 25 },
+  {
+    provider: "claude",
+    match: "opus",
+    inputPerMTok: 4,
+    outputPerMTok: 20,
+    cacheReadPerMTok: 0.2,
+  },
+  { provider: "claude", match: "sonnet-4", inputPerMTok: 3, outputPerMTok: 15 },
+  { provider: "claude", match: "sonnet", inputPerMTok: 2, outputPerMTok: 10 },
   { provider: "claude", match: "haiku", inputPerMTok: 1, outputPerMTok: 5 },
   // OpenAI
   { provider: "codex", match: "gpt-5.5", inputPerMTok: 5, outputPerMTok: 30 },
@@ -101,7 +133,7 @@ export function billedCostUsd(
     tokens.outputTokens * entry.outputPerMTok +
     tokens.cacheWrite5mTokens * input * CACHE_WRITE_5M +
     tokens.cacheWrite1hTokens * input * CACHE_WRITE_1H +
-    tokens.cacheReadTokens * input * CACHE_READ;
+    tokens.cacheReadTokens * (entry.cacheReadPerMTok ?? input * CACHE_READ);
   return perMTok / 1_000_000;
 }
 
